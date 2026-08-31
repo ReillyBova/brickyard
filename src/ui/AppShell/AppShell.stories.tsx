@@ -2,19 +2,30 @@ import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react-vite';
 
 import { ColorPicker } from '../ColorPicker/ColorPicker';
-import { MOCK_COLORS } from '../ColorPicker/mockColors';
+import { LDRAW_PALETTE } from '../ColorPicker/palette';
 import { PartsChest } from '../PartsChest/PartsChest';
 import { MOCK_PARTS } from '../PartsChest/mockParts';
 import { AppShell } from './AppShell';
 
+/** LDraw 4 — classic brick red — matching the App.tsx composition root's default. */
+const DEFAULT_COLOR_CODE = 4;
+
 /** The chest and colour panels wired to local state, exactly as a consuming screen would. */
 function Demo() {
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
-  const [selectedCode, setSelectedCode] = useState<number | undefined>(undefined);
+  const [selectedCode, setSelectedCode] = useState<number>(DEFAULT_COLOR_CODE);
+  const activeColor = LDRAW_PALETTE.find((color) => color.code === selectedCode) ?? LDRAW_PALETTE[0];
   return (
     <AppShell
-      chestPanel={<PartsChest parts={MOCK_PARTS} selectedId={selectedId} onSelect={setSelectedId} />}
-      colorPanel={<ColorPicker colors={MOCK_COLORS} selectedCode={selectedCode} onSelect={setSelectedCode} />}
+      chestPanel={
+        <PartsChest
+          parts={MOCK_PARTS}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+          activeColorHex={activeColor.hex}
+        />
+      }
+      colorPanel={<ColorPicker colors={LDRAW_PALETTE} selectedCode={selectedCode} onSelect={setSelectedCode} />}
     />
   );
 }

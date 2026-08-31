@@ -2,8 +2,12 @@ import { useState, type ReactNode } from 'react';
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { userEvent, within } from 'storybook/test';
 
+import { LDRAW_PALETTE } from '../ColorPicker/palette';
 import { PartsChest } from './PartsChest';
 import { MOCK_PARTS } from './mockParts';
+
+/** LDraw 4 — classic brick red — matching the App.tsx composition root's default. */
+const ACTIVE_COLOR_HEX = (LDRAW_PALETTE.find((color) => color.code === 4) ?? LDRAW_PALETTE[0]).hex;
 
 /**
  * The rail width and body height the chest gets inside `AppShell` (`--by-panel-w`, a
@@ -18,7 +22,14 @@ function Rail({ children, height = '600px' }: { children: ReactNode; height?: st
 /** `PartsChest` is fully controlled — this wraps it in local state for interactive stories. */
 function Controlled({ initialSelectedId }: { initialSelectedId?: string }) {
   const [selectedId, setSelectedId] = useState<string | undefined>(initialSelectedId);
-  return <PartsChest parts={MOCK_PARTS} selectedId={selectedId} onSelect={setSelectedId} />;
+  return (
+    <PartsChest
+      parts={MOCK_PARTS}
+      selectedId={selectedId}
+      onSelect={setSelectedId}
+      activeColorHex={ACTIVE_COLOR_HEX}
+    />
+  );
 }
 
 const meta = {
@@ -27,6 +38,7 @@ const meta = {
   args: {
     parts: MOCK_PARTS,
     onSelect: () => {},
+    activeColorHex: ACTIVE_COLOR_HEX,
   },
 } satisfies Meta<typeof PartsChest>;
 

@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import type { Meta, StoryObj } from '@storybook/react-vite';
 
 import { ColorPicker } from './ColorPicker';
-import { MOCK_COLORS } from './mockColors';
+import { LDRAW_PALETTE } from './palette';
 import type { Swatch } from './types';
 
 const FINISH_MATERIALS: ReadonlySet<Swatch['material']> = new Set([
@@ -30,7 +30,7 @@ const meta = {
   title: 'ColorPicker',
   component: ColorPicker,
   args: {
-    colors: MOCK_COLORS,
+    colors: LDRAW_PALETTE,
     onSelect: () => {},
   },
 } satisfies Meta<typeof ColorPicker>;
@@ -39,7 +39,8 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 /**
- * The full mock palette — 26 LDraw colours spanning all 9 `MaterialClass` values,
+ * The full real LDraw palette — every colour in `LDConfig.ldr` spanning all 9
+ * `MaterialClass` values,
  * grouped under `.by-eyebrow` headings (solid, transparent, pearlescent, chrome,
  * metallic, rubber, glitter, speckle, fabric). Swatches render the real LDraw RGB
  * unmodified, per docs/DESIGN.md's "the palette is data" rule — several clash with
@@ -70,7 +71,7 @@ export const SwatchSelected: Story = {
 export const FinishMarkers: Story = {
   name: 'Finish markers',
   args: {
-    colors: MOCK_COLORS.filter((c) => FINISH_MATERIALS.has(c.material)),
+    colors: LDRAW_PALETTE.filter((c) => FINISH_MATERIALS.has(c.material)),
   },
   decorators: [(Story) => <Rail><Story /></Rail>],
 };
