@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
 
-import { AxonBrick } from '../AxonBrick';
-import { studsForTitle } from '../brickPictogram';
 import { SearchIcon } from '../icons';
 import { useRovingGrid } from '../useRovingGrid';
+import { CategoryMenu } from './CategoryMenu';
+import { PartTile } from './PartTile';
+import type { ThumbnailSource } from '../../scene/thumbnail';
 import type { ChestPart } from './types';
 
 interface PartsChestProps {
@@ -13,7 +14,16 @@ interface PartsChestProps {
   /** '#rrggbb' — the color currently active for placement. Every thumbnail renders in
    * it, so the chest previews what the next click actually places. */
   activeColorHex: string;
+  /**
+   * Renders each tile's real thumbnail (`RuntimeThumbnailRenderer` from
+   * `src/scene/thumbnail.ts`) in the composition root. Left `undefined` in Storybook and
+   * component tests, where every tile falls back to the `AxonBrick` pictogram instead of
+   * standing up a WebGL context per story.
+   */
+  thumbnailSource?: ThumbnailSource;
 }
+
+const ALL_CATEGORIES = 'All categories';
 
 interface Group {
   category: string;
@@ -36,16 +46,30 @@ function groupByCategory(parts: readonly ChestPart[]): Group[] {
  * one flat keyboard-navigable grid (arrow keys, Home/End) per docs/DESIGN.md's
  * `.by-tile-grid` / `.by-tile`.
  */
-export function PartsChest({ parts, selectedId, onSelect, activeColorHex }: PartsChestProps) {
+export function PartsChest({
+  parts,
+  selectedId,
+  onSelect,
+  activeColorHex,
+  thumbnailSource,
+}: PartsChestProps) {
   const [query, setQuery] = useState('');
+  /** `undefined` means no category filter — "All categories". */
+  const [category, setCategory] = useState<string | undefined>(undefined);
+
+  const categories = useMemo(
+    () => Array.from(new Set(parts.map((part) => part.category))).sort((a, b) => a.localeCompare(b)),
+    [parts],
+  );
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (q === '') return parts;
-    return parts.filter(
-      (part) => part.title.toLowerCase().includes(q) || part.id.toLowerCase().includes(q),
-    );
-  }, [parts, query]);
+    return parts.filter((part) => {
+      if (category !== undefined && part.category !== category) return false;
+      if (q === '') return true;
+      return part.title.toLowerCase().includes(q) || part.id.toLowerCase().includes(q);
+    });
+  }, [parts, query, category]);
 
   const groups = useMemo(() => groupByCategory(filtered), [filtered]);
   const { containerRef, onKeyDown } = useRovingGrid(filtered.length);
@@ -62,8 +86,15 @@ export function PartsChest({ parts, selectedId, onSelect, activeColorHex }: Part
       <div className="by-panel__head">
         <div className="by-panel__title">Parts &amp; Pieces</div>
       </div>
-      <div style={{ padding: '0 var(--by-space-3) var(--by-space-2)' }}>
-        <div className="by-search">
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 'var(--by-space-2)',
+          padding: '0 var(--by-space-3) var(--by-space-2)',
+        }}
+      >
+        <div className="by-search" style={{ flex: 1, minWidth: 0 }}>
           <SearchIcon width={15} height={15} />
           <input
             className="by-input"
@@ -74,6 +105,7 @@ export function PartsChest({ parts, selectedId, onSelect, activeColorHex }: Part
             onChange={(event) => setQuery(event.target.value)}
           />
         </div>
+        <CategoryMenu categories={categories} value={category} onChange={setCategory} allLabel={ALL_CATEGORIES} />
       </div>
       <div className="by-panel__body" ref={containerRef}>
         {groups.length === 0 && (
@@ -82,7 +114,14 @@ export function PartsChest({ parts, selectedId, onSelect, activeColorHex }: Part
             <p className="by-empty__body">
               Nothing found for &ldquo;{query}&rdquo;. Try a part number or a different word.
             </p>
-            <button type="button" className="by-btn by-btn--secondary by-btn--sm" onClick={() => setQuery('')}>
+            <button
+              type="button"
+              className="by-btn by-btn--secondary by-btn--sm"
+              onClick={() => {
+                setQuery('');
+                setCategory(undefined);
+              }}
+            >
               Clear search
             </button>
           </div>
@@ -101,27 +140,18 @@ export function PartsChest({ parts, selectedId, onSelect, activeColorHex }: Part
             <div className="by-tile-grid" aria-label={group.category}>
               {group.parts.map((part) => {
                 const index = flatIndexById.get(part.id)!;
-                const isSelected = part.id === selectedId;
                 return (
-                  <button
+                  <PartTile
                     key={part.id}
-                    type="button"
-                    aria-pressed={isSelected}
-                    className={`by-tile${isSelected ? ' is-selected' : ''}`}
-                    data-index={index}
-                    title={part.title}
-                    onClick={() => onSelect(part.id)}
-                    onKeyDown={(event) => onKeyDown(event, index)}
-                  >
-                    <span className="by-tile__thumb">
-                      <AxonBrick
-                        hex={activeColorHex}
-                        studs={studsForTitle(part.title)}
-                        round={group.category === 'Round'}
-                      />
-                    </span>
-                    <span className="by-tile__label">{part.id}</span>
-                  </button>
+                    part={part}
+                    index={index}
+                    isSelected={part.id === selectedId}
+                    isRound={group.category === 'Round'}
+                    activeColorHex={activeColorHex}
+                    thumbnailSource={thumbnailSource}
+                    onSelect={onSelect}
+                    onKeyDown={onKeyDown}
+                  />
                 );
               })}
             </div>
