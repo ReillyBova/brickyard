@@ -252,8 +252,14 @@ export class SceneRenderer {
     this.stop();
     this.batches.dispose();
     this.ghost.dispose();
+    this.grid.dispose();
     this.sceneCamera.dispose();
     this.renderer.dispose();
     this.materials?.dispose();
+
+    for (const pending of this.geometryCache.values()) {
+      pending.then((geometry) => geometry.dispose()).catch(() => {});
+    }
+    this.geometryCache.clear();
   }
 }

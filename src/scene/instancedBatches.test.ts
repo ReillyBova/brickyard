@@ -128,4 +128,72 @@ describe('InstancedBatchManager', () => {
     expect(manager.batchForBrick(id('a'))).toBeUndefined();
     expect(manager.instanceCount).toBe(0);
   });
+
+  it('keeps a grown batch reachable from the scene graph, not just from the manager', () => {
+    const manager = new InstancedBatchManager();
+    const geometry = testGeometry();
+    const material = testMaterial();
+
+    const batch = manager.getOrCreate('3001', 4, geometry, material);
+    const meshBeforeGrowth = batch.mesh;
+    expect(manager.root.children).toContain(meshBeforeGrowth);
+
+    // Capacity starts at 16 (the manager doesn't expose a custom-capacity
+    // constructor, so this exercises the real default); push past it so `grow()`
+    // replaces `batch.mesh`.
+    for (let i = 0; i < 20; i++) {
+      batch.add(id(`brick-${i}`), matrixAt(i));
+      manager.trackBrick(id(`brick-${i}`), batchKey('3001', 4));
+    }
+
+    expect(batch.size).toBe(20);
+    // The manager's own bookkeeping believes every instance is present...
+    expect(manager.instanceCount).toBe(20);
+
+    // ...but the object that actually matters is whatever's parented in the scene
+    // graph, since that's what the renderer draws and what `frameAll()` walks. If
+    // growth doesn't re-parent, this is where it's caught: the stale, disposed mesh
+    // stays in `root.children` forever, and the replacement is never added.
+    expect(batch.mesh).not.toBe(meshBeforeGrowth);
+    expect(manager.root.children).not.toContain(meshBeforeGrowth);
+    expect(manager.root.children).toContain(batch.mesh);
+    expect(manager.root.children.filter((child) => child === batch.mesh)).toHaveLength(1);
+
+    // And the live mesh in the scene graph must actually carry every instance —
+    // this is the number the renderer's triangle count depends on.
+    expect(batch.mesh.count).toBe(20);
+  });
+
+  it('removes an emptied batch from the scene graph and disposes its mesh', () => {
+    const manager = new InstancedBatchManager();
+    const batch = manager.getOrCreate('3001', 4, testGeometry(), testMaterial());
+    batch.add(id('a'), matrixAt(0));
+    manager.trackBrick(id('a'), batchKey('3001', 4));
+    const mesh = batch.mesh;
+
+    manager.removeBrick(id('a'));
+
+    expect(manager.root.children).not.toContain(mesh);
+    expect(manager.batchCount).toBe(0);
+    expect(manager.batchForKey(batchKey('3001', 4))).toBeUndefined();
+  });
+
+  it('lets a new brick of the same (partId, colorCode) work after the batch emptied out', () => {
+    const manager = new InstancedBatchManager();
+    const geometry = testGeometry();
+    const material = testMaterial();
+
+    const first = manager.getOrCreate('3001', 4, geometry, material);
+    first.add(id('a'), matrixAt(0));
+    manager.trackBrick(id('a'), batchKey('3001', 4));
+    manager.removeBrick(id('a'));
+
+    const second = manager.getOrCreate('3001', 4, geometry, material);
+    second.add(id('b'), matrixAt(0));
+    manager.trackBrick(id('b'), batchKey('3001', 4));
+
+    expect(manager.root.children).toContain(second.mesh);
+    expect(manager.batchForBrick(id('b'))).toBe(second);
+    expect(manager.instanceCount).toBe(1);
+  });
 });
