@@ -14,6 +14,7 @@ import {
   positionOf,
   transformDirection,
   transformPoint,
+  vecEquals,
 } from './math';
 import type { Mat4, Vec3 } from './types';
 
@@ -125,6 +126,26 @@ describe('invert', () => {
 
   it('throws on a singular matrix rather than returning a sentinel', () => {
     expect(() => invert(fromBasis([0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0]))).toThrow(/not invertible/);
+  });
+});
+
+describe('tolerance', () => {
+  it('equals honours its epsilon in both directions', () => {
+    const a = fromBasis([1, 0, 0, 0, 1, 0, 0, 0, 1], [0, 0, 0]);
+    const b = fromBasis([1, 0, 0, 0, 1, 0, 0, 0, 1], [0, 1e-7, 0]);
+    expect(equals(a, b)).toBe(true); // default epsilon is 1e-6
+    expect(equals(a, b, 1e-9)).toBe(false);
+  });
+
+  it('equals compares every element, not just the first divergence', () => {
+    const a = fromBasis([1, 0, 0, 0, 1, 0, 0, 0, 1], [0, 0, 0]);
+    const b = fromBasis([1, 0, 0, 0, 1, 0, 0, 0, 1], [0, 0, 1]);
+    expect(equals(a, b)).toBe(false);
+  });
+
+  it('vecEquals honours its epsilon', () => {
+    expect(vecEquals([0, 0, 0], [0, 0, 1e-7])).toBe(true);
+    expect(vecEquals([0, 0, 0], [0, 0, 1e-7], 1e-9)).toBe(false);
   });
 });
 
