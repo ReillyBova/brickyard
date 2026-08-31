@@ -4,14 +4,26 @@
  * Distinct from mating (`mating.ts`): mating finds where two points coincide on
  * purpose, collision finds where two *bodies* overlap by accident. The two overlap in a
  * way that matters — a correctly stacked pair of bricks shares real volume at every stud
- * that mates, and that sharing is not a bug. See `hasClearance` below for how the
- * occupancy mask accounts for it.
+ * that mates, and that sharing is not a bug. `isExemptOverlap` below is how the collision
+ * query accounts for it.
+ *
+ * The occupancy mask itself is unconditionally solid: `buildOccupancy` erases nothing.
+ * An earlier version cleared every connection point's own connector capsule out of the
+ * mask at bake time, unconditionally — whether or not anything was ever connected there.
+ * That made small, connector-dense parts mostly holes (a 1×1 with headlight dropped from
+ * 80% fill to 14.3% and stopped detecting collisions at all) and it excused the wrong
+ * thing: an *unmated* stud is solid plastic and must collide like any other material.
+ * Only an actually mated connection — compatible connectors, facing the same way, both
+ * sides recognisably connector volume — should be excused, and that can only be known at
+ * query time, once both parts and their transforms are in hand.
  *
  * Pure: no three.js, no DOM. Safe inside a worker.
  */
 
 import { invert, transformPoint } from '../math';
 import type { BrickId, Bounds, Mat4, Vec3 } from '../types';
+import { isCompatible } from './compat';
+import { worldPoint } from './mating';
 import { worldBounds } from './spatialIndex';
 import type { Collides, ConnectionPoint, OccupancyMask, PartDef, SpatialIndex } from './types';
 import type { Triangle } from '../ldraw/bounds';
@@ -41,10 +53,6 @@ function getBit(bits: Uint8Array, i: number): boolean {
 
 function setBit(bits: Uint8Array, i: number): void {
   bits[i >> 3] |= 1 << (i & 7);
-}
-
-function clearBit(bits: Uint8Array, i: number): void {
-  bits[i >> 3] &= ~(1 << (i & 7));
 }
 
 /** Voxel-space AABB of a triangle, clamped to the grid. */
@@ -157,94 +165,112 @@ function markInterior(
 }
 
 /**
- * Clears voxels inside a connection point's own connector volume — the capsule swept by
- * its section radius along its local +Y axis, padded by one cell.
- *
- * This is *the* answer to "a correct connection is not a collision": a stacked pair of
- * 2x4 bricks has brick B's studs occupying brick A's socket volume by design. Rather than
- * detect that at query time (which would need to know which two points are meant to
- * mate), the mask is built with a standing exemption at every point capable of mating,
- * on both the male and the female side. A stud's own plastic and a socket's open mouth
- * both stop reading as solid within this capsule — narrow enough (radius + 4 LDU) that it
- * only ever swallows the connector itself, never the body around it.
- */
-function eraseConnectionClearance(
-  connections: readonly ConnectionPoint[],
-  bounds: Bounds,
-  dims: readonly [number, number, number],
-  bits: Uint8Array,
-): void {
-  const MARGIN = OCC_CELL;
-  for (const p of connections) {
-    const axis: Vec3 = [p.orientation[3], p.orientation[4], p.orientation[5]];
-    const maxRadius = p.sections.reduce((m, s) => Math.max(m, s.radius), 0);
-    const totalLength = p.sections.reduce((s, sec) => s + sec.length, 0);
-    if (maxRadius <= 0 && totalLength <= 0) continue;
-    const radius = maxRadius + MARGIN;
-    const lo = -MARGIN;
-    const hi = totalLength + MARGIN;
-
-    // Voxel-space AABB of the capsule's own bounding box, clamped to the grid.
-    const capsuleMin: Vec3 = [
-      p.position[0] - radius - Math.abs(axis[0]) * Math.max(Math.abs(lo), Math.abs(hi)),
-      p.position[1] - radius - Math.abs(axis[1]) * Math.max(Math.abs(lo), Math.abs(hi)),
-      p.position[2] - radius - Math.abs(axis[2]) * Math.max(Math.abs(lo), Math.abs(hi)),
-    ];
-    const capsuleMax: Vec3 = [
-      p.position[0] + radius + Math.abs(axis[0]) * Math.max(Math.abs(lo), Math.abs(hi)),
-      p.position[1] + radius + Math.abs(axis[1]) * Math.max(Math.abs(lo), Math.abs(hi)),
-      p.position[2] + radius + Math.abs(axis[2]) * Math.max(Math.abs(lo), Math.abs(hi)),
-    ];
-
-    const i0 = [0, 1, 2].map((a) =>
-      Math.max(0, Math.floor((capsuleMin[a] - bounds.min[a]) / OCC_CELL)),
-    );
-    const i1 = [0, 1, 2].map((a) =>
-      Math.min(dims[a] - 1, Math.floor((capsuleMax[a] - bounds.min[a]) / OCC_CELL)),
-    );
-
-    for (let iz = i0[2]; iz <= i1[2]; iz++) {
-      for (let iy = i0[1]; iy <= i1[1]; iy++) {
-        for (let ix = i0[0]; ix <= i1[0]; ix++) {
-          const center: Vec3 = [
-            bounds.min[0] + (ix + 0.5) * OCC_CELL,
-            bounds.min[1] + (iy + 0.5) * OCC_CELL,
-            bounds.min[2] + (iz + 0.5) * OCC_CELL,
-          ];
-          const d: Vec3 = [
-            center[0] - p.position[0],
-            center[1] - p.position[1],
-            center[2] - p.position[2],
-          ];
-          const t = d[0] * axis[0] + d[1] * axis[1] + d[2] * axis[2];
-          if (t < lo || t > hi) continue;
-          const perp2 =
-            (d[0] - t * axis[0]) ** 2 + (d[1] - t * axis[1]) ** 2 + (d[2] - t * axis[2]) ** 2;
-          if (perp2 <= radius * radius) clearBit(bits, voxelIndex(dims, ix, iy, iz));
-        }
-      }
-    }
-  }
-}
-
-/**
- * Builds a part's occupancy mask from its triangulated geometry (part-local LDU) and its
- * connection points. Solid-ish fill: a surface pass (triangle-vs-voxel AABB overlap)
- * plus an interior pass (ray-parity from each remaining voxel's center), then a
- * clearance pass that exempts every connection point's own connector volume. See
- * `eraseConnectionClearance` for why the last step exists.
+ * Builds a part's occupancy mask from its triangulated geometry (part-local LDU).
+ * Unconditionally solid-ish fill: a surface pass (triangle-vs-voxel AABB overlap) plus
+ * an interior pass (ray-parity from each remaining voxel's center). Nothing is erased —
+ * an unmated connector is ordinary solid material. `connections` is accepted for call
+ * compatibility but plays no part in building the mask; connector exemptions are
+ * evaluated at query time, in `isExemptOverlap`, where both parts and their transforms
+ * are available to check that a mating actually occurred.
  */
 export function buildOccupancy(
   triangles: readonly Triangle[],
   bounds: Bounds,
   connections: readonly ConnectionPoint[] = [],
 ): OccupancyMask {
+  void connections;
   const dims = dimsOf(bounds);
   const bits = new Uint8Array(Math.ceil((dims[0] * dims[1] * dims[2]) / 8));
   markSurface(triangles, bounds, dims, bits);
   markInterior(triangles, bounds, dims, bits);
-  eraseConnectionClearance(connections, bounds, dims, bits);
   return { dims, bits };
+}
+
+// ---------------------------------------------------------------------------
+// Query-time connector exemption
+// ---------------------------------------------------------------------------
+
+/**
+ * Query-time tolerance, in voxels: one `OCC_CELL`. `markSurface` over-fills — a triangle
+ * that merely clips a voxel's corner fills the whole voxel — so a connector capsule
+ * tested against exact geometry would miss occupied voxels near its own rounded edges.
+ * Padding the capsule by one cell in `connectorAt` absorbs that bleed.
+ *
+ * This is deliberately *not* the old bake-time `MARGIN`: that erased volume from the
+ * mask itself, unconditionally, whether or not the connector was ever mated. This
+ * tolerance only widens which voxels are *classified* as connector volume when checking
+ * an already-detected overlap — the erasure it replaces happened regardless of mating,
+ * this only ever excuses volume that also passed `isCompatible` and the axis check
+ * below. Do not fold this back into `buildOccupancy`.
+ */
+export const CONNECTOR_EPS = OCC_CELL;
+
+/**
+ * Classifies a part-local point as connector volume — the capsule swept by a connection
+ * point's section radius along its axis — or as ordinary body material (`undefined`).
+ *
+ * The capsule extends along local **-Y**, not +Y: LDraw draws both a stud and a socket
+ * bore extending backward from their own position along -Y (see `mating.ts`, verified
+ * against 3001). Getting this backwards was a real regression during development — it
+ * pointed the capsule into the body of the part instead of along the connector, and the
+ * stacked-3001 test caught it because the erased region no longer lined up with where
+ * the two bricks actually overlap.
+ */
+export function connectorAt(
+  connections: readonly ConnectionPoint[],
+  local: Vec3,
+): ConnectionPoint | undefined {
+  for (const p of connections) {
+    const axis: Vec3 = [p.orientation[3], p.orientation[4], p.orientation[5]];
+    const maxRadius = p.sections.reduce((m, s) => Math.max(m, s.radius), 0);
+    const totalLength = p.sections.reduce((s, sec) => s + sec.length, 0);
+    if (maxRadius <= 0 && totalLength <= 0) continue;
+    const radius = maxRadius + CONNECTOR_EPS;
+
+    const d: Vec3 = [local[0] - p.position[0], local[1] - p.position[1], local[2] - p.position[2]];
+    const t = d[0] * axis[0] + d[1] * axis[1] + d[2] * axis[2];
+    // The capsule runs from the position back to -(length), along -axis, padded by
+    // CONNECTOR_EPS at both ends.
+    if (t < -(totalLength + CONNECTOR_EPS) || t > CONNECTOR_EPS) continue;
+    const perp2 = (d[0] - t * axis[0]) ** 2 + (d[1] - t * axis[1]) ** 2 + (d[2] - t * axis[2]) ** 2;
+    if (perp2 <= radius * radius) return p;
+  }
+  return undefined;
+}
+
+const dot = (a: Vec3, b: Vec3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+
+/**
+ * Axes must agree within about two degrees, mirroring `mating.ts`'s `AXIS_TOLERANCE`.
+ * Mated connectors are co-directional (a socket slides onto a stud pointing the same
+ * way it does), not opposed, so this checks the dot product is close to +1.
+ */
+const EXEMPT_AXIS_TOLERANCE = 0.999;
+
+/**
+ * True only when an overlap between `localA` (in `partA`, placed at `transformA`) and
+ * `localB` (in `partB`, placed at `transformB`) is exactly the shape of a mated
+ * stud-in-socket: connector volume on both sides, whose connectors are `isCompatible`,
+ * whose world-space axes point the same way. Anything else — an unmated stud pressed
+ * into a wall, two studs crossing at an angle, a connector overlapping plain body
+ * material — is a real collision and this returns false.
+ */
+export function isExemptOverlap(
+  partA: PartDef,
+  transformA: Mat4,
+  localA: Vec3,
+  partB: PartDef,
+  transformB: Mat4,
+  localB: Vec3,
+): boolean {
+  const a = connectorAt(partA.connections, localA);
+  if (!a) return false;
+  const b = connectorAt(partB.connections, localB);
+  if (!b) return false;
+  if (!isCompatible(a, b)) return false;
+  const axisA = worldPoint(a, transformA).axis;
+  const axisB = worldPoint(b, transformB).axis;
+  return dot(axisA, axisB) >= EXEMPT_AXIS_TOLERANCE;
 }
 
 // ---------------------------------------------------------------------------
@@ -271,6 +297,7 @@ function anyOccupiedVoxelInside(
   part: PartDef,
   transform: Mat4,
   other: PartDef,
+  otherTransform: Mat4,
   otherInverse: Mat4,
 ): boolean {
   const { dims, bits } = part.occupancy;
@@ -287,7 +314,9 @@ function anyOccupiedVoxelInside(
         ];
         const world = transformPoint(transform, local);
         const otherLocal = transformPoint(otherInverse, world);
-        if (isOccupiedAt(other.occupancy, other.bounds, otherLocal)) return true;
+        if (!isOccupiedAt(other.occupancy, other.bounds, otherLocal)) continue;
+        if (isExemptOverlap(part, transform, local, other, otherTransform, otherLocal)) continue;
+        return true;
       }
     }
   }
@@ -309,9 +338,9 @@ interface OccupancyLookup {
 
 /**
  * Broad phase: world-space bounds via `SpatialIndex.nearBricks`. Narrow phase: the two
- * parts' occupancy masks, sampled both directions. A part's own studs and sockets are
- * exempt from their own mask (see `eraseConnectionClearance`), so a properly mated pair
- * — even one mating many points at once — reads as no collision; genuine
+ * parts' occupancy masks, sampled both directions, with an overlap excused only when
+ * `isExemptOverlap` recognises it as a mated connection (see above) — so a properly
+ * mated pair, even one mating many points at once, reads as no collision, while genuine
  * interpenetration elsewhere on the body still does.
  */
 export const collides: Collides = (part, transform, index, ignore) => {
@@ -327,8 +356,12 @@ export const collides: Collides = (part, transform, index, ignore) => {
     const entry = lookup.partAt(brick);
     if (!entry) continue; // index without narrow-phase data: broad phase only
     const otherInverse = invert(entry.transform);
-    if (anyOccupiedVoxelInside(part, transform, entry.part, otherInverse)) return true;
-    if (anyOccupiedVoxelInside(entry.part, entry.transform, part, inverseTransform)) return true;
+    if (anyOccupiedVoxelInside(part, transform, entry.part, entry.transform, otherInverse)) {
+      return true;
+    }
+    if (anyOccupiedVoxelInside(entry.part, entry.transform, part, transform, inverseTransform)) {
+      return true;
+    }
   }
   return false;
 };
