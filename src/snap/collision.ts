@@ -194,7 +194,7 @@ export function buildOccupancy(
  * Query-time tolerance, in voxels: one `OCC_CELL`. `markSurface` over-fills — a triangle
  * that merely clips a voxel's corner fills the whole voxel — so a connector capsule
  * tested against exact geometry would miss occupied voxels near its own rounded edges.
- * Padding the capsule by one cell in `connectorAt` absorbs that bleed.
+ * Padding the capsule by one cell in `connectorsAt` absorbs that bleed.
  *
  * This is deliberately *not* the old bake-time `MARGIN`: that erased volume from the
  * mask itself, unconditionally, whether or not the connector was ever mated. This
@@ -202,12 +202,39 @@ export function buildOccupancy(
  * an already-detected overlap — the erasure it replaces happened regardless of mating,
  * this only ever excuses volume that also passed `isCompatible` and the axis check
  * below. Do not fold this back into `buildOccupancy`.
+ *
+ * This padding is also exactly what makes a stud's own capsule overlap the socket it
+ * mates (see `connectorsAt`) — a stud's position sits inside both, once padded. That
+ * looks like it is destroying classification, but it is not: `connectorsAt` no longer
+ * picks one connector to trust, it returns every candidate, and `isExemptOverlap` still
+ * requires the *actual* pair — compatible, coincident within `MATE_TOLERANCE`, co-
+ * directional — before excusing anything. A connector that only qualifies because of
+ * this padding still has to clear that full gate on its own to matter; it cannot borrow
+ * legitimacy from a neighbour that happens to share the query point. So the padding
+ * trades a wider candidate list for correct classification, not a wider exemption.
  */
 export const CONNECTOR_EPS = OCC_CELL;
 
 /**
- * Classifies a part-local point as connector volume — the capsule swept by a connection
- * point's section radius along its axis — or as ordinary body material (`undefined`).
+ * Classifies a part-local point against every connector capable of claiming it as
+ * connector volume — every connection point whose capsule (the swept section radius
+ * along its axis) contains it — rather than picking one.
+ *
+ * Multiple, not first-match, because the capsules genuinely overlap in exactly the
+ * region a real mate occupies. On a squarely-stacked 3001, a stud (position y=0, axis
+ * [0,1,0], length 4) has capsule range y in [-8, 4] once padded by `CONNECTOR_EPS`; the
+ * socket it mates (position y=24, length 20) has padded range y in [0, 28]. Those
+ * overlap at y in [0, 4] — which includes the stud's own position, y=0. A first-match
+ * classifier returns whichever connector happens to sort first in `connections` there,
+ * which was measured to be the *socket*, not the stud, on the real 3001 fixture: a test
+ * built to exercise the coincidence check in `isExemptOverlap` below was handed a stud's
+ * position and got a socket back, so it was rejected by `isCompatible` (two sockets are
+ * never opposed-gender) before the coincidence check it existed to test ever ran. The
+ * caller cannot fix that by picking a better point — the ambiguity is structural, not a
+ * bad query.
+ *
+ * Returning every match pushes the actual decision to `isExemptOverlap`, which knows
+ * both sides and can check every pairing rather than guessing at one in isolation.
  *
  * The capsule extends along local **-Y**, not +Y: LDraw draws both a stud and a socket
  * bore extending backward from their own position along -Y (see `mating.ts`, verified
@@ -216,10 +243,11 @@ export const CONNECTOR_EPS = OCC_CELL;
  * stacked-3001 test caught it because the erased region no longer lined up with where
  * the two bricks actually overlap.
  */
-export function connectorAt(
+export function connectorsAt(
   connections: readonly ConnectionPoint[],
   local: Vec3,
-): ConnectionPoint | undefined {
+): readonly ConnectionPoint[] {
+  const found: ConnectionPoint[] = [];
   for (const p of connections) {
     const axis: Vec3 = [p.orientation[3], p.orientation[4], p.orientation[5]];
     const maxRadius = p.sections.reduce((m, s) => Math.max(m, s.radius), 0);
@@ -233,9 +261,9 @@ export function connectorAt(
     // CONNECTOR_EPS at both ends.
     if (t < -(totalLength + CONNECTOR_EPS) || t > CONNECTOR_EPS) continue;
     const perp2 = (d[0] - t * axis[0]) ** 2 + (d[1] - t * axis[1]) ** 2 + (d[2] - t * axis[2]) ** 2;
-    if (perp2 <= radius * radius) return p;
+    if (perp2 <= radius * radius) found.push(p);
   }
-  return undefined;
+  return found;
 }
 
 const dot = (a: Vec3, b: Vec3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -283,15 +311,24 @@ export function isExemptOverlap(
   transformB: Mat4,
   localB: Vec3,
 ): boolean {
-  const a = connectorAt(partA.connections, localA);
-  if (!a) return false;
-  const b = connectorAt(partB.connections, localB);
-  if (!b) return false;
-  if (!isCompatible(a, b)) return false;
-  const worldA = worldPoint(a, transformA);
-  const worldB = worldPoint(b, transformB);
-  if (dist2(worldA.position, worldB.position) > EXEMPT_POSITION_TOLERANCE ** 2) return false;
-  return dot(worldA.axis, worldB.axis) >= EXEMPT_AXIS_TOLERANCE;
+  const as = connectorsAt(partA.connections, localA);
+  if (as.length === 0) return false;
+  const bs = connectorsAt(partB.connections, localB);
+  if (bs.length === 0) return false;
+  // Either side's query point can land inside more than one connector's capsule (see
+  // `connectorsAt`), so no single pairing can be assumed correct in isolation. Excuse
+  // the overlap if *any* pairing across the two candidate sets is a real mate — the
+  // rest being present and disqualified is expected, not a problem.
+  for (const a of as) {
+    const worldA = worldPoint(a, transformA);
+    for (const b of bs) {
+      if (!isCompatible(a, b)) continue;
+      const worldB = worldPoint(b, transformB);
+      if (dist2(worldA.position, worldB.position) > EXEMPT_POSITION_TOLERANCE ** 2) continue;
+      if (dot(worldA.axis, worldB.axis) >= EXEMPT_AXIS_TOLERANCE) return true;
+    }
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------

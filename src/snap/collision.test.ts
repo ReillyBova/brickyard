@@ -20,7 +20,7 @@ import { boundsFromTriangles, partTriangles } from '../ldraw/bounds';
 import { fromBasis, fromTranslation, multiply, IDENTITY } from '../math';
 import type { BrickId, Mat3, Mat4, Vec3 } from '../types';
 import { fixtureReader } from './__fixtures__/reader';
-import { buildOccupancy, collides, connectorAt, isExemptOverlap, OCC_CELL } from './collision';
+import { buildOccupancy, collides, connectorsAt, isExemptOverlap, OCC_CELL } from './collision';
 import { isCompatible } from './compat';
 import { resolvePart } from './resolvePart';
 import { HashSpatialIndex } from './spatialIndex';
@@ -287,10 +287,10 @@ describe('collides, rotated placements', () => {
 });
 
 // ---------------------------------------------------------------------------
-// connectorAt: classifying connector volume at query time, including non-stud kinds.
+// connectorsAt: classifying connector volume at query time, including non-stud kinds.
 // ---------------------------------------------------------------------------
 
-describe('connectorAt', () => {
+describe('connectorsAt', () => {
   it('classifies a point at a Technic pin hole (3700) as connector volume', async () => {
     // 3700's pin hole runs sideways, along local -Z, not -Y like every stud in the
     // corpus — a path a stud never exercises.
@@ -300,12 +300,14 @@ describe('connectorAt', () => {
     const h = hole as ConnectionPoint;
     expect(h.sections.length).toBeGreaterThan(1); // stepped: R8x2, R6x16, R8x2
 
-    // The hole's own position is always inside its own capsule (t=0, on-axis).
-    expect(connectorAt(connections, h.position)).toBe(h);
+    // The hole's own position is always inside its own capsule (t=0, on-axis). It may
+    // not be the *only* connector classified there (see the ambiguity test below), so
+    // this asserts inclusion rather than an exact single match.
+    expect(connectorsAt(connections, h.position)).toContain(h);
 
-    // A point far outside every connector's capsule is body material, or nothing.
+    // A point far outside every connector's capsule is body material: nothing at all.
     const far: Vec3 = [h.position[0] + 1000, h.position[1] + 1000, h.position[2] + 1000];
-    expect(connectorAt(connections, far)).toBeUndefined();
+    expect(connectorsAt(connections, far)).toEqual([]);
   });
 
   it('classifies a point at a clip (2335) as connector volume', async () => {
@@ -313,12 +315,12 @@ describe('connectorAt', () => {
     const clip = connections.find((c) => c.kind === 'clip');
     expect(clip).toBeDefined();
     const c = clip as ConnectionPoint;
-    expect(connectorAt(connections, c.position)).toBe(c);
+    expect(connectorsAt(connections, c.position)).toContain(c);
   });
 
   it('does not classify a point well outside every capsule', async () => {
     const connections = await resolvePart('3001', fixtureReader);
-    expect(connectorAt(connections, [1000, 1000, 1000])).toBeUndefined();
+    expect(connectorsAt(connections, [1000, 1000, 1000])).toEqual([]);
   });
 
   it('pins the capsule to local -Y, not +Y — a sign flip must fail this', async () => {
@@ -345,10 +347,33 @@ describe('connectorAt', () => {
 
     // 15 LDU back along -axis: inside the real (-Y) capsule ([-24, 4]), well outside
     // where a flipped (+Y) capsule would reach ([-4, 24] cannot see -15).
-    expect(connectorAt(connections, along(-15))).toBe(h);
+    expect(connectorsAt(connections, along(-15))).toContain(h);
     // 15 LDU forward along +axis: outside the real capsule, but exactly where a flipped
     // capsule would wrongly classify it as connector volume.
-    expect(connectorAt(connections, along(15))).toBeUndefined();
+    expect(connectorsAt(connections, along(15))).not.toContain(h);
+  });
+
+  it('returns every connector whose capsule contains the point, not just the first', async () => {
+    // The structural ambiguity this exists to handle: a squarely-stacked 3001's stud
+    // (position y=0, length 4) and the socket it mates (position y=24, length 20) have
+    // padded capsules that overlap at y in [0,4] — which includes the stud's own
+    // position. A single-match classifier picks whichever sorts first in `connections`
+    // (measured: a socket, not the stud, since sockets are listed before studs on the
+    // real fixture) and that pick is not necessarily the connector the caller meant.
+    const connections = await resolvePart('3001', fixtureReader);
+    const stud = connections.find((c) => c.gender === 'M');
+    expect(stud).toBeDefined();
+    const m = stud as ConnectionPoint;
+
+    const found = connectorsAt(connections, m.position);
+    // The stud itself must be among the results...
+    expect(found).toContain(m);
+    // ...and, measured against the real fixture, so must at least one socket whose
+    // padded capsule reaches down to the stud's position. If this ever drops to just
+    // the stud, `CONNECTOR_EPS` or the fixture geometry changed enough that the
+    // ambiguity this test exists to cover may no longer apply — worth re-checking
+    // `isExemptOverlap`'s cross-product logic still has something to do.
+    expect(found.some((c) => c.gender === 'F')).toBe(true);
   });
 });
 
@@ -369,6 +394,10 @@ describe('isExemptOverlap', () => {
     expect(socket).toBeDefined();
     const s = socket as ConnectionPoint;
     expect(isCompatible(stud, s)).toBe(true);
+    // The classifier must actually see both intended connectors at their own centers —
+    // otherwise a `true` result below could be coming from some other pairing entirely.
+    expect(connectorsAt(p.connections, stud.position)).toContain(stud);
+    expect(connectorsAt(p.connections, s.position)).toContain(s);
 
     // A real stack: the base part at IDENTITY, the one on top offset by one brick
     // height along -Y (up, since +Y is down). The top's underside socket (local y=24)
@@ -390,6 +419,8 @@ describe('isExemptOverlap', () => {
     expect(hole).toBeDefined();
     const h = hole as ConnectionPoint;
     expect(isCompatible(h, stud)).toBe(true); // profiles match...
+    expect(connectorsAt(p.connections, h.position)).toContain(h);
+    expect(connectorsAt(p.connections, stud.position)).toContain(stud);
 
     // ...and translating the stud's part so the stud's own center lands exactly on the
     // hole's own center clears the coincidence check too...
@@ -413,6 +444,8 @@ describe('isExemptOverlap', () => {
     expect(clips.length).toBeGreaterThanOrEqual(2);
     const [a, b] = clips;
     expect(isCompatible(a, b)).toBe(false);
+    expect(connectorsAt(p.connections, a.position)).toContain(a);
+    expect(connectorsAt(p.connections, b.position)).toContain(b);
     const toA = fromTranslation([
       a.position[0] - b.position[0],
       a.position[1] - b.position[1],
@@ -426,20 +459,37 @@ describe('isExemptOverlap', () => {
     const stud = findByGender(p.connections, 'M');
     // The far corner of the bounding box is body material, not a connector.
     const bodyPoint: Vec3 = [p.bounds.max[0] - 1, p.bounds.min[1] + 1, p.bounds.max[2] - 1];
-    expect(connectorAt(p.connections, bodyPoint)).toBeUndefined();
+    expect(connectorsAt(p.connections, bodyPoint)).toEqual([]);
     expect(isExemptOverlap(p, IDENTITY, stud.position, p, IDENTITY, bodyPoint)).toBe(false);
   });
 
   it('does not excuse two compatible, co-directional connectors that are not the same joint', async () => {
     // The reviewed hole: a compatible, co-directional, but unrelated connector pair
-    // pulled 8 LDU apart — far outside MATE_TOLERANCE (0.35 LDU) — used to be waved
+    // pulled 8 LDU apart — far outside MATE_TOLERANCE (0.35 LDU) — was being waved
     // through because nothing checked the two connectors' own centers coincided.
+    //
+    // A single-match `connectorAt` made this test pass for the wrong reason: querying
+    // at the stud's own position returned a *socket* first (3001's sockets sort before
+    // its studs, and the socket's padded capsule reaches the stud's position — see
+    // `connectorsAt`'s own ambiguity test above), so `isCompatible` rejected two
+    // same-gender sockets before the coincidence check below ever ran. Measured on the
+    // pre-fix branch: the assertions immediately below this comment — pinning which
+    // connectors the classifier actually returns — failed, proving the old test never
+    // reached its target.
     const p = await part('3001');
     const stud = findByGender(p.connections, 'M'); // radius 6, axis [0,1,0]
     const socket = p.connections.find((c) => c.gender === 'F');
     expect(socket).toBeDefined();
     const s = socket as ConnectionPoint;
     expect(isCompatible(stud, s)).toBe(true);
+
+    // Pin exactly what a fixed `isExemptOverlap` must see: both intended connectors
+    // present among the candidates at their own positions. `connectorsAt` may also
+    // return other connectors at either point (the ambiguity above) — that's expected
+    // and does not weaken this test, since `isExemptOverlap` must reject every pairing,
+    // not just avoid the one this test is naming.
+    expect(connectorsAt(p.connections, stud.position)).toContain(stud);
+    expect(connectorsAt(p.connections, s.position)).toContain(s);
 
     // Offset the socket's part sideways by 8 LDU from where it would need to be to
     // actually coincide with the stud — well past both MATE_TOLERANCE and the
