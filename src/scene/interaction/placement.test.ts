@@ -218,3 +218,17 @@ describe('continuity', () => {
     expect(far.current.candidates[0].transform).toEqual(near.transform);
   });
 });
+
+describe('keyboard', () => {
+  it('never intercepts Tab', async () => {
+    // The canvas is the first focusable element in the document. Calling
+    // preventDefault on Tab here trapped keyboard users on it permanently — the
+    // toolbar, chest and palette became unreachable in both directions. Candidate
+    // cycling uses a key with no browser meaning instead.
+    const source = await import('node:fs').then((fs) =>
+      fs.readFileSync(new URL('./BuilderCanvas.tsx', import.meta.url), 'utf8'),
+    );
+    expect(source).not.toMatch(/['"]Tab['"]/);
+    expect(source).not.toMatch(/preventDefault/);
+  });
+});
