@@ -34,3 +34,6 @@ public/baked/
 
 # Storybook static build output
 storybook-static/
+
+# Per-developer preview config: each agent and session uses its own port
+.claude/launch.json

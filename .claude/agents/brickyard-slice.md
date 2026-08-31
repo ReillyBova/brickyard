@@ -24,6 +24,10 @@ change.
 **Own your slice, nothing else.** Your task names the files you own. Do not edit any file outside
 them. If you need a change elsewhere, stop and report it as a conflict.
 
+**Never commit `.claude/launch.json`.** It is per-developer preview config and is gitignored. Your
+task assigns you a dev port; pass it as `PORT=<n> npm run dev` rather than editing shared config, or
+you will merge your own local port into everyone else's checkout.
+
 **Never edit a contract file.** `src/types.ts`, `src/snap/types.ts`, `src/model/types.ts`,
 `src/ldraw/types.ts`, and `src/workers/protocol.ts` are frozen. Import from them; never restate a
 shape locally and never adjust one to fit your implementation. If a contract appears wrong or
