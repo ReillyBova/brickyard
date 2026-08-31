@@ -87,11 +87,55 @@ clean. That catches asset-path errors, worker failures, and render breakage that
 No agent judges interaction quality. An agent reporting that something "feels good" is reporting
 nothing; the report should say what it built and what it measured.
 
-## Integration
+## Merging
 
-Slices merge back through review here, not directly to `main`. Integration runs the full suite plus
-the performance budgets, and resolves any contract friction that surfaced — friction being the signal
-that a contract needs revisiting, which is a decision made once, centrally, and propagated.
+Every slice lands through a pull request. `main` stays deployable, and any single slice can be
+reverted without unpicking others.
+
+```mermaid
+flowchart LR
+  W["worktree<br/>agent/&lt;slice&gt;"] --> C["commits"]
+  C --> PR["pull request<br/>one slice, one PR"]
+  PR --> CI["CI · build, typecheck, unit tests"]
+  CI --> REV["review here"]
+  REV --> SQ["squash merge"]
+  SQ --> MAIN["main"]
+  MAIN --> RV["revert = one commit"]
+```
+
+Rules:
+
+- **One slice, one PR.** A PR that touches two slices is split before review.
+- **CI is the gate.** `.github/workflows/ci.yml` runs typecheck, build, and unit tests on every PR.
+  Red CI is not reviewed.
+- **Squash merge**, so each slice is a single revertible commit on `main`.
+- **Rebase, don't merge, to update a branch.** Keeps history linear and reverts clean.
+- The PR description states what was built, what was tested, what was assumed, and what was left
+  undone — the same content as the slice report.
+
+As implementation complexity grows this matters more, not less: the cost of a bad merge is measured
+in debugging time, and a revertible unit of work caps that cost.
+
+## Escalation
+
+Agents verify what they can measure. When a slice hits a question it cannot answer by measurement —
+does this read correctly, is this the right affordance, which of two behaviours is wanted — it does
+not guess and it does not stall. It records the question in its report, with a screenshot where the
+question is visual, and hands it back.
+
+Agent reports are not surfaced directly, so escalations are relayed here and answered with human
+judgement before the slice continues. A question with a screenshot and two named options gets
+answered in seconds; a slice that guessed silently costs a review cycle to discover.
+
+## Agent-to-agent communication
+
+Technically available, and deliberately not used. Slices communicate through contracts and through
+escalation, not with each other.
+
+Two agents negotiating an interface between themselves produces an agreement nobody else can see, and
+it is precisely the shared types — the things a divergent agreement would quietly bend — that
+everything depends on. If a slice needs something from another slice, the contract is either wrong or
+incomplete, and that is a decision to make once, centrally, and propagate.
 
 ## Conflict policy
 

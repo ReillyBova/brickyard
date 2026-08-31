@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local mirror of upstream part libraries (see docs/PREBAKE.md)
+.cache/
