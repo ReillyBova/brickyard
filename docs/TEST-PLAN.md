@@ -17,9 +17,10 @@ flowchart TB
 
 ## Rules
 
-**Tests never touch the network.** Part and shadow data used by tests is captured into
-`src/snap/__fixtures__/` by `tools/capture-fixture.mjs` and committed. Cold-resolving one part costs
-~20 requests; a test suite that fetches is neither fast nor deterministic.
+**Tests never touch the network.** Part and shadow data used by tests is captured to disk and
+committed. Fixtures live inside the slice that owns them — `src/snap/__fixtures__/`,
+`src/ldraw/__fixtures__/` — so ownership boundaries hold. Cold-resolving one part costs ~20 requests;
+a test suite that fetches is neither fast nor deterministic.
 
 **Fixtures are real, never synthesised.** Geometry invented to make a test pass proves nothing about
 a corpus of 18,000 parts. Captured `.dat` and shadow files only.

@@ -25,6 +25,10 @@ export interface GroupDef {
 
 /** One edge per brick pair, carrying every point pair that joins them. */
 export interface ConnectionEdge {
+  /**
+   * Derived deterministically from the unordered brick pair, so the same pair always
+   * yields the same id and add/remove/add is idempotent. Not an arbitrary identifier.
+   */
   id: EdgeId;
   a: BrickId;
   b: BrickId;
@@ -69,7 +73,15 @@ export type Operation =
   | { type: 'recolor'; changes: readonly { id: BrickId; from: number; to: number }[] }
   | { type: 'reparent'; changes: readonly { id: BrickId; from?: GroupId; to?: GroupId }[] }
   | { type: 'addGroup'; group: GroupDef }
-  | { type: 'removeGroup'; group: GroupDef };
+  | { type: 'removeGroup'; group: GroupDef }
+  /**
+   * Connectivity changes are first-class, because every geometry change alters it:
+   * removing a brick drops edges, and moving one breaks and forms them. A gesture
+   * pairs these with its geometry operations inside a single Transaction, which is
+   * what lets undo restore connectivity exactly rather than re-deriving it.
+   */
+  | { type: 'connect'; edges: readonly ConnectionEdge[] }
+  | { type: 'disconnect'; edges: readonly ConnectionEdge[] };
 
 /** A single user-visible undo step; one gesture may produce several operations. */
 export interface Transaction {

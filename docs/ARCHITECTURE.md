@@ -507,7 +507,10 @@ type Operation =
   | { type: 'recolor';   changes: readonly { id: BrickId; from: number; to: number }[] }
   | { type: 'reparent';  changes: readonly { id: BrickId; from?: GroupId; to?: GroupId }[] }
   | { type: 'addGroup';    group: GroupDef }
-  | { type: 'removeGroup'; group: GroupDef };
+  | { type: 'removeGroup'; group: GroupDef }
+  /** Connectivity, recorded explicitly. */
+  | { type: 'connect';    edges: readonly ConnectionEdge[] }
+  | { type: 'disconnect'; edges: readonly ConnectionEdge[] };
 
 /** A single user-visible undo step; one gesture may produce several operations. */
 interface Transaction {
@@ -523,6 +526,18 @@ Group and multi-brick actions reach parity with single-brick ones through `trans
 than a parallel family of group operations: a group move is one delta plus an id list, which is both
 simpler and far lighter than N before/after matrices. Semantic intent lives in the `Transaction`
 label, so undo reads as "Rotate assembly" rather than "Transform 412 bricks".
+
+**Connectivity is an operation, not a side effect.** Every geometry change alters the graph: removing
+a brick drops its edges, and moving one breaks old edges and forms new ones. Recording connectivity
+inside the `add`/`remove` payloads would leave `transformMany` with nowhere to put it, so `connect`
+and `disconnect` are first-class and invert to each other. A gesture pairs them with its geometry
+operations in one transaction — a deletion is `disconnect` + `remove`; a drag is `disconnect` +
+`transformMany` + `connect` — which is what lets undo restore the graph exactly instead of
+re-deriving it. Re-deriving would also require the spatial index and part definitions, breaking the
+purity of `model/`.
+
+Edge ids are derived from the unordered brick pair rather than allocated, so repeated
+add/remove cycles converge on the same graph.
 
 Composite actions are transactions over these primitives — replace is `remove` + `add`, paste is
 `add` with fresh ids, duplicate is a paste of the current selection.

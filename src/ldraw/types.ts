@@ -13,7 +13,9 @@ export type MaterialClass =
   | 'metallic'
   | 'rubber'
   | 'glitter'
-  | 'speckle';
+  | 'speckle'
+  /** LDConfig MATERIAL FABRIC — capes, sails, and similar. */
+  | 'fabric';
 
 export interface LDrawColor {
   /** LDraw colour code. 16 inherits from the parent reference; 24 is its edge colour. */
@@ -53,8 +55,12 @@ export interface CatalogEntry {
 export interface BakedManifest {
   /** Upstream parts library release the bake was produced from. */
   libraryVersion: string;
-  /** Shadow library commit the connection data was produced from. */
-  shadowCommit: string;
+  /**
+   * Shadow library version the connection data was produced from. Any identifier that
+   * changes when the contents change — the archive digest is sufficient, and avoids an
+   * extra upstream request purely to learn a commit SHA.
+   */
+  shadowVersion: string;
   /** Content hash per output file, so a stale or partial bake is detectable. */
   outputs: Readonly<Record<string, string>>;
 }
