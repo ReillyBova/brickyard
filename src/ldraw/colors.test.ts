@@ -65,6 +65,12 @@ describe('parseColorLibrary, against the real LDConfig.ldr', () => {
     expect(colors.get(334)?.material).toBe('chrome') // Chrome_Gold
     expect(colors.get(297)?.material).toBe('pearlescent') // Pearl_Gold
     expect(colors.get(80)?.material).toBe('metallic') // Metallic_Silver, METAL
+    expect(colors.get(20000)).toMatchObject({
+      name: 'Canvas_Black',
+      value: 0x1b2a34,
+      material: 'fabric',
+    }) // MATERIAL FABRIC CANVAS
+    expect(colors.get(20001)?.material).toBe('fabric') // Canvas_Blue
     expect(colors.get(256)?.material).toBe('rubber') // Rubber_Black
     expect(colors.get(133)?.material).toBe('speckle') // Speckle_Black_Gold
   })
