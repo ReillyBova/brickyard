@@ -1,0 +1,169 @@
+/* The landing page. Full-bleed chrome-coloured ground (this is the app frame, not the
+   3D viewport, so it reads as --by-chrome rather than --by-canvas) with a faint dot
+   field at the baseplate's own stud pitch feel — decoration, not the render canvas
+   itself, and static: nothing here competes with the bricks a person hasn't placed
+   yet. */
+
+.by-landing {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--by-space-6);
+  background-color: var(--by-chrome);
+  background-image: radial-gradient(
+    color-mix(in srgb, var(--by-canvas-grid) 45%, transparent) 1.4px,
+    transparent 1.4px
+  );
+  background-size: 40px 40px;
+  overflow: auto;
+}
+
+.by-landing__hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--by-space-5);
+  max-width: 480px;
+  text-align: center;
+}
+
+.by-landing__lockup {
+  display: flex;
+  align-items: center;
+  gap: var(--by-space-3);
+}
+
+.by-landing__wordmark {
+  font-family: var(--by-font-display);
+  font-weight: var(--by-font-display-weight);
+  font-size: var(--by-text-3xl);
+  line-height: var(--by-leading-tight);
+  letter-spacing: var(--by-tracking-display);
+  color: var(--by-text);
+  opacity: 0;
+  transform: translateY(10px);
+  animation: by-landing-settle var(--by-dur-base) var(--by-ease-snap) forwards;
+  animation-delay: 260ms;
+}
+
+.by-landing__tagline {
+  margin: 0;
+  font-size: var(--by-text-lg);
+  color: var(--by-text-muted);
+  opacity: 0;
+  animation: by-landing-fade var(--by-dur-fast) var(--by-ease-out) forwards;
+  animation-delay: 480ms;
+}
+
+.by-landing__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--by-space-3);
+  opacity: 0;
+  animation: by-landing-fade var(--by-dur-fast) var(--by-ease-out) forwards;
+  animation-delay: 600ms;
+}
+
+.by-landing__cta {
+  text-decoration: none;
+  min-width: 168px;
+}
+
+.by-landing__hint {
+  margin: 0;
+  font-size: var(--by-text-sm);
+  opacity: 0;
+  animation: by-landing-fade var(--by-dur-fast) var(--by-ease-out) forwards;
+  animation-delay: 720ms;
+}
+
+@keyframes by-landing-settle {
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes by-landing-fade {
+  to { opacity: 1; }
+}
+
+/* ── The mark ───────────────────────────────────────────────────────────────
+   Three faces settle in staggered by --by-ease-snap's overshoot, the studs follow,
+   then the whole mark drifts a few pixels on a slow loop and the two highlight
+   ellipses per stud gleam — small, ambient, never competing with the wordmark next
+   to it.
+   ------------------------------------------------------------------------- */
+.by-landing-mark {
+  display: block;
+  flex: none;
+  animation: by-landing-drift var(--by-dur-idle) var(--by-ease-out) infinite;
+  animation-delay: 900ms;
+}
+
+.by-landing-mark__face {
+  opacity: 0;
+  transform: translateY(16px) scale(0.92);
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: by-landing-settle-mark var(--by-dur-base) var(--by-ease-snap) forwards;
+}
+.by-landing-mark__face:nth-of-type(1) { animation-delay: 0ms; }
+.by-landing-mark__face:nth-of-type(2) { animation-delay: 70ms; }
+.by-landing-mark__face:nth-of-type(3) { animation-delay: 140ms; }
+
+.by-landing-mark__stud {
+  opacity: 0;
+  transform: translateY(8px);
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: by-landing-settle-mark var(--by-dur-base) var(--by-ease-snap) forwards;
+  animation-delay: 220ms;
+}
+
+.by-landing-mark__hi {
+  animation:
+    by-landing-settle-mark var(--by-dur-base) var(--by-ease-snap) forwards,
+    by-landing-gleam calc(var(--by-dur-idle) * 1.25) ease-in-out infinite;
+  animation-delay: 220ms, 1100ms;
+}
+
+@keyframes by-landing-settle-mark {
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes by-landing-drift {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+
+@keyframes by-landing-gleam {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+
+/* prefers-reduced-motion collapses --by-dur-* to 0ms, which already stops every
+   timed transition dead. That alone still lets an `infinite` keyframe animation
+   complete a full (instant) cycle every frame, so drift and gleam are stopped
+   explicitly here too — nothing in this file may animate when the setting is on. */
+@media (prefers-reduced-motion: reduce) {
+  .by-landing-mark,
+  .by-landing-mark__face,
+  .by-landing-mark__stud,
+  .by-landing-mark__hi,
+  .by-landing__wordmark,
+  .by-landing__tagline,
+  .by-landing__actions,
+  .by-landing__hint {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .by-landing__lockup { flex-direction: column; gap: var(--by-space-2); }
+  .by-landing__actions { flex-direction: column; align-items: stretch; width: 100%; }
+  .by-landing__cta { width: 100%; }
+}
