@@ -23,6 +23,7 @@ import type { PartGeometrySource } from './partSource.ts';
 import { InstancedBatchManager, batchKey } from './instancedBatches.ts';
 import { GhostPreview } from './ghost.ts';
 import { createBaseplateGrid } from './grid.ts';
+import type { BaseplateGrid } from './grid.ts';
 import { SceneCamera } from './camera.ts';
 
 export interface SceneStats {
@@ -52,7 +53,7 @@ export class SceneRenderer {
   private readonly sceneCamera: SceneCamera;
   private readonly batches = new InstancedBatchManager();
   private readonly ghost = new GhostPreview();
-  private readonly grid: THREE.GridHelper;
+  private readonly grid: BaseplateGrid;
   private readonly raycaster = new THREE.Raycaster();
 
   private readonly partSource: PartGeometrySource;

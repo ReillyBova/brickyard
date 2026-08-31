@@ -201,7 +201,7 @@ What the viewport does draw:
 | Ghost | `--by-3d-ghost` at `--by-3d-ghost-alpha`, solid geometry, no wireframe |
 | Invalid placement | `--by-3d-invalid` on the ghost; collision, not incompatibility |
 | Connected set | `--by-3d-connected` (sage) when "select connected" or graph inspection is active |
-| Baseplate | `--by-canvas-grid` at 20 LDU stud pitch, fading with distance |
+| Baseplate | `--by-canvas-grid` dots, one per stud at 20 LDU pitch, fading with distance |
 
 Chrome floats over the viewport as rafts with a gutter to the window edge, so the scene reads as
 continuous underneath rather than as a picture in a frame. The marquee is the one overlay drawn in
