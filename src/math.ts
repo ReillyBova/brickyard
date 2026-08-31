@@ -63,6 +63,11 @@ export function fromBasis(basis: Mat3, position: Vec3): Mat4 {
   return [b0, b1, b2, 0, b3, b4, b5, 0, b6, b7, b8, 0, x, y, z, 1];
 }
 
+/** Rotation about the Y axis, which is every connector's own axis. */
+export function fromYRotation(radians: number): Mat4 {
+  return glMat4.fromYRotation(out4(), radians) as number[];
+}
+
 export function fromTranslation(position: Vec3): Mat4 {
   return glMat4.fromTranslation(out4(), input(position)) as number[];
 }
