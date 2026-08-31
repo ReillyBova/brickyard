@@ -49,7 +49,7 @@ const SIG_EOCD64 = 0x06064b50
 const SIG_CENTRAL = 0x02014b50
 const SIG_LOCAL = 0x04034b50
 
-function findEndOfCentralDirectory(buf) {
+export function findEndOfCentralDirectory(buf) {
   const min = Math.max(0, buf.length - 0x10000 - 22)
   for (let i = buf.length - 22; i >= min; i--) {
     if (buf.readUInt32LE(i) === SIG_EOCD) return i
@@ -58,7 +58,7 @@ function findEndOfCentralDirectory(buf) {
 }
 
 /** Returns `{ count, offset }` for the central directory, resolving zip64 when present. */
-function readCentralDirectoryLocation(buf) {
+export function readCentralDirectoryLocation(buf) {
   const eocd = findEndOfCentralDirectory(buf)
   let count = buf.readUInt16LE(eocd + 10)
   let offset = buf.readUInt32LE(eocd + 16)
@@ -79,7 +79,7 @@ function readCentralDirectoryLocation(buf) {
 }
 
 /** Pulls sizes and the local-header offset out of a zip64 extended information extra field. */
-function readZip64Extra(extra, entry) {
+export function readZip64Extra(extra, entry) {
   let p = 0
   while (p + 4 <= extra.length) {
     const id = extra.readUInt16LE(p)
@@ -104,7 +104,7 @@ function readZip64Extra(extra, entry) {
 }
 
 /** Reads the central directory of a zip held entirely in memory. */
-function readZipEntries(buf) {
+export function readZipEntries(buf) {
   const { count, offset } = readCentralDirectoryLocation(buf)
   const entries = []
   let p = offset
@@ -132,43 +132,68 @@ function readZipEntries(buf) {
   return entries
 }
 
-function inflateEntry(buf, entry) {
+export function inflateEntry(buf, entry) {
   const head = entry.localHeaderOffset
-  if (buf.readUInt32LE(head) !== SIG_LOCAL) {
+  if (head < 0 || head + 30 > buf.length || buf.readUInt32LE(head) !== SIG_LOCAL) {
     throw new Error(`corrupt local header for ${entry.name}`)
   }
   const nameLength = buf.readUInt16LE(head + 26)
   const extraLength = buf.readUInt16LE(head + 28)
   const start = head + 30 + nameLength + extraLength
-  const data = buf.subarray(start, start + entry.compressedSize)
+  const end = start + entry.compressedSize
+  if (start > buf.length || end > buf.length) {
+    throw new Error(
+      `truncated archive: entry ${entry.name} claims ${entry.compressedSize} compressed bytes ` +
+        `at offset ${start}, but the archive is only ${buf.length} bytes`,
+    )
+  }
+  const data = buf.subarray(start, end)
   if (entry.method === 0) return data
-  if (entry.method === 8) return zlib.inflateRawSync(data)
+  if (entry.method === 8) {
+    try {
+      return zlib.inflateRawSync(data)
+    } catch (error) {
+      throw new Error(`corrupt entry ${entry.name}: ${error.message}`)
+    }
+  }
   throw new Error(`unsupported compression method ${entry.method} for ${entry.name}`)
 }
 
 /** Rejects absolute paths and traversal, and normalises separators. */
-function safeEntryPath(name) {
+export function safeEntryPath(name) {
   const normalised = name.replace(/\\/g, '/')
   if (normalised.startsWith('/') || /^[a-zA-Z]:/.test(normalised)) return null
   if (normalised.split('/').some((segment) => segment === '..')) return null
   return normalised
 }
 
-/** The single top-level directory shared by every entry, or `null` when there is not one. */
-function commonRoot(entries) {
-  let root = null
+/**
+ * The top-level directory shared by the majority of entries, or `null` when there is not
+ * one. A stray top-level entry (a `README.txt` beside the real root, say) must not disable
+ * stripping for every other entry, so this tolerates entries that don't start with the
+ * winning root — `extractZip` falls back to the entry's own un-stripped path for those.
+ */
+export function commonRoot(entries) {
+  const counts = new Map()
   for (const entry of entries) {
     const slash = entry.name.indexOf('/')
-    if (slash <= 0) return null
+    if (slash <= 0) continue
     const head = entry.name.slice(0, slash)
-    if (root === null) root = head
-    else if (root !== head) return null
+    counts.set(head, (counts.get(head) ?? 0) + 1)
+  }
+  let root = null
+  let best = 0
+  for (const [head, count] of counts) {
+    if (count > best) {
+      root = head
+      best = count
+    }
   }
   return root
 }
 
 /** Extracts every file entry into `destination`, stripping a shared top-level directory. */
-function extractZip(buf, destination) {
+export function extractZip(buf, destination) {
   const entries = readZipEntries(buf)
   const root = commonRoot(entries)
   const prefix = root === null ? '' : `${root}/`
@@ -357,7 +382,7 @@ const USAGE = `Usage: node tools/sync-mirror.mjs [options]
 Two bulk archives, one conditional request each. Never run on a loop.
 `
 
-async function main() {
+export async function main() {
   let options
   try {
     options = parseArgs(process.argv.slice(2))
@@ -387,4 +412,6 @@ async function main() {
   console.log(`skipped (304): ${skipped.length ? skipped.join(', ') : 'nothing'}`)
 }
 
-await main()
+if (import.meta.url === `file://${process.argv[1]}`) {
+  await main()
+}
