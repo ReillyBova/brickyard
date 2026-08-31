@@ -27,9 +27,17 @@ export interface MateLink {
 /** Which adjacency list an edge occupies on each of its two nodes. */
 type EdgeDirection = 'a-out' | 'b-out' | 'peer';
 
-/** Deterministic and orientation-independent, so add/remove/add is idempotent. */
-export const edgeIdFor = (a: BrickId, b: BrickId): EdgeId =>
-  a <= b ? `${a}~${b}` : `${b}~${a}`;
+/**
+ * Deterministic and orientation-independent, so add/remove/add is idempotent.
+ *
+ * `BrickId` is an unconstrained string, so a plain separator would not be injective:
+ * {'x', 'y~z'} and {'x~y', 'z'} would both render as 'x~y~z'. Length-prefixing the
+ * first id makes the encoding reversible and therefore collision-free.
+ */
+export const edgeIdFor = (a: BrickId, b: BrickId): EdgeId => {
+  const [first, second] = a <= b ? [a, b] : [b, a];
+  return `${first.length}~${first}~${second}`;
+};
 
 /** Reverse a mate's sense, for restating a link in the opposite orientation. */
 export const flipMate = (m: Mate): Mate => ({
@@ -123,10 +131,16 @@ const link = (draft: Draft, raw: MateLink): void => {
     attach(draft, { id, a: l.a, b: l.b, mates: [...l.mates] });
     return;
   }
-  const seen = new Set(existing.mates.map((m) => `${m.aPoint}|${m.bPoint}`));
+  if (existing.a !== l.a || existing.b !== l.b) {
+    throw new Error(
+      `graph: edge id ${id} already holds (${existing.a}, ${existing.b}), refusing to merge (${l.a}, ${l.b})`,
+    );
+  }
+  const mateKey = (m: Mate): string => `${m.aPoint.length}|${m.aPoint}|${m.bPoint}`;
+  const seen = new Set(existing.mates.map(mateKey));
   const merged = [...existing.mates];
   for (const m of l.mates) {
-    const key = `${m.aPoint}|${m.bPoint}`;
+    const key = mateKey(m);
     if (!seen.has(key)) {
       seen.add(key);
       merged.push(m);

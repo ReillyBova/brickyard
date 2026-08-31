@@ -273,3 +273,33 @@ describe('structural sharing', () => {
     expect(next.nodes.get('b1')).not.toBe(base.nodes.get('b1'));
   });
 });
+
+describe('edge id injectivity', () => {
+  // BrickId is an unconstrained string, so the pair encoding must be reversible.
+  // A plain separator would render {'x','y~z'} and {'x~y','z'} identically, and a
+  // collision merges mates into an unrelated edge rather than failing.
+  it('does not collide when ids contain the separator', () => {
+    expect(edgeIdFor('x', 'y~z')).not.toBe(edgeIdFor('x~y', 'z'));
+  });
+
+  it('keeps colliding-looking pairs as separate edges', () => {
+    const g = emptyGraph()
+      .addBricks(
+        (['x', 'y~z', 'x~y', 'z'] as BrickId[]).map((brick) => ({ brick })),
+      )
+      .connect([
+        link('x' as BrickId, 'y~z' as BrickId, [mate('p0', 'p1')]),
+        link('x~y' as BrickId, 'z' as BrickId, [mate('p2', 'p3')]),
+      ]);
+
+    expect(g.edges.size).toBe(2);
+    expect(g.neighbors('x' as BrickId)).toEqual(['y~z']);
+    expect(g.neighbors('z' as BrickId)).toEqual(['x~y']);
+    expectConsistent(g);
+  });
+
+  it('is orientation independent and reversible', () => {
+    expect(edgeIdFor('a', 'b')).toBe(edgeIdFor('b', 'a'));
+    expect(edgeIdFor('aa', 'b')).not.toBe(edgeIdFor('a', 'ab'));
+  });
+});
