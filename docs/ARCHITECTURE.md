@@ -1,31 +1,243 @@
 # Architecture
 
-The type contracts below are the interfaces every module builds against. Treat them as frozen:
-changing one is a deliberate, announced act, because parallel work depends on their stability.
+How the application is put together at runtime, followed by the type contracts every module builds
+against. Treat the contracts as frozen: changing one is a deliberate, announced act, because parallel
+work depends on their stability.
 
 Background on the two file formats is in [`LDRAW-PRIMER.md`](LDRAW-PRIMER.md).
 
-## Layers
+---
 
-```
-        ┌───────────────────────────────────────────────┐
-        │  ui/            React chrome, panels, chest    │
-        ├───────────────────────────────────────────────┤
-        │  scene/         three.js canvas, raycast,      │
-        │                 instancing, ghost, motion      │
-        ├──────────────────────┬────────────────────────┤
-        │  model/              │  snap/                  │
-        │  document, graph,    │  connection points,     │
-        │  operations, undo    │  compatibility, mating  │
-        ├──────────────────────┴────────────────────────┤
-        │  ldraw/         fetch, cache, colors, catalog  │
-        ├───────────────────────────────────────────────┤
-        │  workers/       parsing off the main thread    │
-        └───────────────────────────────────────────────┘
+# Part 1 — The running system
+
+## What the app is doing
+
+At any moment the app is maintaining four things at once: a **document** of bricks, two **derived
+indexes** over it that make spatial questions cheap, a **render tree** that projects it, and a set of
+**asynchronous resolvers** filling in part data as it is needed. Every user gesture is a read of the
+indexes followed by a transaction against the document; everything else is a consequence.
+
+## Systems
+
+| System | Thread | Owns | Lifetime |
+| --- | --- | --- | --- |
+| UI shell | main | React panels, chest, inspector, mode chrome | app |
+| Interaction controller | main | pointer/keyboard state machine, current gesture | app |
+| Document store | main | `SceneDocument`, undo/redo stacks | app |
+| Derived indexes | main | `ConnectionGraph`, `SpatialIndex` | rebuilt from document |
+| Snap engine | main | candidate resolution, mating, collision | stateless |
+| Render system | main | three.js scene, instanced batches, camera, motion, frame loop | app |
+| Asset cache | main | `PartDef` and geometry, in-flight dedupe | app |
+| Resolution pool | worker ×N | fetch and parse parts into `PartDef` + geometry | app |
+| Graph solver | worker ×1 | connection graph for an imported model | per import |
+| Path tracer | worker ×1 | progressive GPU render via `OffscreenCanvas` | on demand |
+
+```mermaid
+flowchart TB
+  subgraph MAIN["Main thread — owns the frame"]
+    direction TB
+    UI["UI shell<br/>panels · chest · inspector"]
+    IC["Interaction controller<br/>pointer and keyboard state machine"]
+    SNAP["Snap engine<br/>resolve · mate · collide"]
+    DOC["Document store<br/>SceneDocument · undo/redo"]
+    DER["Derived indexes<br/>ConnectionGraph · SpatialIndex"]
+    REN["Render system<br/>three.js · instancing · motion"]
+    CACHE["Asset cache<br/>PartDef · geometry · colors"]
+  end
+
+  subgraph WORK["Workers — no shared memory, transferables only"]
+    direction TB
+    POOL["Resolution pool<br/>parse parts"]
+    SOLVER["Graph solver<br/>solve imported models"]
+    PT["Path tracer<br/>OffscreenCanvas"]
+  end
+
+  subgraph DATA["Static assets, same origin"]
+    BAKE["Baked catalog<br/>chest parts · occupancy · colors"]
+    MODELS["Bundled models<br/>mpd + manifest"]
+  end
+
+  UI --> IC
+  IC --> SNAP
+  SNAP --> DER
+  IC -- "transactions" --> DOC
+  DOC -- "operations" --> DER
+  DOC -- "change events" --> REN
+  DER --> REN
+  CACHE --> REN
+  CACHE --> SNAP
+  POOL -- "PartDef + geometry" --> CACHE
+  SOLVER -- "edges" --> DOC
+  DOC -- "bricks" --> SOLVER
+  BAKE --> CACHE
+  MODELS --> POOL
+  REN -.-> PT
 ```
 
-`snap/` and `model/` are **pure**: no three.js imports, no DOM access. This is what makes them
-unit-testable and safe to run inside a worker. `scene/` depends on both; neither depends on `scene/`.
+The document is the only writable state. Indexes and the render tree are projections of it and are
+never edited directly — that invariant is what keeps undo, snapping, and rendering from disagreeing.
+
+## Module dependencies
+
+```mermaid
+flowchart LR
+  ui["ui/"] --> model["model/"]
+  ui --> scene["scene/"]
+  scene --> model
+  scene --> snap["snap/"]
+  scene --> ldraw["ldraw/"]
+  model --> snap
+  snap --> ldraw
+  workers["workers/"] --> snap
+  workers --> ldraw
+  features["features/"] --> model
+  features --> scene
+
+  classDef pure fill:#e8f5e9,stroke:#4caf50,color:#1b5e20;
+  class model,snap pure
+```
+
+`snap/` and `model/` (green) are **pure**: no three.js imports, no DOM access. Nothing depends on
+`scene/`. That purity is what makes them unit-testable, and it is also what lets any of them move
+behind the worker boundary later without a rewrite.
+
+## Threading, and where it goes next
+
+Two worker systems exist today because their workloads differ: the resolution pool is
+network-bound and embarrassingly parallel, while the graph solver is one long job over shared state
+that would cost more in transfer than it saves if split.
+
+We expect to push more across the boundary as models get large. The likely candidates, in the order
+they will probably start hurting: collision sweeps over big selections, restyle across a whole model,
+occupancy mask generation, incremental graph rebuilds after bulk edits, and `.ldr` export. Each is
+already pure, so migration is a message-passing change rather than a redesign.
+
+GitHub Pages cannot set COOP/COEP headers, so the page is not cross-origin isolated and
+`SharedArrayBuffer` is unavailable. All worker traffic is `postMessage` with transferable typed
+arrays.
+
+## Flow: placing a brick
+
+The hot path. Everything here is synchronous and inside the frame budget.
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant U as Pointer
+  participant IC as Interaction controller
+  participant SE as Snap engine
+  participant SI as Spatial index
+  participant D as Document store
+  participant G as Graph
+  participant R as Render
+
+  U->>IC: pointermove
+  IC->>R: pick ray, converted to LDU
+  IC->>SE: resolveSnap(part, ray, roll)
+  SE->>SI: near(points, radius)
+  SI-->>SE: nearby connection points
+  SE->>SE: filter compatible, solveMating, findMates
+  SE-->>IC: ranked candidates
+  IC->>R: ghost transform, mate count, validity
+  U->>IC: pointerdown
+  IC->>D: Transaction "Place brick"
+  D->>G: apply add, update edges incrementally
+  D->>SI: insert connection points
+  D->>R: change event
+  R->>R: update instanced batch
+```
+
+Candidate lookup is a uniform spatial hash with 20 LDU cells, so `near` touches a handful of buckets
+regardless of model size. Nothing on this path fetches or parses.
+
+## Flow: opening a model
+
+The cold path. Asynchronous, progress-reported, and never blocking the frame.
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant U as User
+  participant A as App
+  participant W as Parse worker
+  participant P as Resolution pool
+  participant C as Asset cache
+  participant S as Graph solver
+  participant D as Document store
+
+  U->>A: open model
+  A->>W: parseModel(text)
+  W->>W: split submodels, flatten transforms
+  W-->>A: brick instances + unique part ids
+  A->>P: resolvePart × unique ids, in parallel
+  P->>P: fetch, walk subfile tree, collect snaps
+  P-->>C: PartDef + geometry buffers
+  A->>D: load bricks
+  A->>S: solveGraph(bricks)
+  S->>S: hash all points, match coincident pairs
+  S-->>D: edges
+  D->>A: ready
+```
+
+A published model of ~50 unique parts costs roughly 1,000 fetches to resolve cold, which is why
+bundled models ship with a part manifest: discovery becomes one parallel prefetch instead of a serial
+dependency chain.
+
+## Flow: undo
+
+```mermaid
+flowchart LR
+  U["Ctrl+Z"] --> POP["pop Transaction"]
+  POP --> INV["invert each op, reverse order"]
+  INV --> APP["applyOperation"]
+  APP --> DOC["document"]
+  DOC --> IDX["graph + spatial index"]
+  DOC --> REN["render diff"]
+  POP --> RED["push to redo stack"]
+```
+
+Operations carry both sides of every change, so inversion never consults document state.
+
+## Interaction states
+
+```mermaid
+stateDiagram-v2
+  [*] --> Idle
+  Idle --> Hovering: pointer over brick
+  Hovering --> Idle: pointer leaves
+  Hovering --> Selecting: click
+  Idle --> Marquee: drag on empty space
+  Marquee --> Selecting: release
+  Selecting --> Dragging: drag selection
+  Dragging --> Selecting: release, commit
+  Idle --> Placing: choose part from chest
+  Placing --> Placing: Tab cycles candidate, R rolls
+  Placing --> Selecting: click, commit
+  Placing --> Idle: Esc
+  Selecting --> Idle: Esc or click empty
+  Idle --> Orbiting: middle drag or space drag
+  Orbiting --> Idle: release
+```
+
+Selection and visibility are view state. They live outside the document and are not undoable.
+
+## Performance budget
+
+| Work | Budget | Where |
+| --- | --- | --- |
+| Snap resolution per pointer move | < 2 ms | main |
+| Frame | 16.7 ms | main |
+| Part resolution, cached | < 1 ms | main |
+| Part resolution, cold | seconds, async | pool |
+| Model import | async with progress | worker + pool |
+| Graph solve, whole model | async | solver |
+
+Only the first two are frame-critical. Everything else reports progress and is allowed to take as
+long as it needs, which is why aggressive baking matters more than micro-optimisation.
+
+---
+
+# Part 2 — Contracts
 
 ## Coordinates
 
@@ -34,8 +246,8 @@ unit-testable and safe to run inside a worker. `scene/` depends on both; neither
 scene root, and the matching inverse applied to picking rays as they enter the model layer.
 
 Four of our five data boundaries — the parts library, the shadow library, imported models, and
-exported `.ldr` — are LDraw-native. Converting at each of them would multiply the number of places a
-sign error can hide. One convention and one documented flip is the smaller risk.
+exported `.ldr` — are LDraw-native. Converting at each would multiply the places a sign error can
+hide. One convention and one documented flip is the smaller risk.
 
 ```ts
 type Vec3 = readonly [number, number, number];
@@ -45,12 +257,10 @@ type Mat4 = readonly number[]; // length 16
 type Mat3 = readonly number[]; // length 9
 ```
 
-Column-major matches `Matrix4.elements`, so transforms cross into `scene/` without repacking.
-
 **Transforms are flat and absolute.** Every brick stores a world matrix; groups are *sets*, not
 transform parents. Nested transforms would force every spatial query to walk ancestors, and spatial
-queries are the hot path. Moving a group instead writes N matrices — cheap, and stored compactly as
-a single delta (see `transformMany`).
+queries are the hot path. Moving a group instead writes N matrices, stored compactly as a single
+delta (see `transformMany`).
 
 This is also what makes rotated assemblies work without special handling: a brick sitting at 30° has
 its connection points at 30° in world space, so snapping onto it uses exactly the same code path as
@@ -119,13 +329,23 @@ interface PartDef {
 ```
 
 Cold-resolving one part costs ~20 network fetches and several seconds, and a small published model
-uses ~53 unique parts. Baking is therefore not an optimisation, it is the load path. Three tiers:
+uses ~53 unique parts. Baking is therefore not an optimisation, it is the load path.
 
-1. **Curated chest** — connection points, metadata, occupancy, and geometry baked to a binary bundle
-   in the repo. Zero parsing and zero third-party fetches at runtime.
-2. **Bundled models** — a manifest of every unique part a model needs, plus its solved connection
-   graph. Turns serial discovery into one parallel prefetch.
-3. **Arbitrary models** — resolved through the worker pool at runtime.
+```mermaid
+flowchart LR
+  subgraph BUILD["Build time"]
+    L["LDraw mirror"] --> PB["prebake script"]
+    SH["Shadow library"] --> PB
+    PB --> B1["chest bundle<br/>points · occupancy · geometry"]
+    PB --> B2["model manifests<br/>unique parts · solved graph"]
+  end
+  subgraph RUN["Runtime"]
+    B1 --> CA["asset cache"]
+    B2 --> PF["parallel prefetch"]
+    PF --> CA
+    NET["arbitrary parts"] -.-> WP["worker pool"] -.-> CA
+  end
+```
 
 Serving from our own origin is also strictly faster than the third-party mirror: same-origin, HTTP/2
 multiplexed, CDN-backed, and not subject to another host's rate limits.
@@ -162,10 +382,16 @@ section variants, radii equal within tolerance. A round stud mates a square sock
 an axle does not fit a round hole.
 
 **Mating is multipoint.** One pair plus a roll determines the transform; `findMates` then reports
-every other pair that coincides under it. That single function serves three purposes: it produces the
-mate list stored on a graph edge, it supplies the snap score (an eight-stud mate outranks a one-stud
-mate, which is a physical fact rather than an invented heuristic), and it solves the connection graph
-for an imported model.
+every other pair that coincides under it. That single function serves three purposes:
+
+```mermaid
+flowchart LR
+  FM["findMates"] --> A["edge mate list<br/>graph richness"]
+  FM --> B["snap score<br/>8-stud beats 1-stud"]
+  FM --> C["import solve<br/>connectivity from geometry"]
+```
+
+The score is a physical fact rather than an invented heuristic, which is why it disambiguates well.
 
 ## Collision
 
@@ -229,7 +455,7 @@ interface ConnectionEdge {
   id: EdgeId;
   a: BrickId;
   b: BrickId;
-  /** Every point pair joining these two bricks. Two staggered 2×2s share one edge with two mates. */
+  /** Every point pair joining these two bricks. */
   mates: readonly Mate[];
 }
 
@@ -251,19 +477,20 @@ interface ConnectionGraph {
 }
 ```
 
-**One edge per brick pair**, carrying the list of mates that join them. Two bricks touching at eight
-studs are one relationship, not eight.
+Two staggered 2×2 bricks share **one** edge carrying **two** mates:
 
-Adjacency is stored per node, in both directions, rather than derived by scanning an edge list. The
-graph is queried on every hover, selection, and structural operation, so the memory cost of the
-incoming/outgoing lists buys back far more in query time. Directionality is what makes "what is
-holding this up" answerable; `peer` exists because hinge fingers and some general connections have
-no meaningful male side.
+```mermaid
+flowchart LR
+  B1["brick 1<br/>2×2 brick"] -- "edge · mates: 2 studs" --> B2["brick 2<br/>2×2 brick"]
+```
 
-Importing a model solves the graph geometrically, by hashing all connection points and matching
-coincident compatible pairs — the same `findMates` used for snapping. `0 STEP` metadata in published
-models gives build order, which is orthogonal to connectivity and is retained for future
-instruction playback.
+One edge per brick pair; adjacency stored per node in both directions rather than derived by scanning
+an edge list. The graph is queried on every hover, selection, and structural operation, so the memory
+cost buys back far more in query time. Directionality is what makes "what is holding this up"
+answerable; `peer` exists because hinge fingers and some general connections have no male side.
+
+Importing a model solves the graph geometrically via `findMates`. `0 STEP` metadata gives build
+order, which is orthogonal to connectivity and is retained for future instruction playback.
 
 ## Operations and undo
 
@@ -293,14 +520,12 @@ function invertOperation(op: Operation): Operation;
 ```
 
 Group and multi-brick actions reach parity with single-brick ones through `transformMany` rather
-than a parallel family of group operations: a group move is one delta plus an id list, which is
-both simpler and far lighter than N before/after matrices. Semantic intent lives in the
-`Transaction` label, so undo reads as "Rotate assembly" rather than "Transform 412 bricks".
+than a parallel family of group operations: a group move is one delta plus an id list, which is both
+simpler and far lighter than N before/after matrices. Semantic intent lives in the `Transaction`
+label, so undo reads as "Rotate assembly" rather than "Transform 412 bricks".
 
 Composite actions are transactions over these primitives — replace is `remove` + `add`, paste is
 `add` with fresh ids, duplicate is a paste of the current selection.
-
-Selection and visibility are view state, held outside the document and not undoable.
 
 ## Snap resolution
 
@@ -312,7 +537,7 @@ interface SnapCandidate {
   movingPoint: string;
   target: { brick: BrickId; point: string };
   transform: Mat4;
-  mates: readonly Mate[];   // from findMates — cardinality drives the score
+  mates: readonly Mate[];   // cardinality drives the score
   score: number;
 }
 
@@ -324,15 +549,7 @@ interface SnapQuery {
 }
 
 function resolveSnap(query: SnapQuery, index: SpatialIndex): SnapCandidate[];
-```
 
-The interaction is a ghost piece following the cursor that snaps to the exact mated transform once a
-compatible pair is within threshold, with the mate count shown as placement confidence. Candidates
-are ranked, cycled with <kbd>Tab</kbd>, and rolled with <kbd>R</kbd>.
-
-Candidate lookup uses a uniform spatial hash over world-space connection points, cell size 20 LDU.
-
-```ts
 interface SpatialIndex {
   insert(brick: BrickId, part: PartDef, transform: Mat4): void;
   remove(brick: BrickId): void;
@@ -341,21 +558,11 @@ interface SpatialIndex {
 }
 ```
 
-## Workers
+The interaction is a ghost piece following the cursor that snaps to the exact mated transform once a
+compatible pair is within threshold, with the mate count shown as placement confidence. Candidates
+are ranked, cycled with <kbd>Tab</kbd>, and rolled with <kbd>R</kbd>.
 
-GitHub Pages cannot set COOP/COEP headers, so the page is not cross-origin isolated and
-`SharedArrayBuffer` is unavailable. All worker traffic is `postMessage` with transferable typed
-arrays; no shared memory.
-
-Two systems, because their workloads differ:
-
-- **Resolution pool** — `min(hardwareConcurrency - 1, 4)` workers, each resolving and parsing parts
-  independently. Embarrassingly parallel, network-bound, and the main cost of opening a model.
-- **Solver worker** — one dedicated worker that builds the connection graph for an imported model.
-  A single long job over shared state; splitting it would cost more in transfer than it saves.
-
-Path tracing renders on the GPU in its own worker via `OffscreenCanvas`, so progressive accumulation
-never competes with interaction.
+## Worker protocol
 
 ```ts
 type WorkerRequest =
@@ -371,8 +578,7 @@ type WorkerResponse =
   | { id: number; progress: number };   // 0..1
 ```
 
-Only snap resolution sits inside the frame budget, and it is a main-thread spatial-hash query.
-Everything else is asynchronous and reports progress.
+Requests are correlated by `id`. Geometry crosses as transferable typed arrays.
 
 ## Fallback behaviour
 
