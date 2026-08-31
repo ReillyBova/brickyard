@@ -1,0 +1,16 @@
+/* The model picker placeholder. Reuses .by-empty from components.css for the message;
+   this file only places it on the page and adds the back link. */
+
+.by-model-picker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100%;
+  padding: var(--by-space-6);
+  background: var(--by-chrome);
+}
+
+.by-model-picker__back {
+  margin-top: var(--by-space-4);
+}

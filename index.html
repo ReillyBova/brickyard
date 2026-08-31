@@ -5,6 +5,21 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>BrickYard</title>
+    <script>
+      // Pairs with public/404.html's GitHub Pages SPA redirect: restores the real
+      // deep-linked URL (e.g. /brickyard/sandbox) before the router ever reads
+      // location.pathname, so a reload — or a fresh visit — on a route besides "/"
+      // lands where it should instead of resolving back to the landing page.
+      (function () {
+        var params = new URLSearchParams(window.location.search);
+        var redirect = params.get('redirect');
+        if (redirect === null) return;
+        params.delete('redirect');
+        var rest = params.toString();
+        var url = window.location.pathname + redirect + (rest ? '?' + rest : '') + window.location.hash;
+        window.history.replaceState(null, '', url);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
