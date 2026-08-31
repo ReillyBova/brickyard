@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="BrickYard">
+  <title>BrickYard</title>
+  
+  <g stroke-linejoin="round" stroke-linecap="round" stroke-width="3">
+    <path d="M10 26 L32 37 L32 52 L10 41 Z" fill="#b2622d" stroke="#b2622d"></path>
+    <path d="M54 26 L32 37 L32 52 L54 41 Z" fill="#d67f48" stroke="#d67f48"></path>
+    <path d="M10 26 L32 15 L54 26 L32 37 Z" fill="#f6a06b" stroke="#f6a06b"></path>
+  </g>
+  <g>
+    
+    <ellipse cx="32" cy="20.5" rx="5" ry="2.6" fill="#d67f48"></ellipse>
+    <ellipse cx="32" cy="17.6" rx="5" ry="2.6" fill="#ffc6a5"></ellipse>
+    <ellipse cx="21" cy="26" rx="5" ry="2.6" fill="#d67f48"></ellipse>
+    <ellipse cx="21" cy="23.1" rx="5" ry="2.6" fill="#ffc6a5"></ellipse>
+    <ellipse cx="43" cy="26" rx="5" ry="2.6" fill="#d67f48"></ellipse>
+    <ellipse cx="43" cy="23.1" rx="5" ry="2.6" fill="#ffc6a5"></ellipse>
+    <ellipse cx="32" cy="31.5" rx="5" ry="2.6" fill="#d67f48"></ellipse>
+    <ellipse cx="32" cy="28.6" rx="5" ry="2.6" fill="#ffc6a5"></ellipse>
+  </g>
+</svg>

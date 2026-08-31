@@ -32,6 +32,10 @@ the model is continuous transforms, constrained by connection matching.
 `docs/ARCHITECTURE.md` holds the type contracts. They are frozen; changing one is a deliberate,
 announced act, not a drive-by edit.
 
+UI work follows `docs/DESIGN.md`. Take every colour, size, radius and duration from
+`src/styles/tokens.css` and build with the classes in `src/styles/components.css` — never a raw hex,
+font name or px value. `design-language.html` renders the whole system in both themes.
+
 `docs/LDRAW-PRIMER.md` covers the LDraw file format and the LDCad shadow library — line types,
 transforms, meta commands, and the connectivity model. Read it before working in `src/snap/` or
 `src/ldraw/`.

@@ -1,0 +1,298 @@
+/* ============================================================================
+   BrickYard — design tokens
+   ----------------------------------------------------------------------------
+   The source of truth for colour, type, space, shape, elevation and motion.
+   Nothing in the app may hard-code a hex, a font name, or a px value that a
+   token already carries. If you need a value that isn't here, that's a gap in
+   the system — add it here, don't inline it.
+
+   Two layers, deliberately separate:
+
+     1. PALETTE   raw ramps. Never referenced from a component.
+     2. SEMANTIC  role tokens (--by-*). Components reference only these.
+
+   The theme switch (light / dark viewport) re-points layer 2 only. A component
+   written against --by-panel is themed for free; one written against
+   --color-neutral-800 is not.
+
+   Companion: docs/DESIGN.md for the reasoning, src/styles/components.css for
+   the classes built on top.
+   ========================================================================= */
+
+@import url('https://fonts.googleapis.com/css2?family=Grandstander:wght@400..800&family=Figtree:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* ── 1. Palette ─────────────────────────────────────────────────────────────
+   One perceptual lightness scale across three roles, so step 400 of any ramp
+   carries the same visual weight as step 400 of any other. Warm throughout:
+   there is no true grey in BrickYard. Bricks are made of colour.
+   ------------------------------------------------------------------------- */
+:root {
+  --color-neutral-100: #f9f4ed;
+  --color-neutral-200: #eee7db;
+  --color-neutral-300: #dcd3c4;
+  --color-neutral-400: #c0b6a5;
+  --color-neutral-500: #a19786;
+  --color-neutral-600: #82796a;
+  --color-neutral-700: #645c50;
+  --color-neutral-800: #474238;
+  --color-neutral-900: #2e2b25;
+
+  /* Terracotta — the action colour. BrickYard's own clay. */
+  --color-accent-100: #fff2eb;
+  --color-accent-200: #ffe1d0;
+  --color-accent-300: #ffc6a5;
+  --color-accent-400: #f6a06b;
+  --color-accent-500: #d67f48;
+  --color-accent-600: #b2622d;
+  --color-accent-700: #8c491a;
+  --color-accent-800: #643312;
+  --color-accent-900: #402310;
+
+  /* Sage — the second voice. Structure, connection, "this is held". */
+  --color-accent-2-100: #f0fae1;
+  --color-accent-2-200: #e1eecc;
+  --color-accent-2-300: #ccdbb2;
+  --color-accent-2-400: #aebf92;
+  --color-accent-2-500: #8fa073;
+  --color-accent-2-600: #728157;
+  --color-accent-2-700: #56633f;
+  --color-accent-2-800: #3d472b;
+  --color-accent-2-900: #272e1b;
+
+  --color-bg: #f5ead8;
+  --color-surface: #ebddc5;
+  --color-ink: #201e1d;
+}
+
+/* ── 2. Semantic roles ──────────────────────────────────────────────────────
+   Light chrome, light viewport. This is the fallback theme; it renders
+   correctly with no data-theme attribute at all.
+   ------------------------------------------------------------------------- */
+:root,
+[data-theme='light'] {
+  color-scheme: light;
+
+  /* Surfaces, coolest-to-warmest by depth. The viewport is the floor; panels
+     float above it; popovers and dialogs float above those. */
+  --by-canvas:        var(--color-neutral-200);  /* the 3D viewport ground   */
+  --by-canvas-grid:   var(--color-neutral-400);  /* baseplate / axis lines   */
+  --by-chrome:        var(--color-bg);           /* app frame, toolbar       */
+  --by-panel:         var(--color-bg);           /* chest, inspector         */
+  --by-panel-sunken:  var(--color-surface);      /* wells, part tiles, input */
+  --by-popover:       var(--color-neutral-100);  /* menus, tooltips, dialogs */
+
+  /* Ink */
+  --by-text:          var(--color-ink);
+  --by-text-muted:    color-mix(in srgb, var(--color-ink) 58%, transparent);
+  --by-text-faint:    color-mix(in srgb, var(--color-ink) 38%, transparent);
+  --by-text-on-accent: var(--color-bg);
+
+  /* Lines. BrickYard has no hairline-only geometry — a line is a last resort
+     after space and surface change have both been tried. */
+  --by-line:          color-mix(in srgb, var(--color-ink) 14%, transparent);
+  --by-line-strong:   color-mix(in srgb, var(--color-ink) 26%, transparent);
+
+  /* Interactive */
+  --by-accent:        var(--color-accent-500);
+  --by-accent-hover:  var(--color-accent-600);
+  --by-accent-press:  var(--color-accent-700);
+  --by-accent-text:   var(--color-accent-700);   /* accent at paragraph size */
+  --by-accent-wash:   color-mix(in srgb, var(--color-accent-500) 12%, transparent);
+  --by-hover-wash:    color-mix(in srgb, var(--color-ink) 6%, transparent);
+  --by-press-wash:    color-mix(in srgb, var(--color-ink) 12%, transparent);
+
+  /* Second voice */
+  --by-structure:     var(--color-accent-2-600);
+  --by-structure-wash: color-mix(in srgb, var(--color-accent-2-500) 16%, transparent);
+
+  /* Status. Warm-shifted so nothing reads as system-default. */
+  --by-danger:        #b03a2e;
+  --by-danger-wash:   color-mix(in srgb, #b03a2e 10%, transparent);
+
+  /* 3D overlay colours — consumed by scene/, not by CSS. Read them with
+     getComputedStyle so the canvas re-themes with the chrome. */
+  --by-3d-hover:      var(--color-accent-400);
+  --by-3d-select:     var(--color-accent-600);
+  --by-3d-ghost:      var(--color-accent-500);
+  --by-3d-ghost-alpha: 0.42;
+  --by-3d-invalid:    var(--by-danger);
+  --by-3d-connected:  var(--color-accent-2-600);
+
+  --by-shadow-sm: 0 1px 2px color-mix(in srgb, var(--color-neutral-900) 14%, transparent);
+  --by-shadow-md: 0 3px 10px color-mix(in srgb, var(--color-neutral-900) 16%, transparent);
+  --by-shadow-lg: 0 12px 32px color-mix(in srgb, var(--color-neutral-900) 22%, transparent);
+}
+
+/* ── Dark viewport — the default ────────────────────────────────────────────
+   Not a greyscale inversion: the same ramps, read from the other end. The
+   viewport goes to the deepest neutral so brick colour is the brightest thing
+   on screen, which is the whole point of the tool.
+   ------------------------------------------------------------------------- */
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --by-canvas:        #1b1915;                   /* one step past neutral-900 */
+  --by-canvas-grid:   var(--color-neutral-700);
+  --by-chrome:        var(--color-neutral-900);
+  --by-panel:         var(--color-neutral-900);
+  --by-panel-sunken:  #262319;
+  --by-popover:       var(--color-neutral-800);
+
+  --by-text:          var(--color-neutral-100);
+  --by-text-muted:    color-mix(in srgb, var(--color-neutral-100) 62%, transparent);
+  --by-text-faint:    color-mix(in srgb, var(--color-neutral-100) 40%, transparent);
+  --by-text-on-accent: var(--color-accent-900);
+
+  --by-line:          color-mix(in srgb, var(--color-neutral-100) 14%, transparent);
+  --by-line-strong:   color-mix(in srgb, var(--color-neutral-100) 28%, transparent);
+
+  /* On a dark ground the accent moves UP the ramp, and pressed states move up
+     again — the direction reverses with the theme, brightness does not. */
+  --by-accent:        var(--color-accent-400);
+  --by-accent-hover:  var(--color-accent-300);
+  --by-accent-press:  var(--color-accent-200);
+  --by-accent-text:   var(--color-accent-300);
+  --by-accent-wash:   color-mix(in srgb, var(--color-accent-400) 16%, transparent);
+  --by-hover-wash:    color-mix(in srgb, var(--color-neutral-100) 8%, transparent);
+  --by-press-wash:    color-mix(in srgb, var(--color-neutral-100) 14%, transparent);
+
+  --by-structure:     var(--color-accent-2-400);
+  --by-structure-wash: color-mix(in srgb, var(--color-accent-2-400) 18%, transparent);
+
+  --by-danger:        #e4715f;
+  --by-danger-wash:   color-mix(in srgb, #e4715f 14%, transparent);
+
+  --by-3d-hover:      var(--color-accent-300);
+  --by-3d-select:     var(--color-accent-400);
+  --by-3d-ghost:      var(--color-accent-400);
+  --by-3d-ghost-alpha: 0.5;
+  --by-3d-invalid:    var(--by-danger);
+  --by-3d-connected:  var(--color-accent-2-400);
+
+  /* Elevation on a dark ground is a hairline plus ambient darkness; a soft
+     drop shadow is invisible there. */
+  --by-shadow-sm: 0 1px 0 color-mix(in srgb, var(--color-neutral-100) 6%, transparent) inset,
+                  0 1px 2px rgb(0 0 0 / 0.4);
+  --by-shadow-md: 0 1px 0 color-mix(in srgb, var(--color-neutral-100) 7%, transparent) inset,
+                  0 4px 14px rgb(0 0 0 / 0.45);
+  --by-shadow-lg: 0 1px 0 color-mix(in srgb, var(--color-neutral-100) 8%, transparent) inset,
+                  0 16px 40px rgb(0 0 0 / 0.55);
+}
+
+/* ── 3. Type ────────────────────────────────────────────────────────────────
+   Grandstander is the display voice: playful but workmanlike — slightly flared
+   stems, a real lowercase g, and a full weight axis, so a 44px wordmark and a
+   13px button label can both sit in it. It stays legible at 13px, which a
+   fatter display face does not.
+   It carries the wordmark, panel titles, dialog titles, empty-state headlines
+   and button labels. Everything else is Figtree. Part ids, dimensions and
+   LDraw codes are monospaced, because they are data and get compared.
+   ------------------------------------------------------------------------- */
+:root {
+  --by-font-display: 'Grandstander', system-ui, sans-serif;
+  --by-font-display-weight: 700;
+  --by-font-ui: 'Figtree', system-ui, -apple-system, sans-serif;
+  --by-font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Consolas, monospace;
+
+  --by-text-2xs: 10px;   /* ramp step labels, swatch codes             */
+  --by-text-xs:  11px;   /* metadata, shortcut hints, captions         */
+  --by-text-sm:  12px;   /* dense labels, tile captions, table cells   */
+  --by-text-md:  13px;   /* the interface default                      */
+  --by-text-lg:  15px;   /* body copy in dialogs and empty states      */
+  --by-text-xl:  20px;   /* panel and dialog titles (display)          */
+  --by-text-2xl: 28px;   /* empty-state headlines (display)            */
+  --by-text-3xl: 40px;   /* the wordmark, splash (display)             */
+
+  --by-leading-tight: 1.15;   /* display sizes                        */
+  --by-leading-ui: 1.35;      /* single- and two-line interface text   */
+  --by-leading-body: 1.55;    /* paragraphs                           */
+
+  --by-tracking-display: -0.012em;  /* Grandstander is already fairly tight */
+  --by-tracking-caps: 0.09em;  /* the only use of uppercase: eyebrow labels */
+}
+
+/* ── 4. Space ───────────────────────────────────────────────────────────────
+   A 4px base at 1.10 density — the same scale the whole system is tuned to.
+   Panels breathe at --by-space-3/4; only inside a part tile grid do we go
+   tighter, and never below --by-space-1.
+   ------------------------------------------------------------------------- */
+:root {
+  --by-space-1: 4px;
+  --by-space-2: 9px;
+  --by-space-3: 13px;
+  --by-space-4: 18px;
+  --by-space-5: 22px;
+  --by-space-6: 26px;
+  --by-space-8: 35px;
+  --by-space-10: 44px;
+
+  /* Balanced density: comfortable at a desk, still legible at 1280px. */
+  --by-control-h: 32px;        /* buttons, inputs, select, seg options   */
+  --by-control-h-sm: 26px;     /* in-row controls inside a dense list    */
+  --by-control-h-lg: 40px;     /* the one primary action in a dialog     */
+  --by-hit-min: 32px;          /* nothing clickable is smaller           */
+  --by-panel-w: 268px;         /* chest and inspector rails              */
+  --by-toolbar-h: 52px;
+  --by-statusbar-h: 28px;
+}
+
+/* ── 5. Shape ───────────────────────────────────────────────────────────────
+   BrickYard is round. A brick has a 6.4 LDU corner fillet on a 20 LDU stud
+   pitch — about a third — and the UI keeps that ratio in feel: containers are
+   generously rounded, and anything you press is a full pill.
+
+   Sharp corners exist in exactly one place: the render viewport's own edge,
+   where a rounded canvas would clip geometry the user is trying to see.
+   ------------------------------------------------------------------------- */
+:root {
+  --by-radius-sm: 8px;     /* part tiles, swatches, tags        */
+  --by-radius-md: 16px;    /* panels, cards, wells              */
+  --by-radius-lg: 28px;    /* dialogs, floating groups          */
+  --by-radius-pill: 999px; /* buttons, inputs, chips, segments  */
+  --by-radius-none: 0;     /* the viewport, and nothing else    */
+
+  --by-focus-ring: 2px solid var(--by-accent);
+  --by-focus-offset: 2px;
+}
+
+/* ── 6. Motion ──────────────────────────────────────────────────────────────
+   Toy-like means one thing precisely: a snap has a tiny overshoot, as though
+   the piece was pulled the last fraction of a millimetre by the connection
+   rather than pushed there by software. Everything else is fast and flat.
+
+   Hard rules:
+     · Nothing in the render loop is animated by CSS.
+     · The ghost does not tween between candidates — it cuts. A tween would
+       read as lag on the one interaction that must feel instant.
+     · The camera is damped in scene/, not transitioned in CSS.
+   ------------------------------------------------------------------------- */
+:root {
+  --by-dur-instant: 80ms;   /* hover tints, press states        */
+  --by-dur-fast: 140ms;     /* panel reveals, tooltip fade      */
+  --by-dur-base: 220ms;     /* dialogs, drawers, mode changes   */
+
+  --by-ease-out: cubic-bezier(0.22, 0.9, 0.3, 1);
+  --by-ease-snap: cubic-bezier(0.2, 1.1, 0.3, 1.18);  /* the overshoot */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --by-dur-instant: 0ms;
+    --by-dur-fast: 0ms;
+    --by-dur-base: 0ms;
+    --by-ease-snap: linear;
+  }
+}
+
+/* ── 7. Layering ────────────────────────────────────────────────────────────
+   Five stops. A component that needs a value between two of these is a
+   component in the wrong stop.
+   ------------------------------------------------------------------------- */
+:root {
+  --by-z-canvas: 0;
+  --by-z-canvas-overlay: 10;  /* gizmos, marquee, drop hints        */
+  --by-z-chrome: 20;          /* toolbar, rails, status bar         */
+  --by-z-popover: 30;         /* menus, colour picker, tooltips     */
+  --by-z-dialog: 40;          /* modal + its backdrop               */
+  --by-z-toast: 50;
+}
