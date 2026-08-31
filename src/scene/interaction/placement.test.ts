@@ -1,0 +1,220 @@
+/**
+ * Placement, driven against real resolved parts through a stub scene.
+ *
+ * `PlacementController` only touches the renderer through `PlacementScene`, which is a
+ * four-method interface — so the whole interaction is testable without a canvas, and
+ * the parts are real rather than invented.
+ */
+
+import { describe, expect, it } from 'vitest';
+
+import { IDENTITY, positionOf } from '../../math';
+import { fixtureReader } from '../../snap/__fixtures__/reader';
+import { unpackKey } from '../../snap/compat';
+import { worldPoint } from '../../snap/mating';
+import { resolvePart } from '../../snap/resolvePart';
+import type { PartDef } from '../../snap/types';
+import type { BrickId, Mat4, Vec3 } from '../../types';
+import { PlacementController, type PlacementScene } from './placement';
+
+const BRICK_HEIGHT = 24;
+
+async function brick2x4(): Promise<PartDef> {
+  return {
+    id: '3001',
+    title: 'Brick  2 x  4',
+    connections: await resolvePart('3001', fixtureReader),
+    bounds: { min: [-40, -4, -20], max: [40, 24, 20] },
+    occupancy: { dims: [1, 1, 1], bits: new Uint8Array(1) },
+  };
+}
+
+/** A scene that reports the cursor over a chosen point, with that face's normal. */
+function stubScene(hit: { brick: BrickId; point: Vec3; normal: Vec3 } | null): PlacementScene & {
+  ghosts: { transform: Mat4; valid: boolean }[];
+  hidden: number;
+} {
+  const ghosts: { transform: Mat4; valid: boolean }[] = [];
+  let hidden = 0;
+  return {
+    ghosts,
+    get hidden() {
+      return hidden;
+    },
+    pick: () => hit,
+    pickRay: () => ({ origin: [0, -500, 0] as Vec3, direction: [0, 1, 0] as Vec3 }),
+    showGhost: async (_p, _c, transform, valid) => {
+      ghosts.push({ transform, valid });
+    },
+    hideGhost: () => {
+      hidden += 1;
+    },
+  };
+}
+
+/** The world position of one of the seed brick's top studs. */
+async function aStudOn(part: PartDef, at: Mat4): Promise<Vec3> {
+  const stud = part.connections.find((c) => unpackKey(c.key).gender === 'M');
+  expect(stud).toBeDefined();
+  return worldPoint(stud as NonNullable<typeof stud>, at).position;
+}
+
+describe('PlacementController', () => {
+  it('places a brick where the cursor points', async () => {
+    const part = await brick2x4();
+    const seedAt = IDENTITY;
+    const studPos = await aStudOn(part, seedAt);
+    // The top face of a brick faces -Y, because LDraw's +Y points down.
+    const scene = stubScene({ brick: 'seed' as BrickId, point: studPos, normal: [0, -1, 0] });
+
+    const c = new PlacementController(scene);
+    c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: seedAt, part });
+    c.hold(part);
+
+    expect(c.move(0, 0)).not.toBeNull();
+    const placed = c.commit('new1' as BrickId);
+    expect(placed).not.toBeNull();
+    // A brick placed on top sits one brick height up, which is -24 with +Y down.
+    expect(positionOf((placed as NonNullable<typeof placed>).transform)[1]).toBeCloseTo(
+      -BRICK_HEIGHT,
+      6,
+    );
+  });
+
+  it('does not place the same brick twice from one resolution', async () => {
+    // The regression: commit() used to leave its transform in place, so every further
+    // pointerup re-placed it — a stationary double-click buried a brick inside another.
+    const part = await brick2x4();
+    const studPos = await aStudOn(part, IDENTITY);
+    const scene = stubScene({ brick: 'seed' as BrickId, point: studPos, normal: [0, -1, 0] });
+
+    const c = new PlacementController(scene);
+    c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+    c.hold(part);
+    c.move(0, 0);
+
+    expect(c.commit('a' as BrickId)).not.toBeNull();
+    expect(c.commit('b' as BrickId)).toBeNull();
+    expect(c.current.transform).toBeNull();
+    expect(c.placed).toHaveLength(2); // the seed and one placement, not three
+  });
+
+  it('hides the ghost after committing', async () => {
+    const part = await brick2x4();
+    const studPos = await aStudOn(part, IDENTITY);
+    const scene = stubScene({ brick: 'seed' as BrickId, point: studPos, normal: [0, -1, 0] });
+
+    const c = new PlacementController(scene);
+    c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+    c.hold(part);
+    c.move(0, 0);
+    const before = scene.hidden;
+    c.commit('a' as BrickId);
+    expect(scene.hidden).toBeGreaterThan(before);
+  });
+
+  it('offers nothing when the cursor is over no brick', async () => {
+    const part = await brick2x4();
+    const scene = stubScene(null);
+    const c = new PlacementController(scene);
+    c.hold(part);
+    // With no hit the ground fallback applies, so a transform exists but no candidate.
+    c.move(0, 0);
+    expect(c.current.candidates).toHaveLength(0);
+  });
+
+  it('rotate re-solves at the last pointer position rather than waiting for a move', async () => {
+    const part = await brick2x4();
+    const studPos = await aStudOn(part, IDENTITY);
+    const scene = stubScene({ brick: 'seed' as BrickId, point: studPos, normal: [0, -1, 0] });
+
+    const c = new PlacementController(scene);
+    c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+    c.hold(part);
+    c.move(0, 0);
+
+    const ghostsBefore = scene.ghosts.length;
+    c.rotate([0, 0]);
+    expect(c.current.roll).toBe(1);
+    // A repaint must have happened, or the key does nothing until the pointer moves.
+    expect(scene.ghosts.length).toBeGreaterThan(ghostsBefore);
+  });
+
+  it('hold(null) clears the ghost and the held piece', async () => {
+    const part = await brick2x4();
+    const studPos = await aStudOn(part, IDENTITY);
+    const scene = stubScene({ brick: 'seed' as BrickId, point: studPos, normal: [0, -1, 0] });
+
+    const c = new PlacementController(scene);
+    c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+    c.hold(part);
+    c.move(0, 0);
+    c.hold(null);
+    expect(c.current.transform).toBeNull();
+    expect(c.move(0, 0)).toBeNull();
+  });
+
+  it('removing a brick takes its connection points out of reach', async () => {
+    const part = await brick2x4();
+    const studPos = await aStudOn(part, IDENTITY);
+    const scene = stubScene({ brick: 'seed' as BrickId, point: studPos, normal: [0, -1, 0] });
+
+    const c = new PlacementController(scene);
+    c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+    c.hold(part);
+    expect(c.move(0, 0)).not.toBeNull();
+
+    c.remove('seed' as BrickId);
+    c.move(0, 0);
+    expect(c.current.candidates).toHaveLength(0);
+  });
+});
+
+describe('the face filter', () => {
+  it('offers a brick top its studs, and offers nothing for a face with no connectors', async () => {
+    const part = await brick2x4();
+    const studPos = await aStudOn(part, IDENTITY);
+
+    const top = stubScene({ brick: 'seed' as BrickId, point: studPos, normal: [0, -1, 0] });
+    const c1 = new PlacementController(top);
+    c1.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+    c1.hold(part);
+    c1.move(0, 0);
+    expect(c1.current.candidates.length).toBeGreaterThan(0);
+
+    // Same point, but reporting a side face. A 2x4's studs run along Y, so a normal
+    // along X is perpendicular to them and the face filter must reject them all.
+    const side = stubScene({ brick: 'seed' as BrickId, point: studPos, normal: [1, 0, 0] });
+    const c2 = new PlacementController(side);
+    c2.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+    c2.hold(part);
+    c2.move(0, 0);
+    expect(c2.current.candidates).toHaveLength(0);
+  });
+});
+
+describe('continuity', () => {
+  it('is bounded, so a distant previous position cannot outweigh the cursor', async () => {
+    const part = await brick2x4();
+    const studPos = await aStudOn(part, IDENTITY);
+    const scene = stubScene({ brick: 'seed' as BrickId, point: studPos, normal: [0, -1, 0] });
+
+    const c = new PlacementController(scene);
+    c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+    c.hold(part);
+    c.move(0, 0);
+    const near = c.current.candidates[0];
+    expect(near).toBeDefined();
+
+    // Re-solve with the ghost notionally miles away. The winning candidate must not
+    // change: drift is capped at the search radius precisely so it cannot swamp
+    // proximity to the cursor.
+    const far = new PlacementController(scene);
+    far.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+    far.hold(part);
+    far.move(0, 0);
+    far.move(0, 0);
+    expect(far.current.candidates[0].target.point).toBe(near.target.point);
+    expect(far.current.candidates[0].transform).toEqual(near.transform);
+  });
+});

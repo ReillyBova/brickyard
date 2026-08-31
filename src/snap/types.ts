@@ -194,4 +194,15 @@ export type Collides = (
   ignore?: ReadonlySet<BrickId>,
 ) => boolean;
 
-export type ResolveSnap = (query: SnapQuery, index: SpatialIndex) => SnapCandidate[];
+/**
+ * Resolving needs to read the parts and transforms of bricks already placed, which the
+ * index deliberately does not carry — it holds points, not parts. The caller supplies
+ * that lookup.
+ */
+export type BrickLookup = (id: BrickId) => { part: PartDef; transform: Mat4 } | null;
+
+export type ResolveSnap = (
+  query: SnapQuery,
+  index: SpatialIndex,
+  lookup: BrickLookup,
+) => SnapCandidate[];

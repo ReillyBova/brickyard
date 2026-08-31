@@ -1,4 +1,4 @@
-import { SceneCanvas } from './scene/index.ts'
+import { BuilderCanvas } from './scene/interaction/BuilderCanvas.tsx'
 
 /**
  * The viewport is the floor. Chrome — chest, inspector, toolbar — floats over it as
@@ -7,7 +7,7 @@ import { SceneCanvas } from './scene/index.ts'
 function App() {
   return (
     <div className="by-viewport">
-      <SceneCanvas />
+      <BuilderCanvas />
     </div>
   )
 }
