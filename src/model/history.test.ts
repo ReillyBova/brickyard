@@ -47,7 +47,7 @@ const snapshot = (doc: SceneDocument) => ({
 const base = (): SceneDocument =>
   createDocument([brick('b1', { transform: studOffset(0, 0, 0) })], [group('g1')]);
 
-/** One gesture, several operations: group the brick, move it, and recolour it. */
+/** One gesture, several operations: group the brick, move it, and recolor it. */
 const multiOp: Transaction = {
   label: 'Place and dress a brick',
   ops: [

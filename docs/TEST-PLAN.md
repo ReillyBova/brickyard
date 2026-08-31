@@ -52,8 +52,8 @@ that matter here.
 - Transaction undo and redo across multi-operation gestures.
 
 **`ldraw/`**
-- `LDConfig` colour parsing: codes, alpha, material classes.
-- Colour `16` and `24` inheritance.
+- `LDConfig` color parsing: codes, alpha, material classes.
+- Color `16` and `24` inheritance.
 
 ## Fixture tests
 

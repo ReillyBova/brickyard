@@ -5,7 +5,7 @@ UI in this repository.
 
 Two companions:
 
-- [`src/styles/tokens.css`](../src/styles/tokens.css) — every colour, size, radius and duration.
+- [`src/styles/tokens.css`](../src/styles/tokens.css) — every color, size, radius and duration.
 - [`src/styles/components.css`](../src/styles/components.css) — the classes built on those tokens.
 - `design-language.html` — the same thing rendered, in both themes. Open it in a browser.
 
@@ -20,11 +20,11 @@ thing.
 
 That gives the whole system its shape. Surfaces are rounded and warm, never grey and never sharp.
 Controls are pills you press. Panels are rafts floating over the scene rather than walls boxing it
-in. The heaviest, most saturated colour on screen belongs to the bricks — everything the app draws
+in. The heaviest, most saturated color on screen belongs to the bricks — everything the app draws
 around them stays a step quieter.
 
 The other half of the idea is that this is a real editor with a large operation set: multi-select,
-rotate about connection axes, group, mirror, recolour, isolate, undo across all of it. So the chrome
+rotate about connection axes, group, mirror, recolor, isolate, undo across all of it. So the chrome
 is disciplined. It's warm, not decorative; playful in its shapes, matter-of-fact in its words.
 
 ---
@@ -59,7 +59,7 @@ Two themes, one set of ramps read from opposite ends. Dark is the default.
 <html data-theme="dark">
 ```
 
-Dark is default because the viewport dominates the window, and a dark ground is where brick colour
+Dark is default because the viewport dominates the window, and a dark ground is where brick color
 reads truest — a cream viewport washes out sand, tan and light grey parts, which are a large share of
 the corpus. Light is offered because building on a bright ground is pleasant and because printed
 instructions and screenshots want it.
@@ -78,33 +78,33 @@ them; on dark they also get lighter. Elevation always means "closer to the light
 Elevation on dark is a hairline top edge plus ambient darkness. A soft drop shadow is invisible
 there, so `--by-shadow-*` are themed rather than shared.
 
-The scene reads its overlay colours (`--by-3d-*`) from computed style, so hover, selection and ghost
+The scene reads its overlay colors (`--by-3d-*`) from computed style, so hover, selection and ghost
 tints re-theme with the chrome instead of being hard-coded in `scene/`.
 
 ---
 
-## Colour
+## Color
 
 Three ramps on one perceptual lightness scale, so step 400 of any role carries the same visual weight
 as step 400 of any other.
 
 - **Neutral** — warm sand through deep brown. There is no true grey in BrickYard.
-- **Terracotta** (`--color-accent-*`) — the action colour. Primary buttons, selection, focus, the
+- **Terracotta** (`--color-accent-*`) — the action color. Primary buttons, selection, focus, the
   ghost, active tool. BrickYard's own clay.
 - **Sage** (`--color-accent-2-*`) — the second voice, and a real one rather than a highlight. It
   means *structure*: connection points, "select connected", the graph, what's holding a piece up. If
   something is about how the model is held together, it's sage.
 
-Two colour rules worth stating plainly:
+Two color rules worth stating plainly:
 
 **Terracotta on the cream ground clears 3:1, not 4.5:1.** That's enough for icons, large text and
-interface chrome. For accent-coloured text at paragraph size use `--by-accent-text`, which is a deep
+interface chrome. For accent-colored text at paragraph size use `--by-accent-text`, which is a deep
 ramp step, not the base accent.
 
 **The LDraw palette is data, and we don't reinterpret it.** A swatch shows the real LDraw RGB — which
-means a swatch can be any colour, including ones that clash with the theme. So the selected ring is
+means a swatch can be any color, including ones that clash with the theme. So the selected ring is
 drawn in the theme accent *outside* the swatch, never as a tint on it, and LDraw's finishes
-(transparent, pearl, chrome) get a marker rather than a colour change.
+(transparent, pearl, chrome) get a marker rather than a color change.
 
 ---
 
@@ -116,7 +116,7 @@ Two faces and a monospace, each with one job.
 | ---------------- | -------------------- | -------- |
 | **Grandstander** (700) | `--by-font-display` | The wordmark, panel titles, dialog titles, empty-state headlines, button labels |
 | **Figtree**      | `--by-font-ui`       | Everything else — labels, body copy, metadata, menu items |
-| **JetBrains Mono** | `--by-font-mono`   | Part ids, LDraw colour codes, LDU values, angles, counts, shortcuts |
+| **JetBrains Mono** | `--by-font-mono`   | Part ids, LDraw color codes, LDU values, angles, counts, shortcuts |
 
 Grandstander carries the display voice: playful but workmanlike — slightly flared stems, a real
 lowercase g, an unusual choice for an editor and the better one for a tool made of toys. Two reasons
@@ -224,7 +224,7 @@ for a new variant, and the variant belongs in the sheet.
 | `.by-panel` + `__head` `__title` `__body` `__foot` `__section` | The floating rail — chest, inspector |
 | `.by-well`, `.by-row` | Sunken block; label-left/control-right property row |
 | `.by-tile-grid`, `.by-tile` + `__thumb` `__label` | The chest's atom |
-| `.by-swatch-grid`, `.by-swatch` + `--trans` `--metal` | LDraw colour picker |
+| `.by-swatch-grid`, `.by-swatch` + `--trans` `--metal` | LDraw color picker |
 | `.by-kbd`, `.by-kbd-set`, `.by-tooltip` | Shortcut display |
 | `.by-statusbar` | Brick count, selection count, mode hint |
 | `.by-progress` + `__fill` | Model import |
@@ -272,7 +272,7 @@ fill.
 `public/favicon.svg` is the same mark on a cream tile at 86% so it survives 16px.
 
 The lockup is the mark with **BrickYard** in Grandstander at 700, mark height equal to cap height, gap of
-`--by-space-3`. Don't outline or recolour the mark per context — it has one colourway.
+`--by-space-3`. Don't outline or recolor the mark per context — it has one colorway.
 
 **The name is written BrickYard, with a capital Y.** One word, two capitals, no space and no hyphen.
 Lowercasing the Y makes it read as "bricky-ard", which is the whole reason for the capital. This
@@ -288,7 +288,7 @@ repository name, which stay lowercase.
 - Every icon button carries an accessible name; the tooltip is not the name.
 - The full operation set is reachable by keyboard. Camera control is too — the mouse hand is often
   holding the camera, so a keyboard-only path is not a fallback here, it's a real mode.
-- Text under 15px never carries the base accent as its colour; use `--by-accent-text`.
+- Text under 15px never carries the base accent as its color; use `--by-accent-text`.
 - `prefers-reduced-motion` collapses every chrome transition and disables the snap overshoot.
 
 ---
@@ -297,5 +297,5 @@ repository name, which stay lowercase.
 
 Snap candidate scoring, ghost behaviour and camera feel are product decisions, not style ones. They
 live in `src/snap/resolve.ts` and `src/scene/interaction/`, and they are judged by using the tool.
-This document can tell you what colour the ghost is. It cannot tell you whether the ghost landed
+This document can tell you what color the ghost is. It cannot tell you whether the ghost landed
 where someone meant.

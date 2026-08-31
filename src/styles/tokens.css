@@ -1,7 +1,7 @@
 /* ============================================================================
    BrickYard — design tokens
    ----------------------------------------------------------------------------
-   The source of truth for colour, type, space, shape, elevation and motion.
+   The source of truth for color, type, space, shape, elevation and motion.
    Nothing in the app may hard-code a hex, a font name, or a px value that a
    token already carries. If you need a value that isn't here, that's a gap in
    the system — add it here, don't inline it.
@@ -24,7 +24,7 @@
 /* ── 1. Palette ─────────────────────────────────────────────────────────────
    One perceptual lightness scale across three roles, so step 400 of any ramp
    carries the same visual weight as step 400 of any other. Warm throughout:
-   there is no true grey in BrickYard. Bricks are made of colour.
+   there is no true grey in BrickYard. Bricks are made of color.
    ------------------------------------------------------------------------- */
 :root {
   --color-neutral-100: #f9f4ed;
@@ -37,7 +37,7 @@
   --color-neutral-800: #474238;
   --color-neutral-900: #2e2b25;
 
-  /* Terracotta — the action colour. BrickYard's own clay. */
+  /* Terracotta — the action color. BrickYard's own clay. */
   --color-accent-100: #fff2eb;
   --color-accent-200: #ffe1d0;
   --color-accent-300: #ffc6a5;
@@ -109,7 +109,7 @@
   --by-danger:        #b03a2e;
   --by-danger-wash:   color-mix(in srgb, #b03a2e 10%, transparent);
 
-  /* 3D overlay colours — consumed by scene/, not by CSS. Read them with
+  /* 3D overlay colors — consumed by scene/, not by CSS. Read them with
      getComputedStyle so the canvas re-themes with the chrome. */
   --by-3d-hover:      var(--color-accent-400);
   --by-3d-select:     var(--color-accent-600);
@@ -125,7 +125,7 @@
 
 /* ── Dark viewport — the default ────────────────────────────────────────────
    Not a greyscale inversion: the same ramps, read from the other end. The
-   viewport goes to the deepest neutral so brick colour is the brightest thing
+   viewport goes to the deepest neutral so brick color is the brightest thing
    on screen, which is the whole point of the tool.
    ------------------------------------------------------------------------- */
 [data-theme='dark'] {
@@ -292,7 +292,7 @@
   --by-z-canvas: 0;
   --by-z-canvas-overlay: 10;  /* gizmos, marquee, drop hints        */
   --by-z-chrome: 20;          /* toolbar, rails, status bar         */
-  --by-z-popover: 30;         /* menus, colour picker, tooltips     */
+  --by-z-popover: 30;         /* menus, color picker, tooltips     */
   --by-z-dialog: 40;          /* modal + its backdrop               */
   --by-z-toast: 50;
 }

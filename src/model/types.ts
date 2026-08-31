@@ -10,7 +10,7 @@ import type { Mate } from '../snap/types';
 export interface BrickInstance {
   id: BrickId;
   partId: string;
-  /** LDraw colour code, per LDConfig. */
+  /** LDraw color code, per LDConfig. */
   colorCode: number;
   /** World transform, LDU. Flat and absolute: groups are not transform parents. */
   transform: Mat4;

@@ -1,10 +1,10 @@
 /**
- * Part sourcing, colours, and baked catalog. Contract file — see docs/ARCHITECTURE.md.
+ * Part sourcing, colors, and baked catalog. Contract file — see docs/ARCHITECTURE.md.
  */
 
 import type { Bounds } from '../types';
 
-/** Material classes carried by LDConfig.ldr beyond plain solid colour. */
+/** Material classes carried by LDConfig.ldr beyond plain solid color. */
 export type MaterialClass =
   | 'solid'
   | 'transparent'
@@ -18,7 +18,7 @@ export type MaterialClass =
   | 'fabric';
 
 export interface LDrawColor {
-  /** LDraw colour code. 16 inherits from the parent reference; 24 is its edge colour. */
+  /** LDraw color code. 16 inherits from the parent reference; 24 is its edge color. */
   code: number;
   name: string;
   /** 0xRRGGBB. */
@@ -38,7 +38,7 @@ export interface PartGeometry {
   positions: Float32Array;
   normals: Float32Array;
   indices: Uint32Array;
-  /** Per-index colour codes, for parts whose subfiles hardcode colours. */
+  /** Per-index color codes, for parts whose subfiles hardcode colors. */
   colorCodes?: Uint16Array;
   bounds: Bounds;
 }

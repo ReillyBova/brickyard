@@ -1,7 +1,7 @@
 /**
  * Identifier minting and validation.
  *
- * LDraw has no concept of a per-part identifier — a reference line carries a colour,
+ * LDraw has no concept of a per-part identifier — a reference line carries a color,
  * a transform, and a filename, and nothing else. A brick's only identity in the file
  * format is its position in a list. So ids are entirely ours, minted when a brick
  * enters the document, whether by placement or by import.

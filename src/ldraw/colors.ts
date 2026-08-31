@@ -1,7 +1,7 @@
 /**
- * LDConfig.ldr parsing: the official LDraw colour palette.
+ * LDConfig.ldr parsing: the official LDraw color palette.
  *
- * One `0 !COLOUR` line per colour, of the form
+ * One `0 !COLOUR` line per color, of the form
  *
  *   0 !COLOUR <name> CODE <n> VALUE #RRGGBB EDGE #RRGGBB [ALPHA <0-255>] [LUMINANCE <n>]
  *                    [CHROME | PEARLESCENT | RUBBER | MATTE_METALLIC | METAL |
@@ -13,9 +13,9 @@
 
 import type { ColorLibrary, LDrawColor, MaterialClass } from './types.ts'
 
-/** Colour 16 inherits from the referencing line. */
+/** Color 16 inherits from the referencing line. */
 export const INHERIT_COLOR_CODE = 16
-/** Colour 24 is the edge colour matching an inherited colour. */
+/** Color 24 is the edge color matching an inherited color. */
 export const EDGE_COLOR_CODE = 24
 
 /**
@@ -55,7 +55,7 @@ function parseNumber(token: string | undefined): number | undefined {
 }
 
 /**
- * Finish keywords beat transparency: a glittered transparent colour is `glitter`, because the
+ * Finish keywords beat transparency: a glittered transparent color is `glitter`, because the
  * finish is what a renderer has to treat specially.
  */
 function materialFor(finish: string | null, alpha: number | undefined): MaterialClass {
@@ -82,7 +82,7 @@ function materialFor(finish: string | null, alpha: number | undefined): Material
 
 interface ParsedLine {
   color: LDrawColor
-  /** Set when `EDGE` named a colour code instead of a hex triplet; resolved in a second pass. */
+  /** Set when `EDGE` named a color code instead of a hex triplet; resolved in a second pass. */
   edgeRef?: number
 }
 

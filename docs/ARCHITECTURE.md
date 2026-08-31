@@ -266,7 +266,7 @@ random transforms including mirrored and non-uniformly scaled ones.
 
 ## Identifiers
 
-LDraw has no per-part identity: a reference line is a colour, a transform, and a filename, and a
+LDraw has no per-part identity: a reference line is a color, a transform, and a filename, and a
 brick's only identity in the file is its position in a list. Ids are therefore ours, minted in
 `src/model/ids.ts` when a brick enters the document.
 
