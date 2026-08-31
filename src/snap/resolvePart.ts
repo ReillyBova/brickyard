@@ -269,6 +269,9 @@ function buildPoint(
       // `seq` is the run of finger widths along the axis; one section per finger keeps
       // the interlocking pattern rather than collapsing it to a total length.
       gender = parseGender(attrs.genderofs);
+      // Hinge fingers carry a group too — `hgBrC` for the 1x2 brick hinge — and it is the
+      // only thing distinguishing one hinge family from another.
+      group = attrs.group;
       const radius = Number(attrs.radius ?? '') || 0;
       const widths = parseNumbers(attrs.seq).filter((w) => Number.isFinite(w));
       sections = (widths.length ? widths : [0]).map((length) => ({
