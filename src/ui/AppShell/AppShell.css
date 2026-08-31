@@ -1,0 +1,132 @@
+/*
+ * Layout glue for the app frame: positions the chest rail and the color palette over
+ * the viewport, per docs/DESIGN.md ("panels are rafts, with a gutter to the window
+ * edge, so the scene reads as continuous underneath"). No new component classes here
+ * — this only arranges the ones in components.css, and every value is a token.
+ *
+ * The chest is a full-height grid column on the left. The color palette is not a grid
+ * participant: it's a smaller card, sized and positioned to occupy the lower-right
+ * quadrant of the viewport (`top: 50%` starts it at the vertical midpoint; the right
+ * and bottom edges keep the standard window-edge gutter).
+ *
+ * The viewport is the priority at small widths: below --by-shell-breakpoint the chest
+ * rail stops taking a grid column and both panels become on-demand overlays, opened
+ * from a compact top bar, so a narrow window never crowds the canvas. The palette keeps
+ * its lower-right anchor even there.
+ *
+ * The bar itself — wordmark plus the theme toggle — is chrome that belongs at every
+ * width, not just the collapsed layout: it's the only place the wordmark and the
+ * light/dark switch live, and both are global controls rather than panel-open state.
+ * Only the Parts/Color segmented switch inside it is narrow-only, since at the wide
+ * layout both rails are already always open and the segment has nothing to toggle.
+ */
+
+.by-shell {
+  position: absolute;
+  inset: 0;
+  z-index: var(--by-z-chrome);
+  display: grid;
+  grid-template-columns: var(--by-panel-w) 1fr;
+  grid-template-rows: auto 1fr;
+  gap: var(--by-space-3);
+  padding: var(--by-space-3);
+  pointer-events: none;
+}
+
+.by-shell__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--by-space-2);
+  grid-column: 1 / -1;
+  height: var(--by-toolbar-h);
+  padding: 0 var(--by-space-3);
+  border-radius: var(--by-radius-pill);
+  background: var(--by-panel);
+  box-shadow: var(--by-shadow-md);
+  pointer-events: auto;
+}
+
+.by-shell__wordmark {
+  font-family: var(--by-font-display);
+  font-weight: var(--by-font-display-weight);
+  font-size: var(--by-text-lg);
+  letter-spacing: var(--by-tracking-display);
+}
+
+/* The panel-open segmented switch has no effect at the wide layout (both rails are
+   always visible there), so it's hidden until the narrow layout gives it a job. */
+.by-shell__panels {
+  display: none;
+  margin-left: auto;
+}
+
+.by-shell__rail {
+  min-height: 0;
+  pointer-events: auto;
+}
+
+.by-shell__rail--chest {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+/* Taken out of grid flow deliberately: it floats over the viewport column rather than
+   claiming one, anchored to the lower-right corner of the whole frame. Unlike the chest
+   rail it isn't stretched top-to-bottom — `.by-palette` (components.css) sets its own
+   fixed size, so this only has to position that box, not size it. */
+.by-shell__rail--color {
+  position: absolute;
+  right: var(--by-space-3);
+  bottom: var(--by-space-3);
+  width: var(--by-panel-w);
+  z-index: var(--by-z-popover);
+}
+
+@media (max-width: 860px) {
+  .by-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .by-shell__panels {
+    display: flex;
+  }
+
+  .by-shell__rail {
+    position: absolute;
+    top: calc(var(--by-toolbar-h) + var(--by-space-3) * 2);
+    bottom: var(--by-space-3);
+    left: var(--by-space-3);
+    right: var(--by-space-3);
+    max-width: 360px;
+    z-index: var(--by-z-popover);
+    box-shadow: var(--by-shadow-lg);
+    transition: transform var(--by-dur-base) var(--by-ease-out), opacity var(--by-dur-base) var(--by-ease-out);
+  }
+
+  .by-shell__rail--chest {
+    grid-column: 1;
+  }
+
+  /* Still the lower-right corner on a narrow window — undoes the generic rail's
+     top-to-bottom, edge-to-edge overlay stretch above, since the palette sizes itself. */
+  .by-shell__rail--color {
+    grid-column: 1;
+    top: auto;
+    right: var(--by-space-3);
+    left: auto;
+    max-width: 360px;
+  }
+
+  .by-shell__rail.is-closed {
+    opacity: 0;
+    transform: translateY(-8px);
+    pointer-events: none;
+    visibility: hidden;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .by-shell__rail {
+    transition: none;
+  }
+}
