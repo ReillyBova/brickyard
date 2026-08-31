@@ -31,3 +31,6 @@ public/baked/
 
 # Agent worktrees
 .claude/worktrees/
+
+# Storybook static build output
+storybook-static/
