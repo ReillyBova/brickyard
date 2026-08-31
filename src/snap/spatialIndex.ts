@@ -27,9 +27,18 @@ export class HashSpatialIndex implements SpatialIndex {
   private readonly cells = new Map<string, IndexedPoint[]>();
   private readonly byBrick = new Map<BrickId, Entry[]>();
   private readonly boundsOf = new Map<BrickId, Bounds>();
+  /**
+   * `part` and `transform` per indexed brick, additive to the `SpatialIndex` contract.
+   * Collision's narrow phase (`src/snap/collision.ts`) needs the placed part and its
+   * world transform to test occupancy masks against — `nearBricks` only returns ids —
+   * so this is exposed via `partAt`, a method outside the frozen interface. See
+   * `collision.ts` for the full reasoning.
+   */
+  private readonly partsOf = new Map<BrickId, { part: PartDef; transform: Mat4 }>();
 
   insert(brick: BrickId, part: PartDef, transform: Mat4): void {
     this.remove(brick);
+    this.partsOf.set(brick, { part, transform });
 
     const entries: Entry[] = [];
     for (const p of part.connections) {
@@ -68,6 +77,12 @@ export class HashSpatialIndex implements SpatialIndex {
     }
     this.byBrick.delete(brick);
     this.boundsOf.delete(brick);
+    this.partsOf.delete(brick);
+  }
+
+  /** The part and world transform last inserted for `brick`, for narrow-phase collision. */
+  partAt(brick: BrickId): { part: PartDef; transform: Mat4 } | undefined {
+    return this.partsOf.get(brick);
   }
 
   near(point: Vec3, radius: number): readonly IndexedPoint[] {

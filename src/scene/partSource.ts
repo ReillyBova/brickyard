@@ -18,6 +18,7 @@ import { LDrawConditionalLineMaterial } from 'three/examples/jsm/materials/LDraw
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 import type { Bounds } from '../types';
+import { boundsFromPositions } from '../ldraw/bounds';
 
 /** Default source: the upstream LDraw parts library mirror, fetched over HTTPS. */
 export const DEFAULT_PARTS_BASE_URL =
@@ -34,20 +35,31 @@ export interface PartGeometrySource {
   load(partId: string): Promise<LoadedPart>;
 }
 
+/**
+ * Real bounds, computed from the merged position attribute via the same pure AABB math
+ * `src/ldraw/bounds.ts` uses for fixture-tested parts — one implementation for both the
+ * runtime (loaded through three.js) and offline (parsed) paths. Only a truly empty
+ * geometry (no position attribute at all) falls back to a zero box.
+ */
 function boundsOf(geometry: THREE.BufferGeometry): Bounds {
-  geometry.computeBoundingBox();
-  const box = geometry.boundingBox;
-  if (box === null) {
-    return { min: [0, 0, 0], max: [0, 0, 0] };
-  }
-  return {
-    min: [box.min.x, box.min.y, box.min.z],
-    max: [box.max.x, box.max.y, box.max.z],
-  };
+  const position = geometry.getAttribute('position');
+  if (position === undefined) return { min: [0, 0, 0], max: [0, 0, 0] };
+  return boundsFromPositions(position.array);
 }
 
-/** Strips colour and pulls every `Mesh` under `group` into one merged geometry. */
+/**
+ * Strips colour and pulls every `Mesh` under `group` into one merged geometry.
+ *
+ * `LDrawLoader` bakes most transforms directly into vertex positions as it flattens
+ * subfiles, but parts loaded as a separate nested group (kept apart so per-subfile
+ * materials can differ) carry their placement as `position`/`quaternion`/`scale`
+ * instead — which only lands in `matrixWorld` after `updateMatrixWorld` runs. Nothing
+ * renders `group` before we read it here, so without this call `matrixWorld` is still
+ * the untouched identity and any such subobject's geometry is merged at the origin
+ * instead of its real offset, corrupting both the merged mesh and its bounds.
+ */
 function mergeMeshGeometry(group: THREE.Object3D): THREE.BufferGeometry {
+  group.updateMatrixWorld(true);
   const geometries: THREE.BufferGeometry[] = [];
   group.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return;
