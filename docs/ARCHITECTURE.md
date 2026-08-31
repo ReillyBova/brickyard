@@ -596,9 +596,27 @@ interface SpatialIndex {
 }
 ```
 
-The interaction is a ghost piece following the cursor that snaps to the exact mated transform once a
-compatible pair is within threshold, with the mate count shown as placement confidence. Candidates
-are ranked, cycled with <kbd>Tab</kbd>, and rolled with <kbd>R</kbd>.
+**The cursor expresses intent; mates are consequence.** The raycast supplies three filters at once —
+which brick was hit, where on it, and which face via the surface normal — and together they narrow
+the candidates from the whole spatial index to a handful. Hovering the side of a brick offers its
+sideways connectors rather than the studs on top, which is what makes studs-not-on-top placement feel
+deliberate.
+
+Ranking is therefore by proximity to the cursor, not by strength of connection. Scoring on mate count
+would slide a brick toward wherever the most studs engage, away from where the user pointed.
+`findMates` runs *after* the transform is chosen, to discover what else engaged — drop a plate across
+two bricks and you aimed at one stud; the second brick's engagement is something you get, not
+something you chose.
+
+The residual ambiguity is which of the *moving* part's points mates to the target: stud 1 and stud 8
+of a 2×4 land the brick 60 LDU apart on the same target stud. Continuity resolves it, keeping the
+piece near where it already sits rather than teleporting.
+
+Mate count still earns its place as placement-confidence feedback, as a tiebreaker when cursor
+distance is genuinely ambiguous, and as the mate list recorded on the graph edge.
+
+When `hit` is absent the cursor is over empty space or the baseplate, and placement falls back to a
+ground-plane intersection. Candidates are cycled with <kbd>Tab</kbd> and rolled with <kbd>R</kbd>.
 
 ## Worker protocol
 

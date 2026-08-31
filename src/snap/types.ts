@@ -70,11 +70,24 @@ export interface PointRef {
   point: string;
 }
 
+/** What the cursor is over, produced by the scene raycast against rendered meshes. */
+export interface RaycastHit {
+  brick: BrickId;
+  /** World-space intersection, LDU. */
+  point: Vec3;
+  /** Surface normal at the intersection, which face of the brick was hit. */
+  normal: Vec3;
+}
+
 export interface SnapCandidate {
+  /** The primary pair: the connection the user is expressing through the cursor. */
   movingPoint: string;
   target: PointRef;
   transform: Mat4;
-  /** From findMates. Cardinality drives the score. */
+  /**
+   * Everything else that coincides once `transform` is applied, discovered *after*
+   * the placement is chosen rather than used to choose it. Consequence, not intent.
+   */
   mates: readonly Mate[];
   score: number;
 }
@@ -84,6 +97,20 @@ export interface SnapQuery {
   /** World space, LDU. */
   rayOrigin: Vec3;
   rayDirection: Vec3;
+  /**
+   * What the cursor is over. Present means cursor-driven placement: the hit brick,
+   * point and normal narrow the candidates to a handful. Absent means the cursor is
+   * over empty space or the baseplate, and placement falls back to a ground-plane
+   * intersection.
+   */
+  hit?: RaycastHit;
+  /**
+   * Where the ghost currently sits. Which of the moving part's points mates to the
+   * target is genuinely ambiguous — stud 1 and stud 8 of a 2x4 differ by 60 LDU on
+   * the same target — and continuity is what resolves it, so the piece stays near
+   * where it already is instead of jumping.
+   */
+  previous?: Mat4;
   /** Quarter turns about the connection axis. */
   roll: number;
 }
