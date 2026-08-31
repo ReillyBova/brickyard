@@ -12,6 +12,7 @@
     "test:watch": "vitest",
     "sync-mirror": "node tools/sync-mirror.ts",
     "prebake": "node tools/prebake.ts",
+    "build-chest-catalog": "node tools/build-chest-catalog.ts",
     "test:perf": "vitest run --config vitest.perf.config.ts",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build"
