@@ -73,6 +73,8 @@ function materialFor(finish: string | null, alpha: number | undefined): Material
       return 'glitter'
     case 'SPECKLE':
       return 'speckle'
+    case 'FABRIC':
+      return 'fabric'
     default:
       return alpha !== undefined && alpha < 255 ? 'transparent' : 'solid'
   }

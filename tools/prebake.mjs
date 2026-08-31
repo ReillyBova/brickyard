@@ -212,14 +212,14 @@ async function bake(options) {
    */
   const manifest = {
     libraryVersion: version ?? partsMeta?.etag ?? 'unknown',
-    shadowCommit: shadowMeta?.etag?.replace(/^W\/|"/g, '') ?? 'unknown',
+    shadowVersion: shadowMeta?.etag?.replace(/^W\/|"/g, '') ?? 'unknown',
     outputs: writer.outputs,
   }
   await writer.writeJson('manifest.json', manifest)
 
   console.log('')
   console.log(`library version   ${manifest.libraryVersion}`)
-  console.log(`shadow revision   ${manifest.shadowCommit}`)
+  console.log(`shadow revision   ${manifest.shadowVersion}`)
   console.log(`colours           ${colors.size}`)
   console.log(`catalog entries   ${catalog.length}`)
   console.log(
