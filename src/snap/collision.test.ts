@@ -320,6 +320,36 @@ describe('connectorAt', () => {
     const connections = await resolvePart('3001', fixtureReader);
     expect(connectorAt(connections, [1000, 1000, 1000])).toBeUndefined();
   });
+
+  it('pins the capsule to local -Y, not +Y — a sign flip must fail this', async () => {
+    // CONNECTOR_EPS pads both ends of the capsule's interval, so near t=0 — the mating
+    // interface, where a correctly-stacked pair's real contact sits — a capsule pointing
+    // either direction covers the same shared boundary region. Every other test in this
+    // file probes near that interface (self-mates, deep overlaps close to the connector),
+    // which is exactly why a -Y/+Y sign flip previously passed the whole suite unnoticed.
+    // This test probes deep along the *stepped* pin hole on 3700 (total length 20, far
+    // longer than any stud's 4 LDU), well past the padded region on either end, so the
+    // two orientations disagree.
+    const connections = await resolvePart('3700', fixtureReader);
+    const hole = connections.find((c) => c.source.includes('connhole'));
+    expect(hole).toBeDefined();
+    const h = hole as ConnectionPoint;
+    const totalLength = h.sections.reduce((s, sec) => s + sec.length, 0);
+    expect(totalLength).toBe(20);
+    const axis: Vec3 = [h.orientation[3], h.orientation[4], h.orientation[5]];
+    const along = (t: number): Vec3 => [
+      h.position[0] + axis[0] * t,
+      h.position[1] + axis[1] * t,
+      h.position[2] + axis[2] * t,
+    ];
+
+    // 15 LDU back along -axis: inside the real (-Y) capsule ([-24, 4]), well outside
+    // where a flipped (+Y) capsule would reach ([-4, 24] cannot see -15).
+    expect(connectorAt(connections, along(-15))).toBe(h);
+    // 15 LDU forward along +axis: outside the real capsule, but exactly where a flipped
+    // capsule would wrongly classify it as connector volume.
+    expect(connectorAt(connections, along(15))).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -328,21 +358,32 @@ describe('connectorAt', () => {
 // ---------------------------------------------------------------------------
 
 describe('isExemptOverlap', () => {
-  it('excuses a compatible stud/socket pair with matching world axes', async () => {
+  it('excuses a compatible stud/socket pair whose own centers coincide, with matching world axes', async () => {
     const p = await part('3700');
-    const stud = findByGender(p.connections, 'M', 12); // p/stud2.dat, radius 6
-    const socket = p.connections.find((c) => c.source.includes('3700.dat') && c.gender === 'F');
+    const stud = findByGender(p.connections, 'M', 12); // p/stud2.dat, radius 6, local [-10 or 10, 0, 0]
+    // The socket directly above this particular stud — 3700 has one at each end, and
+    // only the one sharing its x actually lands on this stud once stacked.
+    const socket = p.connections.find(
+      (c) => c.source.includes('3700.dat') && c.gender === 'F' && c.position[0] === stud.position[0],
+    );
     expect(socket).toBeDefined();
     const s = socket as ConnectionPoint;
     expect(isCompatible(stud, s)).toBe(true);
 
-    expect(isExemptOverlap(p, IDENTITY, stud.position, p, IDENTITY, s.position)).toBe(true);
+    // A real stack: the base part at IDENTITY, the one on top offset by one brick
+    // height along -Y (up, since +Y is down). The top's underside socket (local y=24)
+    // then lands exactly on the base's top stud (local y=0) in world space — the same
+    // offset the table-driven stacking tests above use.
+    const onTop = fromTranslation([0, -24, 0]);
+    expect(isExemptOverlap(p, IDENTITY, stud.position, p, onTop, s.position)).toBe(true);
   });
 
-  it('does not excuse a compatible profile whose axes disagree', async () => {
+  it('does not excuse a compatible, coincident profile whose axes disagree', async () => {
     // The Technic pin hole (axis local -Z) and a stud (axis local -Y) on the very same
     // 3700 share a radius bucket and both are cyl/round, so `isCompatible` alone would
-    // wave this through. The axis check is what a stud alone never has to prove.
+    // wave this through, and placing them so their own centers coincide clears the
+    // position check too. Only the axis check catches this — a path a stud alone,
+    // whose axis is always local Y, never has to prove.
     const p = await part('3700');
     const hole = p.connections.find((c) => c.source.includes('connhole'));
     const stud = findByGender(p.connections, 'M', 12);
@@ -350,19 +391,34 @@ describe('isExemptOverlap', () => {
     const h = hole as ConnectionPoint;
     expect(isCompatible(h, stud)).toBe(true); // profiles match...
 
-    // ...but placed at the same identity transform, their world axes are perpendicular.
-    expect(isExemptOverlap(p, IDENTITY, h.position, p, IDENTITY, stud.position)).toBe(false);
+    // ...and translating the stud's part so the stud's own center lands exactly on the
+    // hole's own center clears the coincidence check too...
+    const toHole = fromTranslation([
+      h.position[0] - stud.position[0],
+      h.position[1] - stud.position[1],
+      h.position[2] - stud.position[2],
+    ]);
+    // ...but translation alone cannot rotate the stud's local-Y axis onto the hole's
+    // local-Z one, so they remain perpendicular in world space.
+    expect(isExemptOverlap(p, IDENTITY, h.position, p, toHole, stud.position)).toBe(false);
   });
 
-  it('does not excuse two incompatible connectors even when both are connector volume', async () => {
+  it('does not excuse two coincident, incompatible connectors', async () => {
     // 2335's two clip points are both female — clips grip a male bar, they never mate
-    // each other — so this must not be excused regardless of geometry.
+    // each other — so this must not be excused regardless of geometry. Translating one
+    // clip's part so its own center lands on the other's clears the position check,
+    // isolating the incompatibility as the reason this is rejected.
     const p = await part('2335');
     const clips = p.connections.filter((c) => c.kind === 'clip');
     expect(clips.length).toBeGreaterThanOrEqual(2);
     const [a, b] = clips;
     expect(isCompatible(a, b)).toBe(false);
-    expect(isExemptOverlap(p, IDENTITY, a.position, p, IDENTITY, b.position)).toBe(false);
+    const toA = fromTranslation([
+      a.position[0] - b.position[0],
+      a.position[1] - b.position[1],
+      a.position[2] - b.position[2],
+    ]);
+    expect(isExemptOverlap(p, IDENTITY, a.position, p, toA, b.position)).toBe(false);
   });
 
   it('does not excuse an overlap that is not connector volume on both sides', async () => {
@@ -372,6 +428,29 @@ describe('isExemptOverlap', () => {
     const bodyPoint: Vec3 = [p.bounds.max[0] - 1, p.bounds.min[1] + 1, p.bounds.max[2] - 1];
     expect(connectorAt(p.connections, bodyPoint)).toBeUndefined();
     expect(isExemptOverlap(p, IDENTITY, stud.position, p, IDENTITY, bodyPoint)).toBe(false);
+  });
+
+  it('does not excuse two compatible, co-directional connectors that are not the same joint', async () => {
+    // The reviewed hole: a compatible, co-directional, but unrelated connector pair
+    // pulled 8 LDU apart — far outside MATE_TOLERANCE (0.35 LDU) — used to be waved
+    // through because nothing checked the two connectors' own centers coincided.
+    const p = await part('3001');
+    const stud = findByGender(p.connections, 'M'); // radius 6, axis [0,1,0]
+    const socket = p.connections.find((c) => c.gender === 'F');
+    expect(socket).toBeDefined();
+    const s = socket as ConnectionPoint;
+    expect(isCompatible(stud, s)).toBe(true);
+
+    // Offset the socket's part sideways by 8 LDU from where it would need to be to
+    // actually coincide with the stud — well past both MATE_TOLERANCE and the
+    // connector's own capsule radius.
+    const wouldCoincide = fromTranslation([
+      stud.position[0] - s.position[0],
+      stud.position[1] - s.position[1],
+      stud.position[2] - s.position[2],
+    ]);
+    const eightOff = multiply(wouldCoincide, fromTranslation([8, 0, 0]));
+    expect(isExemptOverlap(p, IDENTITY, stud.position, p, eightOff, s.position)).toBe(false);
   });
 });
 

@@ -23,7 +23,7 @@
 import { invert, transformPoint } from '../math';
 import type { BrickId, Bounds, Mat4, Vec3 } from '../types';
 import { isCompatible } from './compat';
-import { worldPoint } from './mating';
+import { MATE_TOLERANCE, worldPoint } from './mating';
 import { worldBounds } from './spatialIndex';
 import type { Collides, ConnectionPoint, OccupancyMask, PartDef, SpatialIndex } from './types';
 import type { Triangle } from '../ldraw/bounds';
@@ -239,6 +239,8 @@ export function connectorAt(
 }
 
 const dot = (a: Vec3, b: Vec3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const dist2 = (a: Vec3, b: Vec3): number =>
+  (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2;
 
 /**
  * Axes must agree within about two degrees, mirroring `mating.ts`'s `AXIS_TOLERANCE`.
@@ -248,12 +250,30 @@ const dot = (a: Vec3, b: Vec3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2
 const EXEMPT_AXIS_TOLERANCE = 0.999;
 
 /**
+ * How close two connectors' own centers must land, in world space, to count as the
+ * same seated joint rather than two connectors that merely happen to be nearby,
+ * compatible, and pointing the same way. Reuses `mating.ts`'s `MATE_TOLERANCE`
+ * exactly (0.35 LDU) rather than inventing a second number: an exemption is supposed
+ * to represent an actual mate, so it should require what a mate requires. No extra
+ * slack is added for voxel quantisation here — that slack already lives in
+ * `CONNECTOR_EPS`, which widens which voxels classify as connector volume in the first
+ * place; padding this distance too would let two connectors up to a full cell apart
+ * both claim to be "the" mate, which is the exact hole a review of this file found:
+ * two compatible, co-directional connectors 8 LDU apart — far outside any stud's own
+ * capsule radius, let alone this tolerance — were being waved through because nothing
+ * checked they were the same joint.
+ */
+const EXEMPT_POSITION_TOLERANCE = MATE_TOLERANCE;
+
+/**
  * True only when an overlap between `localA` (in `partA`, placed at `transformA`) and
  * `localB` (in `partB`, placed at `transformB`) is exactly the shape of a mated
  * stud-in-socket: connector volume on both sides, whose connectors are `isCompatible`,
- * whose world-space axes point the same way. Anything else — an unmated stud pressed
- * into a wall, two studs crossing at an angle, a connector overlapping plain body
- * material — is a real collision and this returns false.
+ * whose own centers coincide in world space (the same joint, not merely two nearby
+ * compatible connectors), and whose world-space axes point the same way. Anything else
+ * — an unmated stud pressed into a wall, two studs crossing at an angle, a connector
+ * overlapping plain body material, two unrelated compatible connectors that happen to
+ * sit near each other — is a real collision and this returns false.
  */
 export function isExemptOverlap(
   partA: PartDef,
@@ -268,9 +288,10 @@ export function isExemptOverlap(
   const b = connectorAt(partB.connections, localB);
   if (!b) return false;
   if (!isCompatible(a, b)) return false;
-  const axisA = worldPoint(a, transformA).axis;
-  const axisB = worldPoint(b, transformB).axis;
-  return dot(axisA, axisB) >= EXEMPT_AXIS_TOLERANCE;
+  const worldA = worldPoint(a, transformA);
+  const worldB = worldPoint(b, transformB);
+  if (dist2(worldA.position, worldB.position) > EXEMPT_POSITION_TOLERANCE ** 2) return false;
+  return dot(worldA.axis, worldB.axis) >= EXEMPT_AXIS_TOLERANCE;
 }
 
 // ---------------------------------------------------------------------------
