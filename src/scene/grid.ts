@@ -56,6 +56,15 @@ const FRAGMENT_SHADER = /* glsl */ `
     if (alpha <= 0.001) discard;
 
     gl_FragColor = vec4(uColor, alpha);
+    // uColor came from readColorToken, which builds a THREE.Color from the CSS hex and
+    // so is already converted into the renderer's linear working space. A raw
+    // ShaderMaterial writes gl_FragColor straight to the framebuffer with no output
+    // conversion of its own (built-in materials get one via this same chunk), so without
+    // it the linear value is displayed as if it were already sRGB-encoded: a second,
+    // uninvited gamma darkening on top of the first. That crushes a mid-value token like
+    // dark theme's grid colour to nearly nothing against a dark ground while a lighter
+    // token merely dims — which is why the dots vanished in dark mode specifically.
+    #include <colorspace_fragment>
   }
 `;
 
@@ -99,10 +108,10 @@ export function createBaseplateGrid(studsPerSide = 48): BaseplateGrid {
   const positions = buildDotPositions(studsPerSide);
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  // Never included in bounds math: no bounding volume to compute, and nothing calls
-  // setFromObject on this object or on the scene root that contains it.
-  geometry.computeBoundingBox = () => {};
-  geometry.computeBoundingSphere = () => {};
+  // Bounding volumes are left to three's normal computation (the renderer's transparent
+  // sort reads geometry.boundingSphere internally and crashes if it's never set). Bounds
+  // math elsewhere in the app never sees this object: `SceneRenderer.frameAll` only calls
+  // `Box3.setFromObject` on the brick batch group, never on the scene root.
 
   const half = (studsPerSide * STUD_PITCH) / 2;
   const dpr = typeof window !== 'undefined' ? Math.min(window.devicePixelRatio, 2) : 1;
