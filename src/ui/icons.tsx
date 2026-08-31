@@ -31,6 +31,17 @@ export function SearchIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+/** The chest's category filter. */
+export function FilterIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon data-lucide="list-filter" {...props}>
+      <path d="M3 6h18" />
+      <path d="M7 12h10" />
+      <path d="M10 18h4" />
+    </Icon>
+  );
+}
+
 /** Disclosure chevron for the colour picker's finishes accordion; rotates via CSS. */
 export function ChevronDownIcon(props: SVGProps<SVGSVGElement>) {
   return (

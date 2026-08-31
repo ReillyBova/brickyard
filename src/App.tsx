@@ -3,11 +3,12 @@ import { useMemo, useState } from 'react';
 import { AppRouter } from './routes/AppRouter';
 import { RouteProvider } from './routes/router';
 import { BuilderCanvas } from './scene/interaction/BuilderCanvas.tsx';
+import { RuntimeThumbnailRenderer } from './scene/thumbnail.ts';
 import { AppShell } from './ui/AppShell/AppShell';
 import { ColorPicker } from './ui/ColorPicker/ColorPicker';
 import { LDRAW_PALETTE } from './ui/ColorPicker/palette';
 import { PartsChest } from './ui/PartsChest/PartsChest';
-import { MOCK_PARTS } from './ui/PartsChest/mockParts';
+import { PART_CATALOG } from './ui/PartsChest/catalog';
 
 /** LDraw 4 — classic brick red — so the chest always has a real active color to preview. */
 const DEFAULT_COLOR_CODE = 4;
@@ -25,6 +26,10 @@ function SandboxEditor() {
   const [selectedPartId, setSelectedPartId] = useState<string | undefined>(undefined);
   const [selectedColorCode, setSelectedColorCode] = useState<number>(DEFAULT_COLOR_CODE);
 
+  // One offscreen renderer for the whole session — see src/scene/thumbnail.ts. Built once
+  // via useMemo rather than per render, since it owns a WebGL context.
+  const thumbnailSource = useMemo(() => new RuntimeThumbnailRenderer(), []);
+
   const activeColor = useMemo(
     () => LDRAW_PALETTE.find((color) => color.code === selectedColorCode) ?? LDRAW_PALETTE[0],
     [selectedColorCode],
@@ -35,10 +40,11 @@ function SandboxEditor() {
       viewport={<BuilderCanvas />}
       chestPanel={
         <PartsChest
-          parts={MOCK_PARTS}
+          parts={PART_CATALOG}
           selectedId={selectedPartId}
           onSelect={setSelectedPartId}
           activeColorHex={activeColor.hex}
+          thumbnailSource={thumbnailSource}
         />
       }
       colorPanel={

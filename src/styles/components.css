@@ -136,6 +136,46 @@ a:hover { color: var(--by-accent-hover); }
   background: var(--by-panel-sunken);
 }
 
+/* Menu — an icon-triggered popover list. New variant: a category filter has more than
+   the four options `.by-seg` is for, and a bare `<select>` carries browser chrome the
+   rest of the system doesn't. `.by-icon-btn` opens it; the panel itself borrows the
+   floating-surface treatment `.by-tooltip` and `.by-dialog` already use. */
+.by-menu { position: relative; display: inline-flex; }
+.by-menu__panel {
+  position: absolute;
+  top: calc(100% + var(--by-space-1));
+  left: 0;
+  z-index: 20;
+  min-width: 176px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: var(--by-space-1);
+  border-radius: var(--by-radius-md);
+  background: var(--by-popover);
+  box-shadow: var(--by-shadow-md);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.by-menu__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--by-space-2);
+  width: 100%;
+  padding: var(--by-space-2) var(--by-space-3);
+  border: 0;
+  border-radius: var(--by-radius-sm);
+  background: transparent;
+  color: var(--by-text);
+  font: inherit;
+  font-size: var(--by-text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.by-menu__item:hover { background: var(--by-hover-wash); }
+.by-menu__item.is-active { background: var(--by-accent-wash); color: var(--by-accent-text); }
+
 /* ── Fields ─────────────────────────────────────────────────────────────── */
 .by-field { display: flex; flex-direction: column; gap: 5px; }
 .by-field > label { font-size: var(--by-text-xs); color: var(--by-text-muted); }
@@ -359,16 +399,31 @@ a:hover { color: var(--by-accent-hover); }
   background: var(--by-panel);
   overflow: hidden;
 }
+/* The part's real name — display text, so the UI face, not mono. Clamped to two lines:
+   at tile width a name like "Slope Brick 45 2 x 1 Inverted without Inner Stopper Ring"
+   would otherwise blow out every tile in its row. */
+.by-tile__title {
+  font-size: var(--by-text-2xs);
+  line-height: 1.25;
+  color: var(--by-text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+/* The part number — secondary, monospaced per docs/DESIGN.md (ids are data, not prose),
+   kept visible below the name for search and cross-referencing. */
 .by-tile__label {
   font-family: var(--by-font-mono);
   font-size: var(--by-text-2xs);
-  color: var(--by-text-muted);
+  color: var(--by-text-faint);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .by-tile:hover { background: var(--by-hover-wash); }
 .by-tile.is-selected { background: var(--by-accent-wash); }
+.by-tile.is-selected .by-tile__title,
 .by-tile.is-selected .by-tile__label { color: var(--by-accent-text); }
 .by-tile.is-selected .by-tile__thumb { box-shadow: 0 0 0 2px var(--by-accent); }
 
