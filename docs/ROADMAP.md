@@ -83,6 +83,29 @@ finish classes — transparent, chrome, pearlescent, metallic, glitter, speckle,
 map onto real physical parameters rather than needing invention. Getting those right is what makes a
 render read as *bricks* rather than as coloured geometry.
 
+### Progressive loading, in build order
+
+Loading a large model is slow — Galaxy Explorer takes ~16s, and a 1,845-brick model is worse. The
+obvious fix is to make it faster. The better one is to make the wait part of the product.
+
+Published models retain `0 STEP` metadata and `parseMpd` already keeps it, so we know the order the
+set was *meant* to be built in. Loading in that order rather than file order means the model
+assembles the way its instructions do: baseplate first, then the structure, then the details.
+
+The experience runs in two stages. A BrickYard-themed animation covers the first moments, when
+nothing has arrived yet. Then, as parts resolve, pieces fly in from the edge of the screen and settle
+into place — using `--by-ease-snap`, so each one lands with the same overshoot a placement has, and
+the snap sound with it.
+
+That turns the weakest part of the experience into the most characteristic one. It also costs almost
+nothing new: the ordering is in the file, the motion language is specified, and the loader already
+reports `0..1` progress. What it needs is for import to yield bricks incrementally rather than
+returning a finished document, which is a change to the import pipeline's shape rather than its
+substance.
+
+Worth doing before the load path is optimised, not after — if parts stream in beautifully, less of
+the optimisation is urgent.
+
 ### Instruction playback
 
 Published models retain `0 STEP` metadata, so build order is recoverable from the file — the parser
@@ -113,6 +136,10 @@ instructions that group work sensibly rather than one brick at a time.
 
 Named so they are decisions rather than surprises.
 
+- **`buildOccupancy` has a performance cliff.** Measured at **187.7 seconds** for one high-poly curved
+  part, which made a 384-second model import before the loader was changed to skip occupancy it does
+  not use. Placement builds occupancy for the held piece, so the same part in the chest would freeze
+  an interactive drag. The current chest is low-poly, which is the only reason this has not been hit.
 - **The prebake pipeline is scaffolded, not built.** `connections.bin`, `geometry.bin` and the hosted
   per-part tier are specified in `docs/PREBAKE.md` and unimplemented. Thumbnails currently cost ~330 ms
   per part cold, ~6.9 s for a 31-part chest — that number is the argument.
