@@ -10,6 +10,8 @@
 
 import * as THREE from 'three';
 
+import { readColorToken, watchTheme } from './theme.ts';
+
 import type { BrickId, Mat4, Vec3 } from '../types';
 import type { BrickInstance } from '../model/types';
 import type { RaycastHit } from '../snap/types';
@@ -44,6 +46,7 @@ export interface SceneRendererOptions {
 export class SceneRenderer {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
+  private stopThemeWatch: (() => void) | null = null;
   /** Everything LDU-space lives under here. The single coordinate flip. */
   private readonly root = new THREE.Group();
   private readonly sceneCamera: SceneCamera;
@@ -71,6 +74,15 @@ export class SceneRenderer {
   constructor(canvas: HTMLCanvasElement, options: SceneRendererOptions = {}) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+    // The canvas is opaque, so it hides whatever the CSS paints behind it. Take the
+    // ground colour from the same token the chrome uses and follow the theme, or the
+    // viewport stays dark while everything around it turns light.
+    const paintGround = (): void => {
+      this.scene.background = readColorToken('--by-canvas', '#1b1915');
+    };
+    paintGround();
+    this.stopThemeWatch = watchTheme(paintGround);
 
     this.root.rotation.x = ROOT_ROTATION_X;
     this.root.add(this.batches.root);
@@ -249,6 +261,8 @@ export class SceneRenderer {
   }
 
   dispose(): void {
+    this.stopThemeWatch?.();
+    this.stopThemeWatch = null;
     this.stop();
     this.batches.dispose();
     this.ghost.dispose();

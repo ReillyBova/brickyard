@@ -25,6 +25,7 @@ export function BuilderCanvas(): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [status, setStatus] = useState('resolving part…');
   const [count, setCount] = useState(0);
+  const [blocked, setBlocked] = useState(false);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -42,19 +43,20 @@ export function BuilderCanvas(): React.JSX.Element {
       const part = await catalog(SEED_PART);
       if (disposed) return;
 
-      // One brick to build against. Everything after this is the user's.
-      const seed = {
-        id: mintBrickId(),
-        partId: SEED_PART,
-        colorCode: SEED_COLOR,
-        transform: translation(0, -BRICK_HEIGHT, 0),
-        part,
-      };
-      await renderer.addBrick(seed);
-      placement.add(seed);
+      // A brick to build on, and an obstacle hanging where the next brick would go.
+      // The gap is deliberately less than a brick tall — an exactly-one-brick gap fits
+      // perfectly and is correctly not a collision, which makes it useless as a test.
+      const seeds = [
+        { id: mintBrickId(), partId: SEED_PART, colorCode: SEED_COLOR, transform: translation(0, -BRICK_HEIGHT, 0), part },
+        { id: mintBrickId(), partId: SEED_PART, colorCode: 14, transform: translation(0, -BRICK_HEIGHT - 16, 0), part },
+      ];
+      for (const seed of seeds) {
+        await renderer.addBrick(seed);
+        placement.add(seed);
+      }
       renderer.frameAll();
       placement.hold(part, 1);
-      setCount(1);
+      setCount(seeds.length);
       setStatus(`${part.connections.length} connection points · click to place`);
     };
 
@@ -75,6 +77,7 @@ export function BuilderCanvas(): React.JSX.Element {
       }
       lastPointer = ndc(canvas, event);
       placement.move(...lastPointer);
+      setBlocked(placement.current.transform !== null && !placement.current.valid);
     };
     const onUp = (event: PointerEvent): void => {
       if (dragging) return;
@@ -129,6 +132,7 @@ export function BuilderCanvas(): React.JSX.Element {
         <span>
           {count} {count === 1 ? 'brick' : 'bricks'}
         </span>
+        <span>{blocked ? 'Blocked — that space is taken' : 'Ready'}</span>
         <span>{status}</span>
         <span>
           <kbd className="by-kbd">R</kbd> rotate · <kbd className="by-kbd">]</kbd> next fit
