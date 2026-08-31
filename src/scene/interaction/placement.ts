@@ -12,7 +12,8 @@
 
 import { IDENTITY } from '../../math';
 import type { BrickId, Mat4, Vec3 } from '../../types';
-import { collides } from '../../snap/collision';
+import { boundsFromTriangles, partTriangles } from '../../ldraw/bounds';
+import { buildOccupancy, collides } from '../../snap/collision';
 import { resolvePart } from '../../snap/resolvePart';
 import { groundPlacement, resolveSnap } from '../../snap/resolve';
 import { HashSpatialIndex } from '../../snap/spatialIndex';
@@ -53,16 +54,24 @@ export function createPartCatalog(): (partId: string) => Promise<PartDef> {
   return (partId: string): Promise<PartDef> => {
     const cached = parts.get(partId);
     if (cached) return cached;
-    const pending = resolvePart(partId, read).then((connections) => ({
-      id: partId,
-      title: partId,
-      connections,
-      // Bounds and occupancy come from geometry, which the bake will supply. Nothing on
-      // the placement path reads them yet, and a wrong value would be worse than an
-      // obviously-absent one.
-      bounds: { min: [0, 0, 0] as Vec3, max: [0, 0, 0] as Vec3 },
-      occupancy: { dims: [0, 0, 0] as const, bits: new Uint8Array(0) },
-    }));
+    // Connections and geometry are resolved from the same files, so they are fetched
+    // together. Collision needs real bounds and a real occupancy mask: given a zero box
+    // and an empty mask it finds no occupied voxels and reports no collision, ever —
+    // which looks exactly like working collision detection until you try to overlap
+    // something.
+    const pending = Promise.all([
+      resolvePart(partId, read),
+      partTriangles(partId, read),
+    ]).then(([connections, triangles]) => {
+      const bounds = boundsFromTriangles(triangles);
+      return {
+        id: partId,
+        title: partId,
+        connections,
+        bounds,
+        occupancy: buildOccupancy(triangles, bounds, connections),
+      };
+    });
     parts.set(partId, pending);
     return pending;
   };

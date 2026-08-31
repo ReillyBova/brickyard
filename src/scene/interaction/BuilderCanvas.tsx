@@ -43,11 +43,12 @@ export function BuilderCanvas(): React.JSX.Element {
       const part = await catalog(SEED_PART);
       if (disposed) return;
 
-      // Two bricks with one brick-height of clear air between them, so a placement
-      // that would intersect the upper brick is easy to aim at deliberately.
+      // A brick to build on, and an obstacle hanging where the next brick would go.
+      // The gap is deliberately less than a brick tall — an exactly-one-brick gap fits
+      // perfectly and is correctly not a collision, which makes it useless as a test.
       const seeds = [
         { id: mintBrickId(), partId: SEED_PART, colorCode: SEED_COLOR, transform: translation(0, -BRICK_HEIGHT, 0), part },
-        { id: mintBrickId(), partId: SEED_PART, colorCode: 14, transform: translation(0, -BRICK_HEIGHT * 3, 0), part },
+        { id: mintBrickId(), partId: SEED_PART, colorCode: 14, transform: translation(0, -BRICK_HEIGHT - 16, 0), part },
       ];
       for (const seed of seeds) {
         await renderer.addBrick(seed);

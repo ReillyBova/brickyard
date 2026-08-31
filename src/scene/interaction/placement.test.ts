@@ -8,8 +8,10 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { IDENTITY, positionOf } from '../../math';
+import { IDENTITY, fromTranslation, positionOf } from '../../math';
+import { boundsFromTriangles, partTriangles } from '../../ldraw/bounds';
 import { fixtureReader } from '../../snap/__fixtures__/reader';
+import { buildOccupancy } from '../../snap/collision';
 import { unpackKey } from '../../snap/compat';
 import { worldPoint } from '../../snap/mating';
 import { resolvePart } from '../../snap/resolvePart';
@@ -20,12 +22,21 @@ import { PlacementController, type PlacementScene } from './placement';
 const BRICK_HEIGHT = 24;
 
 async function brick2x4(): Promise<PartDef> {
+  // Real bounds and a real occupancy mask. A stub mask makes collision silently
+  // unreachable: `collides` finds no occupied voxels and reports no collision, ever,
+  // which is indistinguishable from working collision detection until you overlap
+  // something.
+  const [connections, triangles] = await Promise.all([
+    resolvePart('3001', fixtureReader),
+    partTriangles('3001', fixtureReader),
+  ]);
+  const bounds = boundsFromTriangles(triangles);
   return {
     id: '3001',
     title: 'Brick  2 x  4',
-    connections: await resolvePart('3001', fixtureReader),
-    bounds: { min: [-40, -4, -20], max: [40, 24, 20] },
-    occupancy: { dims: [1, 1, 1], bits: new Uint8Array(1) },
+    connections,
+    bounds,
+    occupancy: buildOccupancy(triangles, bounds, connections),
   };
 }
 
@@ -216,5 +227,72 @@ describe('continuity', () => {
     far.move(0, 0);
     expect(far.current.candidates[0].target.point).toBe(near.target.point);
     expect(far.current.candidates[0].transform).toEqual(near.transform);
+  });
+});
+
+describe('collision', () => {
+  const BRICK = 24;
+
+  it('refuses a placement that would intersect another brick', async () => {
+    // A snapped placement is a valid *connection* by construction, so it can only
+    // collide with some third brick occupying the space it lands in. That is the case
+    // a two-brick scene cannot produce, and the reason this needs an explicit setup.
+    const part = await brick2x4();
+    const studPos = await aStudOn(part, IDENTITY);
+    const scene = stubScene({ brick: 'seed' as BrickId, point: studPos, normal: [0, -1, 0] });
+
+    const c = new PlacementController(scene);
+    c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+    // Squatting exactly where a brick stacked on the seed would land.
+    c.add({
+      id: 'squatter' as BrickId,
+      partId: '3001',
+      colorCode: 14,
+      transform: fromTranslation([0, -BRICK, 0]),
+      part,
+    });
+    c.hold(part);
+    c.move(0, 0);
+
+    expect(c.current.transform).not.toBeNull();
+    expect(c.current.valid).toBe(false);
+    expect(c.commit('blocked' as BrickId)).toBeNull();
+    expect(c.placed).toHaveLength(2); // nothing added
+  });
+
+  it('allows the same placement once the obstruction is gone', async () => {
+    const part = await brick2x4();
+    const studPos = await aStudOn(part, IDENTITY);
+    const scene = stubScene({ brick: 'seed' as BrickId, point: studPos, normal: [0, -1, 0] });
+
+    const c = new PlacementController(scene);
+    c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+    c.add({
+      id: 'squatter' as BrickId,
+      partId: '3001',
+      colorCode: 14,
+      transform: fromTranslation([0, -BRICK, 0]),
+      part,
+    });
+    c.hold(part);
+    c.move(0, 0);
+    expect(c.current.valid).toBe(false);
+
+    c.remove('squatter' as BrickId);
+    c.move(0, 0);
+    expect(c.current.valid).toBe(true);
+    expect(c.commit('ok' as BrickId)).not.toBeNull();
+  });
+
+  it('does not treat a legitimate stack as a collision', async () => {
+    const part = await brick2x4();
+    const studPos = await aStudOn(part, IDENTITY);
+    const scene = stubScene({ brick: 'seed' as BrickId, point: studPos, normal: [0, -1, 0] });
+
+    const c = new PlacementController(scene);
+    c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+    c.hold(part);
+    c.move(0, 0);
+    expect(c.current.valid).toBe(true);
   });
 });
