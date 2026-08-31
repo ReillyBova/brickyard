@@ -14,15 +14,26 @@ import {
   undo,
   undoLabel,
 } from './history';
+import { edgeIdFor } from './graph';
 import { fromTranslation, identity } from './matrix';
-import { brick, group, studOffset } from './testing';
-import type { SceneDocument, Transaction } from './types';
+import { brick, edge, group, mate, studOffset } from './testing';
+import type { BrickInstance, ConnectionEdge, SceneDocument, Transaction } from './types';
 
+/** Whole-document comparison: bricks, groups, graph nodes, edges, and their mates. */
 const snapshot = (doc: SceneDocument) => ({
   bricks: [...doc.bricks.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)),
   groups: [...doc.groups.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)),
-  nodes: [...doc.graph.nodes.keys()].sort(),
-  edges: [...doc.graph.edges.values()].sort((a, b) => (a.id < b.id ? -1 : 1)),
+  nodes: [...doc.graph.nodes.values()]
+    .map((n) => ({
+      brick: n.brick,
+      out: [...n.out].sort(),
+      in: [...n.in].sort(),
+      peer: [...n.peer].sort(),
+    }))
+    .sort((a, b) => (a.brick < b.brick ? -1 : 1)),
+  edges: [...doc.graph.edges.values()]
+    .map((e) => ({ id: e.id, a: e.a, b: e.b, mates: e.mates }))
+    .sort((a, b) => (a.id < b.id ? -1 : 1)),
 });
 
 const base = (): SceneDocument =>
@@ -148,5 +159,78 @@ describe('undo and redo', () => {
     expect(cleared.undoStack).toEqual([]);
     expect(cleared.redoStack).toEqual([]);
     expect(cleared.doc).toBe(after.doc);
+  });
+});
+
+/**
+ * Connectivity is first-class, so a gesture that changes it records the change in the
+ * same transaction as its geometry. These are the two gestures where that matters.
+ */
+describe('gestures that change connectivity', () => {
+  /** b2 sits on b1 by two studs; b3 stands apart, one stud pitch further along. */
+  const stack = (): SceneDocument =>
+    createDocument(
+      [
+        brick('b1', { transform: studOffset(0, 0, 0) }),
+        brick('b2', { transform: studOffset(0, 3, 0) }),
+        brick('b3', { transform: studOffset(4, 0, 0) }),
+      ],
+      [],
+      [edge('b1', 'b2', [mate('s1', 'k1'), mate('s2', 'k2')])],
+    );
+
+  it('deleting a connected brick and undoing restores nodes, edges and mates', () => {
+    const start = createHistory(stack());
+    const before = snapshot(start.doc);
+    const removed = start.doc.bricks.get('b2') as BrickInstance;
+
+    const deletion: Transaction = {
+      label: 'Delete brick',
+      ops: [
+        { type: 'disconnect', edges: [start.doc.graph.edges.get(edgeIdFor('b1', 'b2')) as ConnectionEdge] },
+        { type: 'remove', bricks: [removed] },
+      ],
+    };
+
+    const after = commit(start, deletion);
+    expect(after.doc.bricks.has('b2')).toBe(false);
+    expect(after.doc.graph.nodes.has('b2')).toBe(false);
+    expect(after.doc.graph.edges.size).toBe(0);
+
+    const undone = undo(after);
+    expect(snapshot(undone.doc)).toEqual(before);
+    const restored = undone.doc.graph.edges.get(edgeIdFor('b1', 'b2')) as ConnectionEdge;
+    expect(restored.mates).toEqual([mate('s1', 'k1'), mate('s2', 'k2')]);
+    expect([...undone.doc.graph.component('b1')].sort()).toEqual(['b1', 'b2']);
+
+    expect(snapshot(redo(undone).doc)).toEqual(snapshot(after.doc));
+  });
+
+  /** Dragging b2 off b1 and onto b3: old edge broken, new edge formed, one transaction. */
+  const drag = (doc: SceneDocument): Transaction => ({
+    label: 'Move brick',
+    ops: [
+      { type: 'disconnect', edges: [doc.graph.edges.get(edgeIdFor('b1', 'b2')) as ConnectionEdge] },
+      { type: 'transformMany', ids: ['b2'], delta: fromTranslation([4 * 20, 0, 0]) },
+      { type: 'connect', edges: [edge('b2', 'b3', [mate('k1', 's1', 'b')])] },
+    ],
+  });
+
+  it('a drag that breaks one edge and forms another undoes exactly', () => {
+    const start = createHistory(stack());
+    const before = snapshot(start.doc);
+    const after = commit(start, drag(start.doc));
+
+    expect(after.doc.bricks.get('b2')?.transform).toEqual(studOffset(4, 3, 0));
+    expect(after.doc.graph.edges.has(edgeIdFor('b1', 'b2'))).toBe(false);
+    expect(after.doc.graph.edges.has(edgeIdFor('b2', 'b3'))).toBe(true);
+    expect([...after.doc.graph.component('b3')].sort()).toEqual(['b2', 'b3']);
+    expect([...after.doc.graph.component('b1')]).toEqual(['b1']);
+
+    const undone = undo(after);
+    expect(snapshot(undone.doc)).toEqual(before);
+    expect([...undone.doc.graph.component('b1')].sort()).toEqual(['b1', 'b2']);
+
+    expect(snapshot(redo(undone).doc)).toEqual(snapshot(after.doc));
   });
 });

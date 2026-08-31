@@ -9,8 +9,9 @@
 import type { BrickId, Mat4 } from '../types';
 import type { Mate, SnapKind } from '../snap/types';
 import type { MateLink } from './graph';
+import { edgeIdFor } from './graph';
 import { fromTranslation } from './matrix';
-import type { BrickInstance, GroupDef } from './types';
+import type { BrickInstance, ConnectionEdge, GroupDef } from './types';
 
 export const brick = (
   id: BrickId,
@@ -41,6 +42,14 @@ export const mate = (
 ): Mate => ({ aPoint, bPoint, kind, polarity });
 
 export const link = (a: BrickId, b: BrickId, mates: readonly Mate[]): MateLink => ({ a, b, mates });
+
+/** A whole edge, with the id the contract derives from the brick pair. */
+export const edge = (a: BrickId, b: BrickId, mates: readonly Mate[]): ConnectionEdge => ({
+  id: edgeIdFor(a, b),
+  a,
+  b,
+  mates,
+});
 
 /**
  * Studs pitch 20 LDU, a plate is 8 LDU, and +Y points down, so stacking upward is

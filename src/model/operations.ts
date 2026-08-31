@@ -121,6 +121,16 @@ export const applyOperation: ApplyOperation = (doc, op) => {
       groups.delete(op.group.id);
       return { bricks: doc.bricks, groups, graph: doc.graph };
     }
+
+    case 'connect': {
+      if (op.edges.length === 0) return doc;
+      return { bricks: doc.bricks, groups: doc.groups, graph: asGraph(doc).addEdges(op.edges) };
+    }
+
+    case 'disconnect': {
+      if (op.edges.length === 0) return doc;
+      return { bricks: doc.bricks, groups: doc.groups, graph: asGraph(doc).removeEdges(op.edges) };
+    }
   }
 };
 
@@ -151,6 +161,10 @@ export const invertOperation: InvertOperation = (op) => {
       return { type: 'removeGroup', group: op.group };
     case 'removeGroup':
       return { type: 'addGroup', group: op.group };
+    case 'connect':
+      return { type: 'disconnect', edges: op.edges };
+    case 'disconnect':
+      return { type: 'connect', edges: op.edges };
   }
 };
 

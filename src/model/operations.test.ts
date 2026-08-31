@@ -5,8 +5,8 @@ import { connectBricks, createDocument, emptyDocument } from './document';
 import { edgeIdFor } from './graph';
 import { fromTranslation, identity, invert as invertMatrix, multiply } from './matrix';
 import { applyOperation, applyOperations, invertOperation } from './operations';
-import { brick, group, link, mate, studOffset } from './testing';
-import type { Operation, SceneDocument } from './types';
+import { brick, edge, group, link, mate, studOffset } from './testing';
+import type { ConnectionEdge, Operation, SceneDocument } from './types';
 
 /** Comparable form of a document, including the full graph structure. */
 const snapshot = (doc: SceneDocument) => ({
@@ -23,6 +23,7 @@ const snapshot = (doc: SceneDocument) => ({
   edges: [...doc.graph.edges.values()].sort((a, b) => (a.id < b.id ? -1 : 1)),
 });
 
+/** Three bricks, two groups, and one edge already joining b1 and b2. */
 const base = (): SceneDocument =>
   createDocument(
     [
@@ -31,7 +32,12 @@ const base = (): SceneDocument =>
       brick('b3', { transform: studOffset(2, 6, 0), colorCode: 0 }),
     ],
     [group('g1'), group('g2', 'Nested', 'g1')],
+    [edge('b1', 'b2', [mate('s1', 'k1'), mate('s2', 'k2')])],
   );
+
+/** The edge as the document stores it, which is what a real caller would pass. */
+const storedEdge = (doc: SceneDocument, a: string, b: string) =>
+  doc.graph.edges.get(edgeIdFor(a, b)) as ConnectionEdge;
 
 const delta: Mat4 = fromTranslation([20, -24, 0]);
 
@@ -58,6 +64,8 @@ const everyVariant = (): readonly Operation[] => [
   },
   { type: 'addGroup', group: group('g3', 'Fresh') },
   { type: 'removeGroup', group: group('g1') },
+  { type: 'connect', edges: [edge('b2', 'b3', [mate('s3', 'k3', 'b')])] },
+  { type: 'disconnect', edges: [storedEdge(base(), 'b1', 'b2')] },
 ];
 
 describe('applyOperation', () => {
@@ -145,6 +153,50 @@ describe('applyOperation', () => {
     ).toThrow(/unknown group/);
   });
 
+  it('connect installs whole edges with all their mates', () => {
+    const doc = applyOperation(base(), {
+      type: 'connect',
+      edges: [edge('b2', 'b3', [mate('s3', 'k3'), mate('s4', 'k4')])],
+    });
+    expect(doc.graph.edges.size).toBe(2);
+    const added = storedEdge(doc, 'b2', 'b3');
+    expect(added.mates).toHaveLength(2);
+    expect(doc.graph.nodes.get('b2')?.out).toEqual([edgeIdFor('b2', 'b3')]);
+    expect(doc.graph.nodes.get('b3')?.in).toEqual([edgeIdFor('b2', 'b3')]);
+  });
+
+  it('connect rejects a pair that is already connected, or an unknown brick', () => {
+    expect(() =>
+      applyOperation(base(), { type: 'connect', edges: [edge('b1', 'b2', [mate('x', 'y')])] }),
+    ).toThrow(/already connected/);
+    expect(() =>
+      applyOperation(base(), { type: 'connect', edges: [edge('b1', 'ghost', [mate('x', 'y')])] }),
+    ).toThrow(/unknown brick/);
+  });
+
+  it('disconnect drops the whole edge and leaves both bricks', () => {
+    const doc = applyOperation(base(), {
+      type: 'disconnect',
+      edges: [storedEdge(base(), 'b1', 'b2')],
+    });
+    expect(doc.graph.edges.size).toBe(0);
+    expect(doc.bricks.size).toBe(3);
+    expect(doc.graph.nodes.get('b1')?.out).toEqual([]);
+    expect(doc.graph.nodes.get('b2')?.in).toEqual([]);
+  });
+
+  it('disconnect rejects a pair that is not connected', () => {
+    expect(() =>
+      applyOperation(base(), { type: 'disconnect', edges: [edge('b2', 'b3', [mate('x', 'y')])] }),
+    ).toThrow(/not connected/);
+  });
+
+  it('treats an empty connectivity change as a no-op', () => {
+    const doc = base();
+    expect(applyOperation(doc, { type: 'connect', edges: [] })).toBe(doc);
+    expect(applyOperation(doc, { type: 'disconnect', edges: [] })).toBe(doc);
+  });
+
   it('does not mutate the input document', () => {
     const doc = base();
     const before = snapshot(doc);
@@ -169,12 +221,32 @@ describe('applyOperation', () => {
   });
 });
 
+describe('operation coverage', () => {
+  it('exercises every variant the contract declares', () => {
+    expect(everyVariant().map((o) => o.type).sort()).toEqual([
+      'add',
+      'addGroup',
+      'connect',
+      'disconnect',
+      'recolor',
+      'remove',
+      'removeGroup',
+      'reparent',
+      'transform',
+      'transformMany',
+    ]);
+  });
+});
+
 describe('invertOperation', () => {
   it('maps each variant to its counterpart', () => {
     expect(invertOperation({ type: 'add', bricks: [brick('b')] }).type).toBe('remove');
     expect(invertOperation({ type: 'remove', bricks: [brick('b')] }).type).toBe('add');
     expect(invertOperation({ type: 'addGroup', group: group('g') }).type).toBe('removeGroup');
     expect(invertOperation({ type: 'removeGroup', group: group('g') }).type).toBe('addGroup');
+    const edges = [edge('b1', 'b2', [mate('s', 'k')])];
+    expect(invertOperation({ type: 'connect', edges })).toEqual({ type: 'disconnect', edges });
+    expect(invertOperation({ type: 'disconnect', edges })).toEqual({ type: 'connect', edges });
     for (const type of ['transformMany', 'transform', 'recolor', 'reparent'] as const) {
       const op = everyVariant().find((o) => o.type === type) as Operation;
       expect(invertOperation(op).type).toBe(type);
@@ -217,19 +289,28 @@ describe('round trip', () => {
     }
   });
 
-  it('restores the graph when the removed brick had no edges', () => {
-    const doc = connectBricks(base(), [link('b1', 'b2', [mate('s1', 'k1')])]);
-    const op: Operation = { type: 'remove', bricks: [doc.bricks.get('b3') as ReturnType<typeof brick>] };
+  it('leaves untouched edges in place when a brick is removed', () => {
+    const op: Operation = {
+      type: 'remove',
+      bricks: [base().bricks.get('b3') as ReturnType<typeof brick>],
+    };
+    const doc = base();
     const round = applyOperation(applyOperation(doc, op), invertOperation(op));
     expect(snapshot(round)).toEqual(snapshot(doc));
     expect(round.graph.edges.has(edgeIdFor('b1', 'b2'))).toBe(true);
   });
 
-  it('does not restore edges of a connected brick: connectivity is not carried by Operation', () => {
-    const doc = connectBricks(base(), [link('b1', 'b2', [mate('s1', 'k1')])]);
-    const op: Operation = { type: 'remove', bricks: [doc.bricks.get('b2') as ReturnType<typeof brick>] };
+  it('restores mates through a disconnect regardless of the orientation supplied', () => {
+    const doc = base();
+    // A caller that names the pair in the other order still round-trips exactly.
+    const reversed = edge('b2', 'b1', storedEdge(doc, 'b1', 'b2').mates.map((m) => ({
+      aPoint: m.bPoint,
+      bPoint: m.aPoint,
+      kind: m.kind,
+      polarity: m.polarity === 'a' ? ('b' as const) : ('a' as const),
+    })));
+    const op: Operation = { type: 'disconnect', edges: [reversed] };
     const round = applyOperation(applyOperation(doc, op), invertOperation(op));
-    expect(snapshot(round).bricks).toEqual(snapshot(doc).bricks);
-    expect(round.graph.edges.size).toBe(0);
+    expect(snapshot(round)).toEqual(snapshot(doc));
   });
 });

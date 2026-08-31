@@ -94,11 +94,12 @@ const asGraph = (doc: SceneDocument): Graph => {
 };
 
 /**
- * Attach precomputed mates to the document's graph.
+ * Attach precomputed mates to the document's graph, merging them into any edge the
+ * pair already has.
  *
- * Connectivity is not carried by `Operation`, so mates arrive through this call
- * rather than through the undo stack. Callers pair it with the transaction that
- * placed the bricks.
+ * This is a convenience for building a document up front — an import, a fixture, a
+ * test. Edits that a user can undo go through the `connect` and `disconnect`
+ * operations instead, so that the change is recorded on the transaction stack.
  */
 export const connectBricks = (doc: SceneDocument, links: readonly MateLink[]): SceneDocument => {
   if (links.length === 0) return doc;
@@ -110,7 +111,7 @@ export const connectBricks = (doc: SceneDocument, links: readonly MateLink[]): S
   return { bricks: doc.bricks, groups: doc.groups, graph: asGraph(doc).connect(links) };
 };
 
-/** Drop the edge between each pair, leaving both bricks in place. */
+/** Drop the edge between each pair, leaving both bricks in place. Lenient if absent. */
 export const disconnectBricks = (
   doc: SceneDocument,
   pairs: readonly { a: BrickId; b: BrickId }[],

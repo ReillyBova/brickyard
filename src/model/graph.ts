@@ -31,7 +31,7 @@ type EdgeDirection = 'a-out' | 'b-out' | 'peer';
 export const edgeIdFor = (a: BrickId, b: BrickId): EdgeId =>
   a <= b ? `${a}~${b}` : `${b}~${a}`;
 
-/** Reverse a mate's sense, for merging a link supplied with the opposite orientation. */
+/** Reverse a mate's sense, for restating a link in the opposite orientation. */
 export const flipMate = (m: Mate): Mate => ({
   aPoint: m.bPoint,
   bPoint: m.aPoint,
@@ -99,28 +99,40 @@ const detach = (draft: Draft, id: EdgeId): void => {
   }
 };
 
+/**
+ * Restate a link with its bricks in canonical order, flipping the mates to match.
+ *
+ * Storing one canonical orientation makes the graph a function of the connections
+ * themselves rather than of the order a caller happened to write them, which is what
+ * lets a disconnect and its inverting connect restore a byte-identical structure.
+ */
+const normalizeLink = (l: MateLink): MateLink =>
+  l.a <= l.b ? l : { a: l.b, b: l.a, mates: l.mates.map(flipMate) };
+
+const assertDistinct = (a: BrickId, b: BrickId): void => {
+  if (a === b) throw new Error(`graph: a brick cannot connect to itself (${a})`);
+};
+
 /** Merge a link into the draft, uniting its mates with any already on that pair. */
-const link = (draft: Draft, l: MateLink): void => {
-  if (l.a === l.b) throw new Error(`graph: a brick cannot connect to itself (${l.a})`);
+const link = (draft: Draft, raw: MateLink): void => {
+  assertDistinct(raw.a, raw.b);
+  const l = normalizeLink(raw);
   const id = edgeIdFor(l.a, l.b);
   const existing = draft.edges.get(id);
   if (!existing) {
     attach(draft, { id, a: l.a, b: l.b, mates: [...l.mates] });
     return;
   }
-  // Keep the established orientation; flip the incoming mates if the link disagrees.
-  const flipped = existing.a !== l.a;
-  const incoming = flipped ? l.mates.map(flipMate) : l.mates;
   const seen = new Set(existing.mates.map((m) => `${m.aPoint}|${m.bPoint}`));
   const merged = [...existing.mates];
-  for (const m of incoming) {
+  for (const m of l.mates) {
     const key = `${m.aPoint}|${m.bPoint}`;
     if (!seen.has(key)) {
       seen.add(key);
       merged.push(m);
     }
   }
-  attach(draft, { id: existing.id, a: existing.a, b: existing.b, mates: merged });
+  attach(draft, { id, a: existing.a, b: existing.b, mates: merged });
 };
 
 export class Graph implements ConnectionGraph {
@@ -248,6 +260,49 @@ export class Graph implements ConnectionGraph {
     const draft = this.draft();
     for (const p of pairs) detach(draft, edgeIdFor(p.a, p.b));
     return Graph.from(draft);
+  }
+
+  /**
+   * Install whole edges, exactly as the `connect` operation carries them.
+   *
+   * Strict where `connect` is lenient: an edge is the complete set of mates joining
+   * its pair, so a pair that already has one is a caller error rather than something
+   * to merge into. That strictness is what makes `addEdges` and `removeEdges` exact
+   * inverses of each other, which the undo path depends on.
+   */
+  addEdges(edges: readonly ConnectionEdge[]): Graph {
+    const draft = this.draft();
+    for (const raw of edges) {
+      assertDistinct(raw.a, raw.b);
+      for (const brick of [raw.a, raw.b]) {
+        if (!draft.nodes.has(brick)) throw new Error(`graph.addEdges: unknown brick ${brick}`);
+      }
+      const id = edgeIdFor(raw.a, raw.b);
+      if (draft.edges.has(id)) {
+        throw new Error(`graph.addEdges: ${raw.a} and ${raw.b} are already connected`);
+      }
+      const l = normalizeLink({ a: raw.a, b: raw.b, mates: raw.mates });
+      attach(draft, { id, a: l.a, b: l.b, mates: [...l.mates] });
+    }
+    return Graph.from(draft);
+  }
+
+  /** Remove whole edges, as the `disconnect` operation carries them. */
+  removeEdges(edges: readonly ConnectionEdge[]): Graph {
+    const draft = this.draft();
+    for (const raw of edges) {
+      const id = edgeIdFor(raw.a, raw.b);
+      if (!draft.edges.has(id)) {
+        throw new Error(`graph.removeEdges: ${raw.a} and ${raw.b} are not connected`);
+      }
+      detach(draft, id);
+    }
+    return Graph.from(draft);
+  }
+
+  /** The stored edge joining a pair, in canonical orientation. */
+  edgeBetween(a: BrickId, b: BrickId): ConnectionEdge | undefined {
+    return this.edges.get(edgeIdFor(a, b));
   }
 }
 
