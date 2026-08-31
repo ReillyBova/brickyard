@@ -257,6 +257,29 @@ type Mat4 = readonly number[]; // length 16
 type Mat3 = readonly number[]; // length 9
 ```
 
+Matrix operations come from **gl-matrix** through a thin adapter at `src/math.ts`, shared by `snap/`
+and `model/` since neither may depend on the other. gl-matrix is column-major, has no rendering
+dependency so the pure modules stay worker-safe, and writes into caller-supplied output arrays — so
+we keep plain float64 arrays rather than its default `Float32Array`, which would drift as transforms
+accumulate down deep subfile trees. The adapter is verified against three.js's own `Matrix4` over
+random transforms including mirrored and non-uniformly scaled ones.
+
+## Identifiers
+
+LDraw has no per-part identity: a reference line is a colour, a transform, and a filename, and a
+brick's only identity in the file is its position in a list. Ids are therefore ours, minted in
+`src/model/ids.ts` when a brick enters the document.
+
+Ids are 12 characters drawn 6 bits at a time from a 64-character alphabet — 72 bits, unique per
+document rather than globally. Random rather than sequential because documents merge: pasting between
+models, importing a second model, and MCP insertion all combine id spaces, where a counter would
+collide and need remapping. The types are branded, so an id cannot be built from a bare string and
+external input must pass validation.
+
+Two consequences. Operations carry whole `BrickInstance`s, so remove-then-undo restores the same id.
+And `.ldr` export drops ids because the format cannot hold them, so a round trip through a file mints
+fresh ones — nothing may assume an id survives being saved.
+
 **Transforms are flat and absolute.** Every brick stores a world matrix; groups are *sets*, not
 transform parents. Nested transforms would force every spatial query to walk ancestors, and spatial
 queries are the hot path. Moving a group instead writes N matrices, stored compactly as a single

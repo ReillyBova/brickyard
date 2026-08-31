@@ -18,6 +18,14 @@ export interface Bounds {
   max: Vec3;
 }
 
-export type BrickId = string;
-export type GroupId = string;
-export type EdgeId = string;
+/**
+ * Identifiers are branded so they cannot be built from a bare string. Everything
+ * that enters the document is minted or validated (see `src/model/ids.ts`), which
+ * matters because LDraw carries no per-part identity of its own — a part reference
+ * is only a colour, a transform, and a filename. Ids are entirely ours, and
+ * external callers (import, MCP) must pass through validation rather than being
+ * trusted.
+ */
+export type BrickId = string & { readonly __brand: 'BrickId' };
+export type GroupId = string & { readonly __brand: 'GroupId' };
+export type EdgeId = string & { readonly __brand: 'EdgeId' };
