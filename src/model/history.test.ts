@@ -14,9 +14,17 @@ import {
   undo,
   undoLabel,
 } from './history';
-import { edgeIdFor } from './graph';
-import { fromTranslation, identity } from './matrix';
-import { brick, edge, group, mate, studOffset } from './testing';
+import { IDENTITY, fromTranslation } from '../math';
+import {
+  brick,
+  edge,
+  group,
+  mate,
+  studOffset,
+  testBrickId as bid,
+  testEdgeId as edgeId,
+  testGroupId as gid,
+} from './testing';
 import type { BrickInstance, ConnectionEdge, SceneDocument, Transaction } from './types';
 
 /** Whole-document comparison: bricks, groups, graph nodes, edges, and their mates. */
@@ -43,10 +51,10 @@ const base = (): SceneDocument =>
 const multiOp: Transaction = {
   label: 'Place and dress a brick',
   ops: [
-    { type: 'add', bricks: [brick('b2', { transform: identity() })] },
-    { type: 'reparent', changes: [{ id: 'b2', from: undefined, to: 'g1' }] },
-    { type: 'transformMany', ids: ['b1', 'b2'], delta: fromTranslation([20, -24, 0]) },
-    { type: 'recolor', changes: [{ id: 'b1', from: 4, to: 25 }] },
+    { type: 'add', bricks: [brick('b2', { transform: IDENTITY })] },
+    { type: 'reparent', changes: [{ id: bid('b2'), from: undefined, to: gid('g1') }] },
+    { type: 'transformMany', ids: [bid('b1'), bid('b2')], delta: fromTranslation([20, -24, 0]) },
+    { type: 'recolor', changes: [{ id: bid('b1'), from: 4, to: 25 }] },
   ],
 };
 
@@ -88,7 +96,7 @@ describe('undo and redo', () => {
     const txs: Transaction[] = [
       multiOp,
       { label: 'Group', ops: [{ type: 'addGroup', group: group('g2', 'Two') }] },
-      { label: 'Recolor', ops: [{ type: 'recolor', changes: [{ id: 'b2', from: 4, to: 71 }] }] },
+      { label: 'Recolor', ops: [{ type: 'recolor', changes: [{ id: bid('b2'), from: 4, to: 71 }] }] },
     ];
     for (const tx of txs) states.push(commit(states[states.length - 1], tx));
 
@@ -182,26 +190,26 @@ describe('gestures that change connectivity', () => {
   it('deleting a connected brick and undoing restores nodes, edges and mates', () => {
     const start = createHistory(stack());
     const before = snapshot(start.doc);
-    const removed = start.doc.bricks.get('b2') as BrickInstance;
+    const removed = start.doc.bricks.get(bid('b2')) as BrickInstance;
 
     const deletion: Transaction = {
       label: 'Delete brick',
       ops: [
-        { type: 'disconnect', edges: [start.doc.graph.edges.get(edgeIdFor('b1', 'b2')) as ConnectionEdge] },
+        { type: 'disconnect', edges: [start.doc.graph.edges.get(edgeId('b1', 'b2')) as ConnectionEdge] },
         { type: 'remove', bricks: [removed] },
       ],
     };
 
     const after = commit(start, deletion);
-    expect(after.doc.bricks.has('b2')).toBe(false);
-    expect(after.doc.graph.nodes.has('b2')).toBe(false);
+    expect(after.doc.bricks.has(bid('b2'))).toBe(false);
+    expect(after.doc.graph.nodes.has(bid('b2'))).toBe(false);
     expect(after.doc.graph.edges.size).toBe(0);
 
     const undone = undo(after);
     expect(snapshot(undone.doc)).toEqual(before);
-    const restored = undone.doc.graph.edges.get(edgeIdFor('b1', 'b2')) as ConnectionEdge;
+    const restored = undone.doc.graph.edges.get(edgeId('b1', 'b2')) as ConnectionEdge;
     expect(restored.mates).toEqual([mate('s1', 'k1'), mate('s2', 'k2')]);
-    expect([...undone.doc.graph.component('b1')].sort()).toEqual(['b1', 'b2']);
+    expect([...undone.doc.graph.component(bid('b1'))].sort()).toEqual(['b1', 'b2']);
 
     expect(snapshot(redo(undone).doc)).toEqual(snapshot(after.doc));
   });
@@ -210,8 +218,8 @@ describe('gestures that change connectivity', () => {
   const drag = (doc: SceneDocument): Transaction => ({
     label: 'Move brick',
     ops: [
-      { type: 'disconnect', edges: [doc.graph.edges.get(edgeIdFor('b1', 'b2')) as ConnectionEdge] },
-      { type: 'transformMany', ids: ['b2'], delta: fromTranslation([4 * 20, 0, 0]) },
+      { type: 'disconnect', edges: [doc.graph.edges.get(edgeId('b1', 'b2')) as ConnectionEdge] },
+      { type: 'transformMany', ids: [bid('b2')], delta: fromTranslation([4 * 20, 0, 0]) },
       { type: 'connect', edges: [edge('b2', 'b3', [mate('k1', 's1', 'b')])] },
     ],
   });
@@ -221,15 +229,15 @@ describe('gestures that change connectivity', () => {
     const before = snapshot(start.doc);
     const after = commit(start, drag(start.doc));
 
-    expect(after.doc.bricks.get('b2')?.transform).toEqual(studOffset(4, 3, 0));
-    expect(after.doc.graph.edges.has(edgeIdFor('b1', 'b2'))).toBe(false);
-    expect(after.doc.graph.edges.has(edgeIdFor('b2', 'b3'))).toBe(true);
-    expect([...after.doc.graph.component('b3')].sort()).toEqual(['b2', 'b3']);
-    expect([...after.doc.graph.component('b1')]).toEqual(['b1']);
+    expect(after.doc.bricks.get(bid('b2'))?.transform).toEqual(studOffset(4, 3, 0));
+    expect(after.doc.graph.edges.has(edgeId('b1', 'b2'))).toBe(false);
+    expect(after.doc.graph.edges.has(edgeId('b2', 'b3'))).toBe(true);
+    expect([...after.doc.graph.component(bid('b3'))].sort()).toEqual(['b2', 'b3']);
+    expect([...after.doc.graph.component(bid('b1'))]).toEqual(['b1']);
 
     const undone = undo(after);
     expect(snapshot(undone.doc)).toEqual(before);
-    expect([...undone.doc.graph.component('b1')].sort()).toEqual(['b1', 'b2']);
+    expect([...undone.doc.graph.component(bid('b1'))].sort()).toEqual(['b1', 'b2']);
 
     expect(snapshot(redo(undone).doc)).toEqual(snapshot(after.doc));
   });

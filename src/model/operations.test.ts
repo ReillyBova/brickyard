@@ -2,10 +2,19 @@ import { describe, expect, it } from 'vitest';
 
 import type { Mat4 } from '../types';
 import { connectBricks, createDocument, emptyDocument } from './document';
-import { edgeIdFor } from './graph';
-import { fromTranslation, identity, invert as invertMatrix, multiply } from './matrix';
+import { IDENTITY, fromTranslation, invert as invertMatrix, multiply } from '../math';
 import { applyOperation, applyOperations, invertOperation } from './operations';
-import { brick, edge, group, link, mate, studOffset } from './testing';
+import {
+  brick,
+  edge,
+  group,
+  link,
+  mate,
+  studOffset,
+  testBrickId as bid,
+  testEdgeId as edgeId,
+  testGroupId as gid,
+} from './testing';
 import type { ConnectionEdge, Operation, SceneDocument } from './types';
 
 /** Comparable form of a document, including the full graph structure. */
@@ -37,29 +46,35 @@ const base = (): SceneDocument =>
 
 /** The edge as the document stores it, which is what a real caller would pass. */
 const storedEdge = (doc: SceneDocument, a: string, b: string) =>
-  doc.graph.edges.get(edgeIdFor(a, b)) as ConnectionEdge;
+  doc.graph.edges.get(edgeId(a, b)) as ConnectionEdge;
 
 const delta: Mat4 = fromTranslation([20, -24, 0]);
 
 /** One representative operation of every variant in the contract. */
 const everyVariant = (): readonly Operation[] => [
   { type: 'add', bricks: [brick('new1'), brick('new2', { groupId: 'g1' })] },
-  { type: 'remove', bricks: [base().bricks.get('b3') as ReturnType<typeof brick>] },
-  { type: 'transformMany', ids: ['b1', 'b2'], delta },
+  { type: 'remove', bricks: [base().bricks.get(bid('b3')) as ReturnType<typeof brick>] },
+  { type: 'transformMany', ids: [bid('b1'), bid('b2')], delta },
   {
     type: 'transform',
     changes: [
-      { id: 'b1', from: studOffset(0, 0, 0), to: studOffset(4, 2, 1) },
-      { id: 'b3', from: studOffset(2, 6, 0), to: identity() },
+      { id: bid('b1'), from: studOffset(0, 0, 0), to: studOffset(4, 2, 1) },
+      { id: bid('b3'), from: studOffset(2, 6, 0), to: IDENTITY },
     ],
   },
-  { type: 'recolor', changes: [{ id: 'b1', from: 4, to: 25 }, { id: 'b3', from: 0, to: 71 }] },
+  {
+    type: 'recolor',
+    changes: [
+      { id: bid('b1'), from: 4, to: 25 },
+      { id: bid('b3'), from: 0, to: 71 },
+    ],
+  },
   {
     type: 'reparent',
     changes: [
-      { id: 'b1', from: undefined, to: 'g1' },
-      { id: 'b2', from: 'g1', to: undefined },
-      { id: 'b3', from: undefined, to: 'g2' },
+      { id: bid('b1'), from: undefined, to: gid('g1') },
+      { id: bid('b2'), from: gid('g1'), to: undefined },
+      { id: bid('b3'), from: undefined, to: gid('g2') },
     ],
   },
   { type: 'addGroup', group: group('g3', 'Fresh') },
@@ -72,7 +87,7 @@ describe('applyOperation', () => {
   it('add inserts bricks and graph nodes', () => {
     const doc = applyOperation(base(), { type: 'add', bricks: [brick('b4')] });
     expect(doc.bricks.size).toBe(4);
-    expect(doc.graph.nodes.get('b4')).toEqual({ brick: 'b4', out: [], in: [], peer: [] });
+    expect(doc.graph.nodes.get(bid('b4'))).toEqual({ brick: 'b4', out: [], in: [], peer: [] });
   });
 
   it('add rejects a duplicate id', () => {
@@ -89,13 +104,13 @@ describe('applyOperation', () => {
     expect(doc.graph.edges.size).toBe(2);
     const after = applyOperation(doc, {
       type: 'remove',
-      bricks: [doc.bricks.get('b2') as ReturnType<typeof brick>],
+      bricks: [doc.bricks.get(bid('b2')) as ReturnType<typeof brick>],
     });
-    expect(after.bricks.has('b2')).toBe(false);
-    expect(after.graph.nodes.has('b2')).toBe(false);
+    expect(after.bricks.has(bid('b2'))).toBe(false);
+    expect(after.graph.nodes.has(bid('b2'))).toBe(false);
     expect(after.graph.edges.size).toBe(0);
-    expect(after.graph.nodes.get('b1')?.out).toEqual([]);
-    expect(after.graph.nodes.get('b3')?.in).toEqual([]);
+    expect(after.graph.nodes.get(bid('b1'))?.out).toEqual([]);
+    expect(after.graph.nodes.get(bid('b3'))?.in).toEqual([]);
   });
 
   it('remove rejects an unknown brick', () => {
@@ -105,39 +120,39 @@ describe('applyOperation', () => {
   });
 
   it('transformMany applies the delta on the left of each world transform', () => {
-    const doc = applyOperation(base(), { type: 'transformMany', ids: ['b1', 'b2'], delta });
-    expect(doc.bricks.get('b1')?.transform).toEqual(multiply(delta, studOffset(0, 0, 0)));
-    expect(doc.bricks.get('b2')?.transform).toEqual(multiply(delta, studOffset(1, 3, 0)));
-    expect(doc.bricks.get('b3')?.transform).toEqual(studOffset(2, 6, 0));
+    const doc = applyOperation(base(), { type: 'transformMany', ids: [bid('b1'), bid('b2')], delta });
+    expect(doc.bricks.get(bid('b1'))?.transform).toEqual(multiply(delta, studOffset(0, 0, 0)));
+    expect(doc.bricks.get(bid('b2'))?.transform).toEqual(multiply(delta, studOffset(1, 3, 0)));
+    expect(doc.bricks.get(bid('b3'))?.transform).toEqual(studOffset(2, 6, 0));
   });
 
   it('transform sets absolute transforms', () => {
     const doc = applyOperation(base(), {
       type: 'transform',
-      changes: [{ id: 'b1', from: studOffset(0, 0, 0), to: identity() }],
+      changes: [{ id: bid('b1'), from: studOffset(0, 0, 0), to: IDENTITY }],
     });
-    expect(doc.bricks.get('b1')?.transform).toEqual(identity());
+    expect(doc.bricks.get(bid('b1'))?.transform).toEqual(IDENTITY);
   });
 
   it('recolor sets the colour code', () => {
     const doc = applyOperation(base(), {
       type: 'recolor',
-      changes: [{ id: 'b1', from: 4, to: 25 }],
+      changes: [{ id: bid('b1'), from: 4, to: 25 }],
     });
-    expect(doc.bricks.get('b1')?.colorCode).toBe(25);
-    expect(doc.bricks.get('b2')?.colorCode).toBe(15);
+    expect(doc.bricks.get(bid('b1'))?.colorCode).toBe(25);
+    expect(doc.bricks.get(bid('b2'))?.colorCode).toBe(15);
   });
 
   it('reparent sets and clears groupId', () => {
     const doc = applyOperation(base(), {
       type: 'reparent',
       changes: [
-        { id: 'b1', from: undefined, to: 'g1' },
-        { id: 'b2', from: 'g1', to: undefined },
+        { id: bid('b1'), from: undefined, to: gid('g1') },
+        { id: bid('b2'), from: gid('g1'), to: undefined },
       ],
     });
-    expect(doc.bricks.get('b1')?.groupId).toBe('g1');
-    expect('groupId' in (doc.bricks.get('b2') as object)).toBe(false);
+    expect(doc.bricks.get(bid('b1'))?.groupId).toBe('g1');
+    expect('groupId' in (doc.bricks.get(bid('b2')) as object)).toBe(false);
   });
 
   it('addGroup and removeGroup maintain the group map', () => {
@@ -147,7 +162,7 @@ describe('applyOperation', () => {
       /already exists/,
     );
     const removed = applyOperation(added, { type: 'removeGroup', group: group('g3') });
-    expect(removed.groups.has('g3')).toBe(false);
+    expect(removed.groups.has(gid('g3'))).toBe(false);
     expect(() =>
       applyOperation(removed, { type: 'removeGroup', group: group('g3') }),
     ).toThrow(/unknown group/);
@@ -161,8 +176,8 @@ describe('applyOperation', () => {
     expect(doc.graph.edges.size).toBe(2);
     const added = storedEdge(doc, 'b2', 'b3');
     expect(added.mates).toHaveLength(2);
-    expect(doc.graph.nodes.get('b2')?.out).toEqual([edgeIdFor('b2', 'b3')]);
-    expect(doc.graph.nodes.get('b3')?.in).toEqual([edgeIdFor('b2', 'b3')]);
+    expect(doc.graph.nodes.get(bid('b2'))?.out).toEqual([edgeId('b2', 'b3')]);
+    expect(doc.graph.nodes.get(bid('b3'))?.in).toEqual([edgeId('b2', 'b3')]);
   });
 
   it('connect rejects a pair that is already connected, or an unknown brick', () => {
@@ -181,8 +196,8 @@ describe('applyOperation', () => {
     });
     expect(doc.graph.edges.size).toBe(0);
     expect(doc.bricks.size).toBe(3);
-    expect(doc.graph.nodes.get('b1')?.out).toEqual([]);
-    expect(doc.graph.nodes.get('b2')?.in).toEqual([]);
+    expect(doc.graph.nodes.get(bid('b1'))?.out).toEqual([]);
+    expect(doc.graph.nodes.get(bid('b2'))?.in).toEqual([]);
   });
 
   it('disconnect rejects a pair that is not connected', () => {
@@ -206,8 +221,11 @@ describe('applyOperation', () => {
 
   it('shares untouched entries rather than copying them', () => {
     const doc = base();
-    const next = applyOperation(doc, { type: 'recolor', changes: [{ id: 'b1', from: 4, to: 25 }] });
-    expect(next.bricks.get('b2')).toBe(doc.bricks.get('b2'));
+    const next = applyOperation(doc, {
+      type: 'recolor',
+      changes: [{ id: bid('b1'), from: 4, to: 25 }],
+    });
+    expect(next.bricks.get(bid('b2'))).toBe(doc.bricks.get(bid('b2')));
     expect(next.groups).toBe(doc.groups);
     expect(next.graph).toBe(doc.graph);
   });
@@ -215,9 +233,9 @@ describe('applyOperation', () => {
   it('applyOperations folds a sequence in order', () => {
     const doc = applyOperations(emptyDocument(), [
       { type: 'add', bricks: [brick('b1')] },
-      { type: 'recolor', changes: [{ id: 'b1', from: 4, to: 1 }] },
+      { type: 'recolor', changes: [{ id: bid('b1'), from: 4, to: 1 }] },
     ]);
-    expect(doc.bricks.get('b1')?.colorCode).toBe(1);
+    expect(doc.bricks.get(bid('b1'))?.colorCode).toBe(1);
   });
 });
 
@@ -254,9 +272,9 @@ describe('invertOperation', () => {
   });
 
   it('inverts transformMany by inverting its delta', () => {
-    const op: Operation = { type: 'transformMany', ids: ['b1'], delta };
+    const op: Operation = { type: 'transformMany', ids: [bid('b1')], delta };
     const inv = invertOperation(op);
-    expect(inv).toEqual({ type: 'transformMany', ids: ['b1'], delta: invertMatrix(delta) });
+    expect(inv).toEqual({ type: 'transformMany', ids: [bid('b1')], delta: invertMatrix(delta) });
   });
 
   it('consults nothing but the operation', () => {
@@ -292,23 +310,27 @@ describe('round trip', () => {
   it('leaves untouched edges in place when a brick is removed', () => {
     const op: Operation = {
       type: 'remove',
-      bricks: [base().bricks.get('b3') as ReturnType<typeof brick>],
+      bricks: [base().bricks.get(bid('b3')) as ReturnType<typeof brick>],
     };
     const doc = base();
     const round = applyOperation(applyOperation(doc, op), invertOperation(op));
     expect(snapshot(round)).toEqual(snapshot(doc));
-    expect(round.graph.edges.has(edgeIdFor('b1', 'b2'))).toBe(true);
+    expect(round.graph.edges.has(edgeId('b1', 'b2'))).toBe(true);
   });
 
   it('restores mates through a disconnect regardless of the orientation supplied', () => {
     const doc = base();
     // A caller that names the pair in the other order still round-trips exactly.
-    const reversed = edge('b2', 'b1', storedEdge(doc, 'b1', 'b2').mates.map((m) => ({
-      aPoint: m.bPoint,
-      bPoint: m.aPoint,
-      kind: m.kind,
-      polarity: m.polarity === 'a' ? ('b' as const) : ('a' as const),
-    })));
+    const reversed = edge(
+      'b2',
+      'b1',
+      storedEdge(doc, 'b1', 'b2').mates.map((m) => ({
+        aPoint: m.bPoint,
+        bPoint: m.aPoint,
+        kind: m.kind,
+        polarity: m.polarity === 'a' ? ('b' as const) : ('a' as const),
+      })),
+    );
     const op: Operation = { type: 'disconnect', edges: [reversed] };
     const round = applyOperation(applyOperation(doc, op), invertOperation(op));
     expect(snapshot(round)).toEqual(snapshot(doc));

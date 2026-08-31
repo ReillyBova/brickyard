@@ -4,32 +4,46 @@
  * These are document values — ids, colour codes, transforms, mates — not part
  * geometry. Parser fixtures use real captured part data; nothing here stands in for
  * that.
+ *
+ * Production code never fabricates a `BrickId`/`GroupId`: it mints one
+ * (`mintBrickId`/`mintGroupId`) or validates one arriving from outside
+ * (`asBrickId`/`asGroupId`). Tests want short, readable, deterministic ids instead —
+ * `testBrickId`/`testGroupId` cast a plain label directly, and every constructor
+ * below takes plain string labels and casts internally, so call sites never need
+ * their own cast.
  */
 
-import type { BrickId, Mat4 } from '../types';
+import type { BrickId, EdgeId, GroupId, Mat4 } from '../types';
 import type { Mate, SnapKind } from '../snap/types';
 import type { MateLink } from './graph';
 import { edgeIdFor } from './graph';
-import { fromTranslation } from './matrix';
+import { fromTranslation } from '../math';
 import type { BrickInstance, ConnectionEdge, GroupDef } from './types';
 
+export const testBrickId = (label: string): BrickId => label as BrickId;
+export const testGroupId = (label: string): GroupId => label as GroupId;
+
+/** The id a pair of test labels would derive, without a caller reaching for `edgeIdFor` directly. */
+export const testEdgeId = (a: string, b: string): EdgeId =>
+  edgeIdFor(testBrickId(a), testBrickId(b));
+
 export const brick = (
-  id: BrickId,
-  overrides: Partial<Omit<BrickInstance, 'id'>> = {},
+  id: string,
+  overrides: Partial<Omit<BrickInstance, 'id' | 'groupId'>> & { groupId?: string } = {},
 ): BrickInstance => {
   const value: BrickInstance = {
-    id,
+    id: testBrickId(id),
     partId: overrides.partId ?? '3001',
     colorCode: overrides.colorCode ?? 4,
     transform: overrides.transform ?? fromTranslation([0, 0, 0]),
   };
-  if (overrides.groupId !== undefined) value.groupId = overrides.groupId;
+  if (overrides.groupId !== undefined) value.groupId = testGroupId(overrides.groupId);
   return value;
 };
 
 export const group = (id: string, name = id, parentId?: string): GroupDef => {
-  const value: GroupDef = { id, name };
-  if (parentId !== undefined) value.parentId = parentId;
+  const value: GroupDef = { id: testGroupId(id), name };
+  if (parentId !== undefined) value.parentId = testGroupId(parentId);
   return value;
 };
 
@@ -41,13 +55,17 @@ export const mate = (
   kind: SnapKind = 'cyl',
 ): Mate => ({ aPoint, bPoint, kind, polarity });
 
-export const link = (a: BrickId, b: BrickId, mates: readonly Mate[]): MateLink => ({ a, b, mates });
+export const link = (a: string, b: string, mates: readonly Mate[]): MateLink => ({
+  a: testBrickId(a),
+  b: testBrickId(b),
+  mates,
+});
 
 /** A whole edge, with the id the contract derives from the brick pair. */
-export const edge = (a: BrickId, b: BrickId, mates: readonly Mate[]): ConnectionEdge => ({
-  id: edgeIdFor(a, b),
-  a,
-  b,
+export const edge = (a: string, b: string, mates: readonly Mate[]): ConnectionEdge => ({
+  id: testEdgeId(a, b),
+  a: testBrickId(a),
+  b: testBrickId(b),
   mates,
 });
 

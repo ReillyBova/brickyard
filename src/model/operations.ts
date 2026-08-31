@@ -10,7 +10,7 @@
 
 import type { BrickId, GroupId, Mat4 } from '../types';
 import { asGraph } from './document';
-import { invert as invertMatrix, multiply } from './matrix';
+import { invert as invertMatrix, multiply } from '../math';
 import type {
   ApplyOperation,
   BrickInstance,

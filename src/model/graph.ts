@@ -11,7 +11,10 @@
 
 import type { BrickId, EdgeId } from '../types';
 import type { Mate } from '../snap/types';
+import { edgeIdFor } from './ids';
 import type { ConnectionEdge, ConnectionGraph, GraphNode } from './types';
+
+export { edgeIdFor };
 
 /**
  * A pairwise connection supplied by the caller. `mates` are expressed in the
@@ -26,18 +29,6 @@ export interface MateLink {
 
 /** Which adjacency list an edge occupies on each of its two nodes. */
 type EdgeDirection = 'a-out' | 'b-out' | 'peer';
-
-/**
- * Deterministic and orientation-independent, so add/remove/add is idempotent.
- *
- * `BrickId` is an unconstrained string, so a plain separator would not be injective:
- * {'x', 'y~z'} and {'x~y', 'z'} would both render as 'x~y~z'. Length-prefixing the
- * first id makes the encoding reversible and therefore collision-free.
- */
-export const edgeIdFor = (a: BrickId, b: BrickId): EdgeId => {
-  const [first, second] = a <= b ? [a, b] : [b, a];
-  return `${first.length}~${first}~${second}`;
-};
 
 /** Reverse a mate's sense, for restating a link in the opposite orientation. */
 export const flipMate = (m: Mate): Mate => ({

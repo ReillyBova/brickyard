@@ -15,8 +15,17 @@ import {
   groupDescendants,
   requireBrick,
 } from './document';
-import { edgeIdFor } from './graph';
-import { brick, group, link, mate, studOffset } from './testing';
+import {
+  brick,
+  edge,
+  group,
+  link,
+  mate,
+  studOffset,
+  testBrickId as bid,
+  testEdgeId as edgeId,
+  testGroupId as gid,
+} from './testing';
 
 const doc = () =>
   createDocument(
@@ -45,11 +54,11 @@ describe('construction', () => {
     const d = createDocument(
       [brick('b1'), brick('b2')],
       [],
-      [{ id: 'e', a: 'b1', b: 'b2', mates: [mate('s1', 'k1'), mate('s2', 'k2')] }],
+      [edge('b1', 'b2', [mate('s1', 'k1'), mate('s2', 'k2')])],
     );
     expect(d.graph.edges.size).toBe(1);
     expect([...d.graph.edges.values()][0].mates).toHaveLength(2);
-    expect(d.graph.neighbors('b1')).toEqual(['b2']);
+    expect(d.graph.neighbors(bid('b1'))).toEqual(['b2']);
   });
 
   it('rejects duplicate brick and group ids', () => {
@@ -60,23 +69,23 @@ describe('construction', () => {
 
 describe('accessors', () => {
   it('reads bricks and groups', () => {
-    expect(getBrick(doc(), 'b1')?.partId).toBe('3001');
-    expect(getBrick(doc(), 'ghost')).toBeUndefined();
-    expect(requireBrick(doc(), 'b2').groupId).toBe('g1');
-    expect(() => requireBrick(doc(), 'ghost')).toThrow(/unknown brick/);
-    expect(getGroup(doc(), 'g2')?.parentId).toBe('g1');
+    expect(getBrick(doc(), bid('b1'))?.partId).toBe('3001');
+    expect(getBrick(doc(), bid('ghost'))).toBeUndefined();
+    expect(requireBrick(doc(), bid('b2')).groupId).toBe('g1');
+    expect(() => requireBrick(doc(), bid('ghost'))).toThrow(/unknown brick/);
+    expect(getGroup(doc(), gid('g2'))?.parentId).toBe('g1');
     expect(allBricks(doc())).toHaveLength(4);
   });
 
   it('lists direct group members without flattening nested groups', () => {
-    expect(bricksInGroup(doc(), 'g1').map((b) => b.id)).toEqual(['b2']);
-    expect(bricksInGroup(doc(), 'g3')).toEqual([]);
+    expect(bricksInGroup(doc(), gid('g1')).map((b) => b.id)).toEqual(['b2']);
+    expect(bricksInGroup(doc(), gid('g3'))).toEqual([]);
   });
 
   it('walks the group tree', () => {
-    expect([...groupDescendants(doc(), 'g1')].sort()).toEqual(['g1', 'g2']);
-    expect([...groupDescendants(doc(), 'g3')]).toEqual(['g3']);
-    expect(bricksInGroupTree(doc(), 'g1').map((b) => b.id)).toEqual(['b2', 'b3']);
+    expect([...groupDescendants(doc(), gid('g1'))].sort()).toEqual(['g1', 'g2']);
+    expect([...groupDescendants(doc(), gid('g3'))]).toEqual(['g3']);
+    expect(bricksInGroupTree(doc(), gid('g1')).map((b) => b.id)).toEqual(['b2', 'b3']);
   });
 });
 
@@ -87,12 +96,12 @@ describe('connectivity', () => {
       link('b2', 'b3', [mate('f1', 'f2', 'symmetric', 'finger')]),
     ]);
     expect(connected.graph.edges.size).toBe(2);
-    expect([...assemblyOf(connected, 'b1')].sort()).toEqual(['b1', 'b2', 'b3']);
-    expect([...assemblyOf(connected, 'b4')]).toEqual(['b4']);
+    expect([...assemblyOf(connected, bid('b1'))].sort()).toEqual(['b1', 'b2', 'b3']);
+    expect([...assemblyOf(connected, bid('b4'))]).toEqual(['b4']);
 
-    const detached = disconnectBricks(connected, [{ a: 'b1', b: 'b2' }]);
-    expect(detached.graph.edges.has(edgeIdFor('b1', 'b2'))).toBe(false);
-    expect([...assemblyOf(detached, 'b1')]).toEqual(['b1']);
+    const detached = disconnectBricks(connected, [{ a: bid('b1'), b: bid('b2') }]);
+    expect(detached.graph.edges.has(edgeId('b1', 'b2'))).toBe(false);
+    expect([...assemblyOf(detached, bid('b1'))]).toEqual(['b1']);
     expect(detached.bricks).toBe(connected.bricks);
   });
 
