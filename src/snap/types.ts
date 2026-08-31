@@ -116,14 +116,43 @@ export interface SnapQuery {
 }
 
 /**
+ * A connection point as the index holds it: already in world space, and carrying its
+ * compatibility key, so a caller can test a match without a second lookup into the
+ * part definitions.
+ */
+export interface IndexedPoint extends PointRef {
+  /** World-space position, LDU. */
+  position: Vec3;
+  /** World-space connector axis, the point's local +Y transformed. */
+  axis: Vec3;
+  /** Copied from the ConnectionPoint. */
+  key: number;
+  kind: SnapKind;
+  gender: Gender;
+  /** SNAP_GEN matching group, when the kind is 'general'. */
+  group?: string;
+}
+
+/**
  * Uniform spatial hash over world-space connection points, cell size 20 LDU.
  * Supports O(1) insert and remove: bricks appear and disappear constantly.
  */
 export interface SpatialIndex {
   insert(brick: BrickId, part: PartDef, transform: Mat4): void;
   remove(brick: BrickId): void;
-  near(point: Vec3, radius: number): readonly PointRef[];
+  near(point: Vec3, radius: number): readonly IndexedPoint[];
   nearBricks(bounds: Bounds): readonly BrickId[];
+  /** Every brick currently indexed, for whole-scene solves. */
+  bricks(): readonly BrickId[];
+}
+
+/**
+ * Mates found against one already-placed brick. `aPoint` is on the moving part and
+ * `bPoint` on `brick`, so the orientation is explicit rather than positional.
+ */
+export interface MateGroup {
+  brick: BrickId;
+  mates: readonly Mate[];
 }
 
 /** Table lookup on precomputed keys. */
@@ -145,11 +174,18 @@ export type SolveMating = (
  * Every point pair that coincides once `transform` is applied. A 2×4 laid squarely
  * on another 2×4 mates eight studs, not one.
  */
+/**
+ * Every point pair that coincides once `transform` is applied — a 2x4 laid squarely on
+ * another 2x4 mates eight studs, not one. Runs *after* a placement is chosen, to
+ * discover what else engaged; it does not select the placement.
+ */
 export type FindMates = (
   movingPart: PartDef,
   transform: Mat4,
   index: SpatialIndex,
-) => readonly Mate[];
+  /** Bricks to ignore, normally the moving brick itself when it is already indexed. */
+  exclude?: ReadonlySet<BrickId>,
+) => readonly MateGroup[];
 
 export type Collides = (
   part: PartDef,
