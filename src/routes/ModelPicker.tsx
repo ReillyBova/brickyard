@@ -149,7 +149,7 @@ type LoadState =
   | { status: 'fetching' }
   | { status: 'importing'; progress: number }
   | { status: 'rendering'; result: ImportResult; importMs: number }
-  | { status: 'ready'; result: ImportResult; importMs: number; renderMs: number }
+  | { status: 'ready'; result: ImportResult; importMs: number; renderMs: number; skippedParts: number }
   | { status: 'error'; message: string };
 
 interface ModelViewerProps {
@@ -190,12 +190,28 @@ function ModelViewer({ entry, onBack }: ModelViewerProps) {
       const importMs = performance.now() - importStart;
       setState({ status: 'rendering', result, importMs });
 
+      // `renderer.loadDocument` fetches every brick's render geometry through one
+      // `Promise.all`, so a single part missing from the upstream mirror (a model file
+      // referencing a sibling prop `.ldr` that isn't part of the published catalog, for
+      // instance) would reject the whole batch and blank the viewer. Loading one brick
+      // at a time and swallowing individual failures keeps that "a part loads and
+      // renders, or degrades — it never blocks the model" guarantee
+      // (`docs/ARCHITECTURE.md`, "Fallback behaviour") for geometry too, not just
+      // connectivity.
       const renderStart = performance.now();
-      await renderer.loadDocument(result.document.bricks.values());
+      let skippedParts = 0;
+      for (const brick of result.document.bricks.values()) {
+        if (disposed) return;
+        try {
+          await renderer.addBrick(brick);
+        } catch {
+          skippedParts++;
+        }
+      }
       if (disposed) return;
       renderer.frameAll();
       const renderMs = performance.now() - renderStart;
-      setState({ status: 'ready', result, importMs, renderMs });
+      setState({ status: 'ready', result, importMs, renderMs, skippedParts });
 
       renderer.start();
       statsHandle = window.setInterval(() => {
@@ -273,6 +289,9 @@ function ModelViewer({ entry, onBack }: ModelViewerProps) {
             {state.status === 'ready' && <span>geometry {Math.round(state.renderMs)} ms</span>}
             {stats && <span>{stats.frameTimeMs > 0 ? Math.round(1000 / stats.frameTimeMs) : 0} fps</span>}
             {stats && <span>{stats.drawCalls} draw calls</span>}
+            {state.status === 'ready' && state.skippedParts > 0 && (
+              <span>{state.skippedParts} part{state.skippedParts === 1 ? '' : 's'} failed to load</span>
+            )}
           </>
         ) : (
           <span>{entry.brickCount.toLocaleString()} bricks · {entry.uniquePartCount} unique parts</span>
