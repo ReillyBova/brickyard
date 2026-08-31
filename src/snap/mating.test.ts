@@ -9,11 +9,12 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { IDENTITY, fromTranslation, multiply, transformPoint } from '../math';
+import { IDENTITY, determinant, fromTranslation, multiply, transformPoint } from '../math';
 import type { BrickId, Mat4 } from '../types';
 import { fixtureReader } from './__fixtures__/reader';
-import { isCompatible, unpackKey } from './compat';
-import { MATE_TOLERANCE, findMates, mateCount, solveMating, worldPoint } from './mating';
+import { isCompatible, keysCompatible, unpackKey } from './compat';
+import { packKey } from './parseMeta';
+import { MATE_TOLERANCE, findMates, mateCount, pointMatrix, solveMating, worldPoint } from './mating';
 import { resolvePart } from './resolvePart';
 import { HashSpatialIndex } from './spatialIndex';
 import type { ConnectionPoint, PartDef } from './types';
@@ -99,6 +100,94 @@ describe('solveMating', () => {
     const straight = transformPoint(solveMating(p, socket, stud, IDENTITY, 0), [0, 0, 0]);
     const turned = transformPoint(solveMating(p, socket, stud, IDENTITY, 1), [0, 0, 0]);
     expect(straight).not.toEqual(turned);
+  });
+});
+
+describe('handedness', () => {
+  // LDraw redirects radially-symmetric primitives with reflections: 4070 places its
+  // sideways stud through a reference whose determinant is -1. That is invisible in the
+  // geometry and very visible in the maths — mating composes the target frame with the
+  // inverse of the moving frame, so one left-handed basis mirrors the whole placed part
+  // while leaving the mated point exactly where it belongs, pointing exactly the right
+  // way. Position-and-axis assertions cannot see it; a determinant can.
+  it('4070 really does carry a left-handed connector basis', async () => {
+    const headlight = await part('4070');
+    const raw = headlight.connections.map((c) => c.orientation);
+    const dets = raw.map(
+      (o) =>
+        o[0] * (o[4] * o[8] - o[5] * o[7]) -
+        o[3] * (o[1] * o[8] - o[2] * o[7]) +
+        o[6] * (o[1] * o[5] - o[2] * o[4]),
+    );
+    expect(dets.some((d) => d < 0)).toBe(true);
+  });
+
+  it('never places a mirrored part, whatever the connector handedness', async () => {
+    const headlight = await part('4070');
+    const brick = await part('3001');
+
+    for (const target of headlight.connections) {
+      for (const moving of brick.connections) {
+        if (!isCompatible(moving, target)) continue;
+        for (const roll of [0, 1, 2, 3]) {
+          const placed = solveMating(brick, moving, target, IDENTITY, roll);
+          expect(determinant(placed)).toBeGreaterThan(0);
+        }
+      }
+    }
+  });
+
+  it('canonicalises every connector frame to right-handed', async () => {
+    for (const id of ['3001', '4070', '3700', '3818']) {
+      const p = await part(id);
+      for (const c of p.connections) {
+        expect(determinant(pointMatrix(c))).toBeGreaterThan(0);
+      }
+    }
+  });
+});
+
+describe('axle exclusivity', () => {
+  // A cross-section axle must not mate a round hole of the same radius: the whole point
+  // of the distinction in Technic is that a round pin spins and an axle does not.
+  const point = (variant: 'R' | 'S' | 'A', gender: 'M' | 'F'): ConnectionPoint => ({
+    id: `${variant}${gender}`,
+    kind: 'cyl',
+    gender,
+    sections: [{ variant, radius: 6, length: 4 }],
+    position: [0, 0, 0],
+    orientation: [1, 0, 0, 0, 1, 0, 0, 0, 1],
+    slide: false,
+    key: packKey('cyl', gender, [{ variant, radius: 6, length: 4 }], false),
+    source: 'test',
+  });
+
+  it('refuses an axle in a round hole and a round pin in an axle hole', () => {
+    expect(isCompatible(point('A', 'M'), point('R', 'F'))).toBe(false);
+    expect(isCompatible(point('R', 'M'), point('A', 'F'))).toBe(false);
+  });
+
+  it('accepts an axle in an axle hole', () => {
+    expect(isCompatible(point('A', 'M'), point('A', 'F'))).toBe(true);
+  });
+
+  it('still treats round and square as interchangeable', () => {
+    expect(isCompatible(point('R', 'M'), point('S', 'F'))).toBe(true);
+    expect(isCompatible(point('S', 'M'), point('R', 'F'))).toBe(true);
+  });
+
+  it('isCompatible and keysCompatible cannot disagree', () => {
+    for (const va of ['R', 'S', 'A'] as const) {
+      for (const vb of ['R', 'S', 'A'] as const) {
+        for (const ga of ['M', 'F'] as const) {
+          for (const gb of ['M', 'F'] as const) {
+            const a = point(va, ga);
+            const b = point(vb, gb);
+            expect(isCompatible(a, b)).toBe(keysCompatible(a.key, b.key, a.group, b.group));
+          }
+        }
+      }
+    }
   });
 });
 

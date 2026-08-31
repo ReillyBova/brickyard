@@ -13,7 +13,7 @@
  */
 
 import { fromBasis, fromYRotation, invert, multiply, transformDirection, transformPoint } from '../math';
-import type { BrickId, Mat4, Vec3 } from '../types';
+import type { BrickId, Mat3, Mat4, Vec3 } from '../types';
 import { keysCompatible, polarityOf, unpackKey } from './compat';
 import type { ConnectionPoint, Mate, MateGroup, PartDef, SpatialIndex } from './types';
 
@@ -35,9 +35,35 @@ export const MATE_TOLERANCE = 0.35;
  */
 const AXIS_TOLERANCE = 0.999;
 
-/** A connection point's own frame, in the part's local space. */
+/** Determinant of a column-major 3x3. */
+function det3(m: Mat3): number {
+  return (
+    m[0] * (m[4] * m[8] - m[5] * m[7]) -
+    m[3] * (m[1] * m[8] - m[2] * m[7]) +
+    m[6] * (m[1] * m[5] - m[2] * m[4])
+  );
+}
+
+/**
+ * A connection point's own frame, in the part's local space, forced right-handed.
+ *
+ * LDraw redirects radially-symmetric primitives with reflections: `4070` places its
+ * sideways stud through a reference whose determinant is -1, which is invisible in the
+ * geometry because a stud looks the same mirrored. It is not invisible here. Mating
+ * composes the target frame with the inverse of the moving frame, so one left-handed
+ * basis among the two makes the whole placed part a reflection of itself — with its
+ * mated point still in exactly the right place, pointing exactly the right way, which is
+ * why position-and-axis assertions sail straight past it.
+ *
+ * Negating the first basis column restores handedness while leaving +Y — the connector
+ * axis, and the only direction that carries meaning — untouched. Cylindrical connectors
+ * are radially symmetric, so the column choice is arbitrary anyway; roll about the axis
+ * is the user's to set.
+ */
 export function pointMatrix(p: ConnectionPoint): Mat4 {
-  return fromBasis(p.orientation, p.position);
+  const o = p.orientation;
+  const basis: Mat3 = det3(o) < 0 ? [-o[0], -o[1], -o[2], o[3], o[4], o[5], o[6], o[7], o[8]] : o;
+  return fromBasis(basis, p.position);
 }
 
 /** Where a connection point sits once its part is placed at `transform`. */

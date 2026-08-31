@@ -39,8 +39,9 @@ that matter here.
 - Reference resolution order (`parts/`, `p/`, `models/`) and 404 handling.
 - Compatibility keys: opposite genders match, same genders do not, radius bucketing, axle-in-round
   rejection.
-- `solveMating`: resulting transform places the moving point coincident and anti-parallel to the
-  target; roll rotates about the shared axis only.
+- `solveMating`: resulting transform places the moving point coincident with the target and
+  co-directional with it; roll rotates about the shared axis only; the placement is never a
+  reflection, including when a connector basis is left-handed.
 - `findMates`: an eight-stud coincidence is found for a squarely-stacked 2×4 pair.
 
 **`model/`**

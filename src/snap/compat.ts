@@ -57,28 +57,15 @@ function variantsMate(a: SectionVariant | null, b: SectionVariant | null): boole
  * - General points match only within their declared group, which is what the group is for.
  */
 export function isCompatible(a: ConnectionPoint, b: ConnectionPoint): boolean {
-  const ka = unpackKey(a.key);
-  const kb = unpackKey(b.key);
-  if (ka.kind === null || kb.kind === null) return false;
-  if (ka.radiusBucket !== kb.radiusBucket) return false;
-  if (!variantsMate(ka.variant, kb.variant)) return false;
-
-  const opposed = ka.gender !== null && kb.gender !== null && ka.gender !== kb.gender;
-
-  if (ka.kind === 'finger' || kb.kind === 'finger') {
-    // Symmetric, and only among themselves.
-    return ka.kind === 'finger' && kb.kind === 'finger' && a.group === b.group;
-  }
-  if (ka.kind === 'general' || kb.kind === 'general') {
-    return ka.kind === 'general' && kb.kind === 'general' && a.group === b.group && opposed;
-  }
-  // cyl and clip, in any combination.
-  return opposed;
+  return keysCompatible(a.key, b.key, a.group, b.group);
 }
 
 /**
- * The same test against index records, which carry the key but not the whole point.
- * `group` is compared directly because it does not fit in the packed key.
+ * The single implementation. Takes keys and groups rather than whole points so the
+ * spatial index, which stores only those, uses exactly the same rules as everything
+ * else — two copies of this logic would agree today and drift later.
+ *
+ * `group` is compared separately because it does not fit in the packed key.
  */
 export function keysCompatible(
   aKey: number,
@@ -95,11 +82,13 @@ export function keysCompatible(
   const opposed = ka.gender !== null && kb.gender !== null && ka.gender !== kb.gender;
 
   if (ka.kind === 'finger' || kb.kind === 'finger') {
+    // Symmetric, and only among themselves.
     return ka.kind === 'finger' && kb.kind === 'finger' && aGroup === bGroup;
   }
   if (ka.kind === 'general' || kb.kind === 'general') {
     return ka.kind === 'general' && kb.kind === 'general' && aGroup === bGroup && opposed;
   }
+  // cyl and clip, in any combination.
   return opposed;
 }
 
