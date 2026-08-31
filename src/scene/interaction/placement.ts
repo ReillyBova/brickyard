@@ -12,6 +12,7 @@
 
 import { IDENTITY } from '../../math';
 import type { BrickId, Mat4, Vec3 } from '../../types';
+import { collides } from '../../snap/collision';
 import { resolvePart } from '../../snap/resolvePart';
 import { groundPlacement, resolveSnap } from '../../snap/resolve';
 import { HashSpatialIndex } from '../../snap/spatialIndex';
@@ -94,13 +95,27 @@ export interface PlacementState {
   /** Quarter turns about the connection axis. */
   roll: number;
   transform: Mat4 | null;
+  /**
+   * Whether the shown placement can actually be made. Collision is a property of the
+   * placement, not of the candidate list: one test per frame against the transform
+   * being displayed. Testing several and quietly showing a non-colliding alternative
+   * would move the piece away from where the cursor is pointing, which is the failure
+   * this whole layer exists to avoid.
+   */
+  valid: boolean;
 }
 
 export class PlacementController {
   readonly index = new HashSpatialIndex();
   private readonly bricks = new Map<BrickId, PlacedBrick>();
 
-  private state: PlacementState = { candidates: [], index: 0, roll: 0, transform: null };
+  private state: PlacementState = {
+    candidates: [],
+    index: 0,
+    roll: 0,
+    transform: null,
+    valid: false,
+  };
   private held: PartDef | null = null;
   private heldColor = 4;
   private previous: Mat4 | undefined;
@@ -116,7 +131,7 @@ export class PlacementController {
     this.held = part;
     this.heldColor = colorCode;
     this.previous = undefined;
-    this.state = { candidates: [], index: 0, roll: 0, transform: null };
+    this.state = { candidates: [], index: 0, roll: 0, transform: null, valid: false };
     if (part === null) this.scene.hideGhost();
   }
 
@@ -168,7 +183,13 @@ export class PlacementController {
       transform = groundPlacement(part, ray.origin, ray.direction);
     }
 
-    this.state = { candidates, index: 0, roll: this.state.roll, transform };
+    this.state = {
+      candidates,
+      index: 0,
+      roll: this.state.roll,
+      transform,
+      valid: transform === null ? false : !collides(part, transform, this.index),
+    };
     this.previous = transform ?? undefined;
     void this.paint();
     return transform;
@@ -178,7 +199,13 @@ export class PlacementController {
   cycle(): void {
     if (this.state.candidates.length < 2) return;
     const index = (this.state.index + 1) % this.state.candidates.length;
-    this.state = { ...this.state, index, transform: this.state.candidates[index].transform };
+    const transform = this.state.candidates[index].transform;
+    this.state = {
+      ...this.state,
+      index,
+      transform,
+      valid: this.held === null ? false : !collides(this.held, transform, this.index),
+    };
     this.previous = this.state.transform ?? undefined;
     void this.paint();
   }
@@ -201,8 +228,7 @@ export class PlacementController {
       this.scene.hideGhost();
       return;
     }
-    const snapped = this.state.candidates.length > 0;
-    await this.scene.showGhost(this.held.id, this.heldColor, transform, snapped);
+    await this.scene.showGhost(this.held.id, this.heldColor, transform, this.state.valid);
   }
 
   /**
@@ -210,8 +236,8 @@ export class PlacementController {
    * place — the caller decides whether that is worth saying out loud.
    */
   commit(id: BrickId): PlacedBrick | null {
-    const { transform } = this.state;
-    if (this.held === null || transform === null) return null;
+    const { transform, valid } = this.state;
+    if (this.held === null || transform === null || !valid) return null;
 
     const brick: PlacedBrick = {
       id,
@@ -225,7 +251,13 @@ export class PlacementController {
     // Clear the committed placement. Without this every pointerup re-places the same
     // transform, so a stationary double-click stacks bricks inside each other — and
     // `previous` would anchor continuity to a position the ghost has already left.
-    this.state = { candidates: [], index: 0, roll: this.state.roll, transform: null };
+    this.state = {
+      candidates: [],
+      index: 0,
+      roll: this.state.roll,
+      transform: null,
+      valid: false,
+    };
     this.previous = undefined;
     this.scene.hideGhost();
     return brick;
