@@ -38,7 +38,7 @@ flowchart LR
 single 1.7 MB zip. Fetching them individually would mean tens of thousands of requests against
 volunteer-run infrastructure for exactly the same bytes.
 
-Rules for `tools/sync-mirror.mjs`:
+Rules for `tools/sync-mirror.ts`:
 
 - Bulk archives only. Never crawl the file APIs to build a mirror.
 - Store `ETag` and `Last-Modified`; subsequent syncs send `If-None-Match` and stop at `304`.
@@ -162,9 +162,13 @@ application's licence:
 The application code stays MIT. `public/baked/` ships a `LICENSE.txt` naming each upstream source and
 its terms, and `README.md` carries the same attributions.
 
+Build-time scripts in `tools/` are TypeScript, run directly by Node's native type stripping — no
+build step, and no hand-written declaration files to drift out of sync with the code. They type-check
+under `tsconfig.tools.json`.
+
 ## Determinism
 
-The bake is a pure function of the mirror contents. `tools/prebake.mjs` writes a manifest recording
+The bake is a pure function of the mirror contents. `tools/prebake.ts` writes a manifest recording
 the source library version, the shadow library commit, and a content hash of each output, so a stale
 or partial bake is detectable rather than mysterious.
 
