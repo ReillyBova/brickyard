@@ -35,6 +35,8 @@ export function BuilderCanvas(): React.JSX.Element {
     const catalog = createPartCatalog();
     let disposed = false;
     let dragging = false;
+    // Kept so a key press can re-solve at the current pointer position.
+    let lastPointer: [number, number] | undefined;
 
     const start = async (): Promise<void> => {
       const part = await catalog(SEED_PART);
@@ -71,7 +73,8 @@ export function BuilderCanvas(): React.JSX.Element {
         dragging = true;
         return;
       }
-      placement.move(...ndc(canvas, event));
+      lastPointer = ndc(canvas, event);
+      placement.move(...lastPointer);
     };
     const onUp = (event: PointerEvent): void => {
       if (dragging) return;
@@ -81,19 +84,22 @@ export function BuilderCanvas(): React.JSX.Element {
       void renderer.addBrick(brick);
       setCount((n) => n + 1);
     };
+    // Scoped to the canvas, not the window: Tab is the browser's own navigation key and
+    // swallowing it globally would trap keyboard users once the chest and palette are
+    // mounted alongside this.
     const onKey = (event: KeyboardEvent): void => {
       if (event.key === 'Tab') {
         event.preventDefault();
         placement.cycle();
       } else if (event.key.toLowerCase() === 'r') {
-        placement.rotate();
+        placement.rotate(lastPointer);
       }
     };
 
     canvas.addEventListener('pointerdown', onDown);
     canvas.addEventListener('pointermove', onMove);
     canvas.addEventListener('pointerup', onUp);
-    window.addEventListener('keydown', onKey);
+    canvas.addEventListener('keydown', onKey);
 
     const resize = (): void => {
       const rect = canvas.getBoundingClientRect();
@@ -108,7 +114,7 @@ export function BuilderCanvas(): React.JSX.Element {
       canvas.removeEventListener('pointerdown', onDown);
       canvas.removeEventListener('pointermove', onMove);
       canvas.removeEventListener('pointerup', onUp);
-      window.removeEventListener('keydown', onKey);
+      canvas.removeEventListener('keydown', onKey);
       observer.disconnect();
       renderer.dispose();
     };
@@ -116,7 +122,8 @@ export function BuilderCanvas(): React.JSX.Element {
 
   return (
     <>
-      <canvas ref={canvasRef} />
+      {/* Focusable so it can receive keys without a window-level listener. */}
+      <canvas ref={canvasRef} tabIndex={0} aria-label="Building canvas" />
       <div className="by-statusbar">
         <span>
           {count} {count === 1 ? 'brick' : 'bricks'}

@@ -33,12 +33,18 @@ export function createPartCatalog(): (partId: string) => Promise<PartDef> {
 
   const read = async (relativePath: string): Promise<string | null> => {
     const cached = files.get(relativePath);
-    if (cached) return cached;
+    if (cached) return cached.catch(() => null);
     const base = relativePath.startsWith('shadow/') ? SHADOW_BASE : LDRAW_BASE;
     const rest = relativePath.replace(/^(shadow|ldraw)\//, '');
     const pending = fetch(base + rest)
       .then((r) => (r.ok ? r.text() : null))
-      .catch(() => null);
+      .catch((error: unknown) => {
+        // A 404 is a real answer and worth caching — the resolver probes paths that
+        // legitimately do not exist. A thrown request is not: caching it would break
+        // the part for the rest of the session over one dropped connection.
+        files.delete(relativePath);
+        throw error;
+      });
     files.set(relativePath, pending);
     return pending;
   };
@@ -177,9 +183,16 @@ export class PlacementController {
     void this.paint();
   }
 
-  /** Quarter turn about the connection axis. */
-  rotate(): void {
+  /**
+   * Quarter turn about the connection axis.
+   *
+   * Takes the last pointer position so the placement can be re-solved immediately.
+   * Changing `roll` alone leaves the ghost showing the old orientation until the
+   * pointer happens to move, which reads as the key not working.
+   */
+  rotate(ndc?: readonly [number, number]): void {
     this.state = { ...this.state, roll: (this.state.roll + 1) % 4 };
+    if (ndc) this.move(ndc[0], ndc[1]);
   }
 
   private async paint(): Promise<void> {
@@ -208,6 +221,13 @@ export class PlacementController {
       part: this.held,
     };
     this.add(brick);
+
+    // Clear the committed placement. Without this every pointerup re-places the same
+    // transform, so a stationary double-click stacks bricks inside each other — and
+    // `previous` would anchor continuity to a position the ghost has already left.
+    this.state = { candidates: [], index: 0, roll: this.state.roll, transform: null };
+    this.previous = undefined;
+    this.scene.hideGhost();
     return brick;
   }
 

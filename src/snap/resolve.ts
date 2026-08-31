@@ -14,12 +14,12 @@
  * The weights below are the product. They are meant to be tuned by using the tool.
  */
 
-import { positionOf, transformPoint } from '../math';
+import { positionOf } from '../math';
 import type { BrickId, Mat4, Vec3 } from '../types';
 import { isCompatible } from './compat';
-import { findMates, solveMating, worldPoint } from './mating';
+import { findMates, solveMating } from './mating';
 import type {
-  ConnectionPoint,
+  BrickLookup,
   IndexedPoint,
   MateGroup,
   PartDef,
@@ -27,9 +27,6 @@ import type {
   SnapQuery,
   SpatialIndex,
 } from './types';
-
-/** Resolves a placed brick back to what it is and where it sits. */
-export type BrickLookup = (id: BrickId) => { part: PartDef; transform: Mat4 } | null;
 
 export interface ResolveOptions {
   /**
@@ -49,8 +46,23 @@ const DEFAULTS = {
   maxCandidates: 8,
 } as const;
 
+/**
+ * How closely a connector's axis must align with the hit face's normal to count as
+ * belonging to that face. A connector on the face is perpendicular to it, so the two are
+ * near-parallel; one on an adjacent face is near-perpendicular. 0.7 is a 45 degree cone,
+ * wide enough for recessed connectors like 4070's and narrow enough to exclude the faces
+ * you are not pointing at.
+ *
+ * Sign is ignored: a stud on the top face points along -normal and a socket on the bottom
+ * face along +normal, and both belong to the face they sit on.
+ */
+const FACE_ALIGNMENT = 0.7;
+
 const distance = (a: Vec3, b: Vec3): number =>
   Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+
+const onHitFace = (p: IndexedPoint, normal: Vec3): boolean =>
+  Math.abs(p.axis[0] * normal[0] + p.axis[1] * normal[1] + p.axis[2] * normal[2]) >= FACE_ALIGNMENT;
 
 /**
  * Rank one pairing.
@@ -70,9 +82,15 @@ function scoreOf(
   placed: Mat4,
   previous: Mat4 | undefined,
   weight: number,
+  searchRadius: number,
 ): number {
   const proximity = distance(targetWorldPos, cursor);
-  const drift = previous ? distance(positionOf(placed), positionOf(previous)) : 0;
+  // Proximity is bounded by the search radius, so drift must be bounded too. Left
+  // unbounded it grows without limit as the ghost travels and swamps the cursor signal
+  // it is only meant to break ties on — the piece would start preferring where it
+  // already was over where you are pointing.
+  const raw = previous ? distance(positionOf(placed), positionOf(previous)) : 0;
+  const drift = Math.min(raw, searchRadius);
   // Higher is better, so both penalties are negative.
   return -(proximity + weight * drift);
 }
@@ -100,10 +118,12 @@ export function resolveSnap(
   const host = lookup(hit.brick);
   if (!host) return [];
 
-  // Filter one: the brick under the cursor. Filter two: near where on it.
+  // Three filters, from the one raycast: which brick, where on it, and which face. The
+  // face filter is what makes studs-not-on-top placement feel deliberate — hover a
+  // brick's side and you are offered its side connectors, not the studs on its top.
   const nearby: IndexedPoint[] = index
     .near(hit.point, searchRadius)
-    .filter((p) => p.brick === hit.brick);
+    .filter((p) => p.brick === hit.brick && onHitFace(p, hit.normal));
   if (nearby.length === 0) return [];
 
   const targetsById = new Map(host.part.connections.map((c) => [c.id, c]));
@@ -124,7 +144,14 @@ export function resolveSnap(
         target: { brick: hit.brick, point: target.id },
         transform: placed,
         mates: [],
-        score: scoreOf(near.position, hit.point, placed, query.previous, continuityWeight),
+        score: scoreOf(
+          near.position,
+          hit.point,
+          placed,
+          query.previous,
+          continuityWeight,
+          searchRadius,
+        ),
       });
     }
   }
@@ -167,10 +194,3 @@ export function groundPlacement(part: PartDef, origin: Vec3, direction: Vec3): M
   // bounds.max[1] is the lowest point, because +Y is down.
   return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, -part.bounds.max[1], z, 1];
 }
-
-/** The world position a candidate would put the part's origin at. */
-export const placementOrigin = (c: SnapCandidate): Vec3 => positionOf(c.transform);
-
-/** Where a given connection point ends up under a candidate, for drawing feedback. */
-export const candidatePoint = (c: SnapCandidate, p: ConnectionPoint): Vec3 =>
-  transformPoint(c.transform, worldPoint(p, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]).position);
