@@ -147,67 +147,69 @@ export function ColorPicker({ colors, selectedCode, onSelect }: ColorPickerProps
   const current = colors.find((color) => color.code === selectedCode);
 
   return (
-    <div className="by-panel by-palette">
-      <div className="by-panel__head">
-        <div className="by-panel__title">Color</div>
-      </div>
-      <div className="by-panel__body" ref={containerRef}>
-        {current !== undefined && (
-          <div className="by-palette__current">
-            <span
-              className={`by-palette__blob ${MATERIAL_MARK[current.material]}`}
-              style={{ backgroundColor: current.hex, borderColor: current.edgeHex }}
-              aria-hidden="true"
+    <div className="by-palette-wrap">
+      <div className="by-panel by-palette">
+        <div className="by-panel__head">
+          <div className="by-panel__title">Color Palette</div>
+        </div>
+        <div className="by-panel__body" ref={containerRef}>
+          {current !== undefined && (
+            <div className="by-palette__current">
+              <span
+                className={`by-palette__blob ${MATERIAL_MARK[current.material]}`}
+                style={{ backgroundColor: current.hex, borderColor: current.edgeHex }}
+                aria-hidden="true"
+              />
+              <span className="by-palette__current-text">
+                <span className="by-palette__current-name">{current.name}</span>
+                <span className="by-mono by-faint">{current.code} · {MATERIAL_LABEL[current.material]}</span>
+              </span>
+            </div>
+          )}
+
+          <div className="by-eyebrow" style={{ marginBottom: 'var(--by-space-2)' }}>
+            Solid
+          </div>
+          <div className="by-palette__cluster" aria-label="Solid">
+            <Swatches
+              colors={solids}
+              selectedCode={selectedCode}
+              indexOf={indexOf}
+              onSelect={onSelect}
+              onKeyDown={onKeyDown}
             />
-            <span className="by-palette__current-text">
-              <span className="by-palette__current-name">{current.name}</span>
-              <span className="by-mono by-faint">{current.code} · {MATERIAL_LABEL[current.material]}</span>
-            </span>
           </div>
-        )}
 
-        <div className="by-eyebrow" style={{ marginBottom: 'var(--by-space-2)' }}>
-          Solid
-        </div>
-        <div className="by-palette__cluster" aria-label="Solid">
-          <Swatches
-            colors={solids}
-            selectedCode={selectedCode}
-            indexOf={indexOf}
-            onSelect={onSelect}
-            onKeyDown={onKeyDown}
-          />
-        </div>
-
-        <details
-          className="by-accordion"
-          open={othersOpen}
-          onToggle={(event) => setOthersOpen(event.currentTarget.open)}
-        >
-          <summary className="by-accordion__summary">
-            <ChevronDownIcon className="by-accordion__chevron" />
-            More finishes
-            <span className="by-mono by-faint">{otherCount}</span>
-          </summary>
-          <div className="by-accordion__body">
-            {otherGroups.map((group, groupIndex) => (
-              <div key={group.material} style={{ marginTop: groupIndex === 0 ? 0 : 'var(--by-space-3)' }}>
-                <div className="by-eyebrow" style={{ marginBottom: 'var(--by-space-2)' }}>
-                  {MATERIAL_LABEL[group.material]}
+          <details
+            className="by-accordion"
+            open={othersOpen}
+            onToggle={(event) => setOthersOpen(event.currentTarget.open)}
+          >
+            <summary className="by-accordion__summary">
+              <ChevronDownIcon className="by-accordion__chevron" />
+              More finishes
+              <span className="by-mono by-faint">{otherCount}</span>
+            </summary>
+            <div className="by-accordion__body">
+              {otherGroups.map((group, groupIndex) => (
+                <div key={group.material} style={{ marginTop: groupIndex === 0 ? 0 : 'var(--by-space-3)' }}>
+                  <div className="by-eyebrow" style={{ marginBottom: 'var(--by-space-2)' }}>
+                    {MATERIAL_LABEL[group.material]}
+                  </div>
+                  <div className="by-palette__cluster" aria-label={MATERIAL_LABEL[group.material]}>
+                    <Swatches
+                      colors={group.colors}
+                      selectedCode={selectedCode}
+                      indexOf={indexOf}
+                      onSelect={onSelect}
+                      onKeyDown={onKeyDown}
+                    />
+                  </div>
                 </div>
-                <div className="by-palette__cluster" aria-label={MATERIAL_LABEL[group.material]}>
-                  <Swatches
-                    colors={group.colors}
-                    selectedCode={selectedCode}
-                    indexOf={indexOf}
-                    onSelect={onSelect}
-                    onKeyDown={onKeyDown}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        </details>
+              ))}
+            </div>
+          </details>
+        </div>
       </div>
     </div>
   );

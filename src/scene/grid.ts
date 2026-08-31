@@ -21,7 +21,7 @@ import { readColorToken, watchTheme } from './theme.ts';
 const STUD_PITCH = 20;
 const DOT_OPACITY = 0.6;
 /** Screen-space point diameter, in physical (device) pixels. */
-const DOT_SIZE_PX = 3.5;
+const DOT_SIZE_PX = 5.5;
 /** Fade starts this far from the camera and is fully gone by the far distance. */
 const FADE_NEAR = 8 * STUD_PITCH;
 
