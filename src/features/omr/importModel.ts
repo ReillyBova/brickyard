@@ -3,9 +3,10 @@
  *
  * Three phases, matching the "opening a model" flow in `docs/ARCHITECTURE.md`:
  *
- * 1. Resolve every unique part's connections, bounds, and occupancy — `resolvePart` for
- *    connectivity, `partTriangles`/`boundsFromTriangles`/`buildOccupancy` for the rest —
- *    in parallel, once per distinct part id rather than once per brick.
+ * 1. Resolve every unique part's connections and bounds — `resolvePart` for connectivity,
+ *    `partTriangles`/`boundsFromTriangles` for bounds — in parallel, once per distinct
+ *    part id rather than once per brick. Occupancy is a placeholder; see
+ *    `PLACEHOLDER_OCCUPANCY` below for why.
  * 2. Mint a `BrickInstance` per flattened reference and index it in a `SpatialIndex`.
  * 3. Solve the connection graph geometrically with `findMates` (via `matesForCommit`),
  *    the same code the placement interaction uses, so an imported model's connectivity
@@ -24,9 +25,8 @@
 import { HashSpatialIndex } from '../../snap/spatialIndex';
 import { resolvePart, type ReadFile } from '../../snap/resolvePart';
 import { matesForCommit } from '../../snap/resolve';
-import type { PartDef } from '../../snap/types';
+import type { OccupancyMask, PartDef } from '../../snap/types';
 import { partTriangles, boundsFromTriangles } from '../../ldraw/bounds';
-import { buildOccupancy } from '../../snap/collision';
 import { mintBrickId } from '../../model/ids';
 import { createDocument, connectBricks } from '../../model/document';
 import type { MateLink } from '../../model/graph';
@@ -36,6 +36,26 @@ import { parseMpd, type ParsedModel } from './parseMpd';
 
 export type { ReadFile };
 
+/**
+ * A stand-in for a real occupancy mask. `buildOccupancy` (`src/snap/collision.ts`)
+ * voxelises a part's full triangle soup at 4 LDU and its interior pass is
+ * O(voxels × triangles) — fine for an ordinary brick (hundreds of each), but a measured
+ * 187.7 **seconds** for one part alone on Galaxy Explorer (928): `3947`, the radar dish
+ * (160×15×160 = 384,000 voxels against 39,304 triangles). That single part accounted for
+ * over 80% of a 232-second import.
+ *
+ * Occupancy exists for collision detection during interactive placement, which this
+ * viewer never exercises — it loads a document and renders it, it does not let anyone
+ * drag a brick into another. Computing a real mask here would pay that cost for every
+ * unique part in every bundled model on every open, for a query this pipeline never
+ * makes. A degenerate 1-voxel mask keeps `PartDef` well-typed without the cost; real
+ * occupancy is a bake-time concern once a part reaches the chest (`docs/PREBAKE.md`), not
+ * something a one-off import should compute cold. The underlying performance cliff in
+ * `buildOccupancy` is real regardless of this workaround — flagged separately, since it
+ * would also hang a real interactive drag on a dish-shaped part; see the import report.
+ */
+const PLACEHOLDER_OCCUPANCY: OccupancyMask = { dims: [1, 1, 1], bits: new Uint8Array(1) };
+
 /** Everything resolving one part id costs, reused across every brick that references it. */
 async function resolveFullPart(partId: string, read: ReadFile): Promise<PartDef> {
   const [connections, triangles] = await Promise.all([
@@ -43,8 +63,7 @@ async function resolveFullPart(partId: string, read: ReadFile): Promise<PartDef>
     partTriangles(partId, read),
   ]);
   const bounds = boundsFromTriangles(triangles);
-  const occupancy = buildOccupancy(triangles, bounds, connections);
-  return { id: partId, title: partId, connections, bounds, occupancy };
+  return { id: partId, title: partId, connections, bounds, occupancy: PLACEHOLDER_OCCUPANCY };
 }
 
 export interface ImportOptions {
