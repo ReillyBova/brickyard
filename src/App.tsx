@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 
-import { SceneCanvas } from './scene/index.ts';
+import { BuilderCanvas } from './scene/interaction/BuilderCanvas.tsx';
 import { AppShell } from './ui/AppShell/AppShell';
 import { ColorPicker } from './ui/ColorPicker/ColorPicker';
 import { LDRAW_PALETTE } from './ui/ColorPicker/palette';
@@ -30,7 +30,7 @@ function App() {
 
   return (
     <AppShell
-      viewport={<SceneCanvas />}
+      viewport={<BuilderCanvas />}
       chestPanel={
         <PartsChest
           parts={MOCK_PARTS}
