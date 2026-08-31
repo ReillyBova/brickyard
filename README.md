@@ -1,32 +1,61 @@
-# React + TypeScript + Vite
+# Brickyard
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+A browser-based brick building canvas. Snap pieces together the way real bricks do — including
+sideways building, clips, bars, axles, hinges and minifigures — then restyle, render, or take apart
+real published models.
 
-Currently, two official plugins are available:
+Built with three.js and React. Runs entirely in the browser; no server, no account.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Running locally
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm install
+npm run dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Then open http://localhost:5173.
+
+To run several instances at once (useful when working on branches in parallel):
+
+```bash
+PORT=5174 npm run dev
+```
+
+## How it works
+
+Brick geometry comes from the [LDraw parts library](https://library.ldraw.org/), an open corpus of
+several thousand parts. LDraw files describe geometry only — they carry no information about how
+pieces attach — so connection data comes from the
+[LDCad shadow library](https://github.com/RolandMelkert/LDCadShadowLibrary), which annotates LDraw
+primitives with typed connection points:
+
+```
+p/stud.dat →  0 !LDCAD SNAP_CYL [ID=studC] [gender=M] [caps=one] [secs=R 6 4]
+```
+
+Because the annotations live on *primitives*, any part that references `stud.dat` inherits a stud
+connector at that reference's transform. Walking a part's subfile tree and accumulating transforms
+therefore yields its full connection geometry — with no per-part authoring, and with orientation
+preserved, which is why sideways and angled building work without special cases.
+
+Placement matches compatible connection points and solves the rigid transform that mates them.
+
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the type contracts and module layout.
+
+## Attribution
+
+This project is not affiliated with or endorsed by the LEGO Group. LEGO® is a trademark of the LEGO
+Group.
+
+| Source | License |
+| --- | --- |
+| [LDraw Parts Library](https://library.ldraw.org/) | CC BY 2.0 |
+| [LDCad Shadow Library](https://github.com/RolandMelkert/LDCadShadowLibrary) — Roland Melkert | CC BY-SA 4.0 |
+| [LDraw Official Model Repository](https://library.ldraw.org/omr) | CC BY 4.0 |
+| [three-gpu-pathtracer](https://github.com/gkjohnson/three-gpu-pathtracer) | MIT |
+| [three.js](https://threejs.org/) | MIT |
+
+## License
+
+MIT for the application code. Bundled part and model data retain their original licenses as listed
+above.
