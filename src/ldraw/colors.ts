@@ -11,7 +11,7 @@
  * speckle or glitter particles, so top-level parsing stops where that block begins.
  */
 
-import type { ColorLibrary, LDrawColor, MaterialClass } from './types'
+import type { ColorLibrary, LDrawColor, MaterialClass } from './types.ts'
 
 /** Colour 16 inherits from the referencing line. */
 export const INHERIT_COLOR_CODE = 16

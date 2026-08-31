@@ -14,11 +14,11 @@ import {
   readCentralDirectoryLocation,
   readZipEntries,
   safeEntryPath,
-} from '../../tools/sync-mirror.mjs'
+} from '../../tools/sync-mirror.ts'
 
 // ---------------------------------------------------------------------------
 // Hand-built zips. No archiver dependency: this writes the same central-directory
-// + local-header bytes `sync-mirror.mjs` reads, entry by entry, so the fixture can
+// + local-header bytes `sync-mirror.ts` reads, entry by entry, so the fixture can
 // be corrupted precisely for the failure-path tests.
 // ---------------------------------------------------------------------------
 
@@ -233,19 +233,23 @@ describe('safeEntryPath', () => {
 
 describe('extractZip — path traversal', () => {
   it('writes safe entries and skips every malicious one, none escaping the destination', () => {
+    // Deliberately no shared top-level directory here: mixing traversal-check fixtures with
+    // commonRoot's root-stripping is covered separately below (a malicious entry's own
+    // fabricated head, e.g. '..' from '../../etc/passwd', must not interact with stripping
+    // decisions for legitimate entries).
     const zip = buildZip([
-      entry('root/good.txt', 'fine'),
+      entry('good.txt', 'fine'),
       entry('../../etc/passwd', 'evil'),
       entry('/etc/passwd', 'evil'),
       entry('C:\\Windows\\system.ini', 'evil'),
-      entry('root/good/../../evil.txt', 'evil'),
+      entry('good/../../evil.txt', 'evil'),
       entry('..', 'evil'),
-      entry('root/..\\..\\evil.txt', 'evil'),
+      entry('..\\..\\evil.txt', 'evil'),
     ])
     const destination = path.join(workdir, 'dest')
     const result = extractZip(zip.buf, destination)
 
-    // Only the one safe entry, stripped of its shared 'root/' prefix.
+    // Only the one safe entry.
     expect(listFiles(destination)).toEqual(['good.txt'])
     expect(result.files).toBe(1)
     expect(readFileSync(path.join(destination, 'good.txt'), 'utf8')).toBe('fine')
@@ -318,7 +322,7 @@ describe('extractZip — corrupt or truncated entries', () => {
   })
 })
 
-describe('commonRoot — per-entry, not all-or-nothing', () => {
+describe('commonRoot — a stray top-level file does not veto the shared root', () => {
   it('still strips the shared root when one stray top-level entry has none', () => {
     const entries = readZipEntries(
       buildZip([
@@ -343,5 +347,34 @@ describe('commonRoot — per-entry, not all-or-nothing', () => {
     expect(listFiles(destination)).toEqual(['README.txt', 'p/stud.dat', 'parts/3001.dat'])
     expect(readFileSync(path.join(destination, 'README.txt'), 'utf8')).toBe('stray top-level file')
     expect(readFileSync(path.join(destination, 'parts/3001.dat'), 'utf8')).toBe('part data')
+  })
+})
+
+describe('commonRoot — two genuine, disagreeing roots strip nothing', () => {
+  it('returns null rather than picking a winner', () => {
+    const entries = readZipEntries(
+      buildZip([
+        entry('parts/3001.dat', 'part data'),
+        entry('parts/3002.dat', 'part data'),
+        entry('parts/3003.dat', 'part data'),
+        entry('p/stud.dat', 'primitive data'),
+      ]).buf,
+    )
+    // 'parts' has three entries and 'p' has one — a "most common wins" policy would pick
+    // 'parts' and silently flatten it while leaving 'p' alone. That's wrong: an archive with
+    // two real content roots and no shared parent must be left unstripped rather than mangled.
+    expect(commonRoot(entries)).toBeNull()
+  })
+
+  it('extracts every entry at its own un-stripped path', () => {
+    const zip = buildZip([
+      entry('parts/3001.dat', 'part data'),
+      entry('p/stud.dat', 'primitive data'),
+    ])
+    const destination = path.join(workdir, 'dest')
+    const result = extractZip(zip.buf, destination)
+
+    expect(result.root).toBeNull()
+    expect(listFiles(destination)).toEqual(['p/stud.dat', 'parts/3001.dat'])
   })
 })

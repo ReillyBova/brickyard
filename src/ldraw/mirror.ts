@@ -1,5 +1,5 @@
 /**
- * Reading LDraw source files from the local mirror populated by `tools/sync-mirror.mjs`.
+ * Reading LDraw source files from the local mirror populated by `tools/sync-mirror.ts`.
  *
  * This is what makes the bake offline: a reader with this signature is injected into a parser,
  * which then never knows whether bytes came from disk or from the network.
@@ -18,7 +18,7 @@
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 
-import type { ColorLibrary } from './types'
+import type { ColorLibrary } from './types.ts'
 import { parseColorLibrary, parseLibraryVersion } from './colors.ts'
 
 /** Reads one LDraw reference, returning `null` when the mirror does not have it. */

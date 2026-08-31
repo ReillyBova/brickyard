@@ -10,8 +10,8 @@
     "preview": "vite preview",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
-    "sync-mirror": "node tools/sync-mirror.mjs",
-    "prebake": "node tools/prebake.mjs",
+    "sync-mirror": "node tools/sync-mirror.ts",
+    "prebake": "node tools/prebake.ts",
     "test:perf": "vitest run --config vitest.perf.config.ts"
   },
   "dependencies": {

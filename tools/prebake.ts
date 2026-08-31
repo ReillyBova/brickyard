@@ -3,10 +3,10 @@
  * Bakes the shipped catalog from the local mirror into `public/baked/`.
  *
  * **This script makes no network requests.** Everything it needs comes from `.cache/ldraw/`,
- * populated separately by `tools/sync-mirror.mjs`. Re-baking a hundred times costs upstream
+ * populated separately by `tools/sync-mirror.ts`. Re-baking a hundred times costs upstream
  * nothing, which is the whole point of the split.
  *
- * Usage: node tools/prebake.mjs [--mirror <dir>] [--out <dir>] [--chest <ids>] [--pretty]
+ * Usage: node tools/prebake.ts [--mirror <dir>] [--out <dir>] [--chest <ids>] [--pretty]
  */
 
 import { createHash } from 'node:crypto'
@@ -14,6 +14,7 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
 
+import type { CatalogEntry } from '../src/ldraw/types.ts'
 import {
   DEFAULT_MIRROR_ROOT,
   createLibraryReader,
@@ -21,13 +22,14 @@ import {
   mirrorExists,
   readArchiveMeta,
   readColorLibrary,
+  type MirrorReader,
 } from '../src/ldraw/mirror.ts'
 
 /**
  * The chest during development. It grows into a curated popular set before shipping; the list is
  * deliberately literal rather than derived, because chest membership is a product decision.
  */
-const DEFAULT_CHEST = [
+const DEFAULT_CHEST: readonly string[] = [
   '3001', // Brick 2 x 4
   '3002', // Brick 2 x 3
   '3003', // Brick 2 x 2
@@ -58,10 +60,10 @@ const DEFAULT_CHEST = [
  * Title and category from a part header. Line 1 is the description; `0 !CATEGORY` overrides the
  * implicit category, which is otherwise the first word of the description.
  */
-function readPartHeader(text) {
+function readPartHeader(text: string): { title: string; category: string } {
   const lines = text.split(/\r?\n/)
   let title = ''
-  let category = null
+  let category: string | null = null
 
   for (const rawLine of lines) {
     const line = rawLine.trim()
@@ -87,6 +89,17 @@ function readPartHeader(text) {
 // Seam: connection-point resolution
 // ---------------------------------------------------------------------------
 
+interface ConnectionReaders {
+  readLibrary: MirrorReader
+  readShadow: MirrorReader
+}
+
+interface ConnectionResolution {
+  parts: unknown[]
+  covered: number
+  implemented: boolean
+}
+
 /**
  * ============================ INTEGRATION SEAM ============================
  * Connection-point resolution plugs in here. It belongs to the `src/snap/` slice, which owns the
@@ -103,7 +116,10 @@ function readPartHeader(text) {
  * and a catalog carrying real titles, which exercises the mirror end to end.
  * =========================================================================
  */
-async function resolveConnections(partIds, readers) {
+async function resolveConnections(
+  partIds: string[],
+  readers: ConnectionReaders,
+): Promise<ConnectionResolution> {
   void partIds
   void readers
   return { parts: [], covered: 0, implemented: false }
@@ -133,13 +149,16 @@ LEGO is a trademark of the LEGO Group, which does not sponsor or endorse this pr
 `
 
 class Writer {
-  constructor(outDir, pretty) {
+  outDir: string
+  pretty: boolean
+  outputs: Record<string, string> = {}
+
+  constructor(outDir: string, pretty: boolean) {
     this.outDir = outDir
     this.pretty = pretty
-    this.outputs = {}
   }
 
-  async write(name, data) {
+  async write(name: string, data: string | Buffer): Promise<number> {
     const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data)
     const file = path.join(this.outDir, name)
     await fsp.mkdir(path.dirname(file), { recursive: true })
@@ -149,7 +168,7 @@ class Writer {
     return buffer.length
   }
 
-  writeJson(name, value) {
+  writeJson(name: string, value: unknown): Promise<number> {
     return this.write(name, `${JSON.stringify(value, null, this.pretty ? 2 : 0)}\n`)
   }
 }
@@ -158,7 +177,15 @@ class Writer {
 // Bake
 // ---------------------------------------------------------------------------
 
-async function bake(options) {
+interface BakeOptions {
+  mirror: string
+  out: string
+  chest: readonly string[]
+  pretty: boolean
+  help?: boolean
+}
+
+async function bake(options: BakeOptions): Promise<void> {
   if (!(await mirrorExists(options.mirror))) {
     throw new Error(
       `no mirror at ${path.resolve(options.mirror)} — run \`npm run sync-mirror\` first`,
@@ -174,8 +201,8 @@ async function bake(options) {
 
   // Catalog. Titles and categories come from the real part headers, so a missing or renamed part
   // fails the bake here rather than at runtime.
-  const catalog = []
-  const missing = []
+  const catalog: CatalogEntry[] = []
+  const missing: string[] = []
   for (const partId of options.chest) {
     const text = await readLibrary(`${partId}.dat`)
     if (text === null) {
@@ -229,7 +256,7 @@ async function bake(options) {
   )
 }
 
-const USAGE = `Usage: node tools/prebake.mjs [options]
+const USAGE = `Usage: node tools/prebake.ts [options]
 
   --mirror <dir>  local mirror (default ${DEFAULT_MIRROR_ROOT})
   --out <dir>     output directory (default public/baked)
@@ -240,8 +267,8 @@ const USAGE = `Usage: node tools/prebake.mjs [options]
 Reads only the mirror. Makes no network requests.
 `
 
-function parseArgs(argv) {
-  const options = {
+function parseArgs(argv: string[]): BakeOptions {
+  const options: BakeOptions = {
     mirror: DEFAULT_MIRROR_ROOT,
     out: 'public/baked',
     chest: DEFAULT_CHEST,
@@ -262,12 +289,12 @@ function parseArgs(argv) {
   return options
 }
 
-async function main() {
-  let options
+async function main(): Promise<void> {
+  let options: BakeOptions
   try {
     options = parseArgs(process.argv.slice(2))
   } catch (error) {
-    console.error(String(error.message))
+    console.error(String((error as Error).message))
     console.error(USAGE)
     process.exitCode = 2
     return
@@ -278,19 +305,21 @@ async function main() {
   }
 
   // Enforced, not merely documented: the bake reads the mirror and nothing else.
-  globalThis.fetch = () => {
+  globalThis.fetch = (() => {
     throw new Error('prebake makes no network requests — run `npm run sync-mirror` instead')
-  }
+  }) as typeof fetch
 
   const started = Date.now()
   try {
     await bake(options)
   } catch (error) {
-    console.error(`prebake failed: ${error.message}`)
+    console.error(`prebake failed: ${(error as Error).message}`)
     process.exitCode = 1
     return
   }
   console.log(`\nbaked in ${((Date.now() - started) / 1000).toFixed(1)}s`)
 }
 
-await main()
+if (import.meta.url === `file://${process.argv[1]}`) {
+  await main()
+}

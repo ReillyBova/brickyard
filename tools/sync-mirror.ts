@@ -13,7 +13,7 @@
  *   .cache/ldraw/library/                   complete.zip, top-level `ldraw/` stripped
  *   .cache/ldraw/shadow/                    shadow library, top-level directory stripped
  *
- * Usage: node tools/sync-mirror.mjs [--force] [--cache <dir>]
+ * Usage: node tools/sync-mirror.ts [--force] [--cache <dir>]
  */
 
 import fs, { createWriteStream } from 'node:fs'
@@ -24,7 +24,14 @@ import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import zlib from 'node:zlib'
 
-const ARCHIVES = [
+interface Archive {
+  name: string
+  label: string
+  url: string
+  dest: string
+}
+
+const ARCHIVES: Archive[] = [
   {
     name: 'complete',
     label: 'LDraw parts library',
@@ -49,7 +56,16 @@ const SIG_EOCD64 = 0x06064b50
 const SIG_CENTRAL = 0x02014b50
 const SIG_LOCAL = 0x04034b50
 
-export function findEndOfCentralDirectory(buf) {
+/** One central-directory record: enough to locate and inflate the entry's data. */
+export interface ZipEntry {
+  name: string
+  method: number
+  compressedSize: number
+  uncompressedSize: number
+  localHeaderOffset: number
+}
+
+export function findEndOfCentralDirectory(buf: Buffer): number {
   const min = Math.max(0, buf.length - 0x10000 - 22)
   for (let i = buf.length - 22; i >= min; i--) {
     if (buf.readUInt32LE(i) === SIG_EOCD) return i
@@ -58,7 +74,7 @@ export function findEndOfCentralDirectory(buf) {
 }
 
 /** Returns `{ count, offset }` for the central directory, resolving zip64 when present. */
-export function readCentralDirectoryLocation(buf) {
+export function readCentralDirectoryLocation(buf: Buffer): { count: number; offset: number } {
   const eocd = findEndOfCentralDirectory(buf)
   let count = buf.readUInt16LE(eocd + 10)
   let offset = buf.readUInt32LE(eocd + 16)
@@ -79,7 +95,7 @@ export function readCentralDirectoryLocation(buf) {
 }
 
 /** Pulls sizes and the local-header offset out of a zip64 extended information extra field. */
-export function readZip64Extra(extra, entry) {
+export function readZip64Extra(extra: Buffer, entry: ZipEntry): void {
   let p = 0
   while (p + 4 <= extra.length) {
     const id = extra.readUInt16LE(p)
@@ -104,9 +120,9 @@ export function readZip64Extra(extra, entry) {
 }
 
 /** Reads the central directory of a zip held entirely in memory. */
-export function readZipEntries(buf) {
+export function readZipEntries(buf: Buffer): ZipEntry[] {
   const { count, offset } = readCentralDirectoryLocation(buf)
-  const entries = []
+  const entries: ZipEntry[] = []
   let p = offset
   for (let i = 0; i < count; i++) {
     if (buf.readUInt32LE(p) !== SIG_CENTRAL) {
@@ -116,7 +132,7 @@ export function readZipEntries(buf) {
     const nameLength = buf.readUInt16LE(p + 28)
     const extraLength = buf.readUInt16LE(p + 30)
     const commentLength = buf.readUInt16LE(p + 32)
-    const entry = {
+    const entry: ZipEntry = {
       name: buf.toString('utf8', p + 46, p + 46 + nameLength),
       method,
       compressedSize: buf.readUInt32LE(p + 20),
@@ -132,7 +148,7 @@ export function readZipEntries(buf) {
   return entries
 }
 
-export function inflateEntry(buf, entry) {
+export function inflateEntry(buf: Buffer, entry: ZipEntry): Buffer {
   const head = entry.localHeaderOffset
   if (head < 0 || head + 30 > buf.length || buf.readUInt32LE(head) !== SIG_LOCAL) {
     throw new Error(`corrupt local header for ${entry.name}`)
@@ -153,14 +169,14 @@ export function inflateEntry(buf, entry) {
     try {
       return zlib.inflateRawSync(data)
     } catch (error) {
-      throw new Error(`corrupt entry ${entry.name}: ${error.message}`)
+      throw new Error(`corrupt entry ${entry.name}: ${(error as Error).message}`)
     }
   }
   throw new Error(`unsupported compression method ${entry.method} for ${entry.name}`)
 }
 
 /** Rejects absolute paths and traversal, and normalises separators. */
-export function safeEntryPath(name) {
+export function safeEntryPath(name: string): string | null {
   const normalised = name.replace(/\\/g, '/')
   if (normalised.startsWith('/') || /^[a-zA-Z]:/.test(normalised)) return null
   if (normalised.split('/').some((segment) => segment === '..')) return null
@@ -168,36 +184,33 @@ export function safeEntryPath(name) {
 }
 
 /**
- * The top-level directory shared by the majority of entries, or `null` when there is not
- * one. A stray top-level entry (a `README.txt` beside the real root, say) must not disable
- * stripping for every other entry, so this tolerates entries that don't start with the
- * winning root — `extractZip` falls back to the entry's own un-stripped path for those.
+ * The single top-level directory shared by every entry that has one, or `null` when two
+ * entries disagree. A stray top-level *file* (a `README.txt` beside the real root, say) is
+ * ignored rather than treated as a competing root — but two genuine directories with
+ * different names must not be silently flattened into each other, so any real disagreement
+ * strips nothing.
  */
-export function commonRoot(entries) {
-  const counts = new Map()
+export function commonRoot(entries: ZipEntry[]): string | null {
+  let root: string | null = null
   for (const entry of entries) {
     const slash = entry.name.indexOf('/')
-    if (slash <= 0) continue
+    if (slash <= 0) continue // stray top-level file: ignore, don't veto
     const head = entry.name.slice(0, slash)
-    counts.set(head, (counts.get(head) ?? 0) + 1)
-  }
-  let root = null
-  let best = 0
-  for (const [head, count] of counts) {
-    if (count > best) {
-      root = head
-      best = count
-    }
+    if (root === null) root = head
+    else if (root !== head) return null // no single shared root: strip nothing
   }
   return root
 }
 
 /** Extracts every file entry into `destination`, stripping a shared top-level directory. */
-export function extractZip(buf, destination) {
+export function extractZip(
+  buf: Buffer,
+  destination: string,
+): { files: number; bytes: number; root: string | null } {
   const entries = readZipEntries(buf)
   const root = commonRoot(entries)
   const prefix = root === null ? '' : `${root}/`
-  const created = new Set()
+  const created = new Set<string>()
   let files = 0
   let bytes = 0
 
@@ -229,14 +242,14 @@ export function extractZip(buf, destination) {
 // Sync
 // ---------------------------------------------------------------------------
 
-function formatBytes(n) {
+function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
   if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`
   return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`
 }
 
-async function readJson(file) {
+async function readJson(file: string): Promise<Record<string, unknown> | null> {
   try {
     return JSON.parse(await fsp.readFile(file, 'utf8'))
   } catch {
@@ -244,7 +257,7 @@ async function readJson(file) {
   }
 }
 
-async function exists(file) {
+async function exists(file: string): Promise<boolean> {
   try {
     await fsp.stat(file)
     return true
@@ -254,14 +267,14 @@ async function exists(file) {
 }
 
 /** Streams a response body to disk, reporting progress against `Content-Length`. */
-async function download(response, file) {
+async function download(response: Response, file: string): Promise<number> {
   const total = Number(response.headers.get('content-length')) || 0
   const partial = `${file}.part`
   let received = 0
   let lastReport = 0
 
-  const source = Readable.fromWeb(response.body)
-  source.on('data', (chunk) => {
+  const source = Readable.fromWeb(response.body as import('node:stream/web').ReadableStream)
+  source.on('data', (chunk: Buffer) => {
     received += chunk.length
     const now = Date.now()
     if (now - lastReport > 1000) {
@@ -275,7 +288,19 @@ async function download(response, file) {
   return received
 }
 
-async function syncArchive(archive, options) {
+interface SyncOptions {
+  cache: string
+  force: boolean
+  help?: boolean
+}
+
+interface SyncResult {
+  name: string
+  downloaded: boolean
+  meta: Record<string, unknown> | null
+}
+
+async function syncArchive(archive: Archive, options: SyncOptions): Promise<SyncResult> {
   const archiveDir = path.join(options.cache, 'archives')
   const zipFile = path.join(archiveDir, `${archive.name}.zip`)
   const metaFile = path.join(archiveDir, `${archive.name}.json`)
@@ -289,10 +314,10 @@ async function syncArchive(archive, options) {
   console.log(`${archive.label}`)
   console.log(`  ${archive.url}`)
 
-  const headers = {}
+  const headers: Record<string, string> = {}
   if (meta && haveZip) {
-    if (meta.etag) headers['if-none-match'] = meta.etag
-    if (meta.lastModified) headers['if-modified-since'] = meta.lastModified
+    if (typeof meta.etag === 'string') headers['if-none-match'] = meta.etag
+    if (typeof meta.lastModified === 'string') headers['if-modified-since'] = meta.lastModified
   }
 
   const response = await fetch(archive.url, { headers, redirect: 'follow' })
@@ -305,8 +330,9 @@ async function syncArchive(archive, options) {
     }
     console.log(`  304 Not Modified — re-extracting the stored archive`)
     const stats = await extractInto(zipFile, destination)
-    await writeMeta(metaFile, { ...meta, ...stats })
-    return { name: archive.name, downloaded: false, meta: { ...meta, ...stats } }
+    const nextMeta = { ...meta, ...stats }
+    await writeMeta(metaFile, nextMeta)
+    return { name: archive.name, downloaded: false, meta: nextMeta }
   }
 
   if (!response.ok) {
@@ -330,7 +356,7 @@ async function syncArchive(archive, options) {
   return { name: archive.name, downloaded: true, meta: next }
 }
 
-async function writeMeta(file, meta) {
+async function writeMeta(file: string, meta: Record<string, unknown>): Promise<void> {
   await fsp.writeFile(file, `${JSON.stringify(meta, null, 2)}\n`)
 }
 
@@ -338,7 +364,10 @@ async function writeMeta(file, meta) {
  * Extracts to a sibling temporary directory and swaps it in, so a failed extraction never
  * leaves a half-populated mirror behind.
  */
-async function extractInto(zipFile, destination) {
+async function extractInto(
+  zipFile: string,
+  destination: string,
+): Promise<{ files: number; extractedBytes: number; extractedAt: string }> {
   const staging = `${destination}.incoming`
   await fsp.rm(staging, { recursive: true, force: true })
   await fsp.mkdir(staging, { recursive: true })
@@ -361,8 +390,8 @@ async function extractInto(zipFile, destination) {
   return { files, extractedBytes: bytes, extractedAt: new Date().toISOString() }
 }
 
-function parseArgs(argv) {
-  const options = { cache: path.resolve('.cache/ldraw'), force: false }
+function parseArgs(argv: string[]): SyncOptions {
+  const options: SyncOptions = { cache: path.resolve('.cache/ldraw'), force: false }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
     if (arg === '--force') options.force = true
@@ -373,7 +402,7 @@ function parseArgs(argv) {
   return options
 }
 
-const USAGE = `Usage: node tools/sync-mirror.mjs [options]
+const USAGE = `Usage: node tools/sync-mirror.ts [options]
 
   --cache <dir>   mirror location (default .cache/ldraw)
   --force         ignore stored validators and re-download
@@ -382,12 +411,12 @@ const USAGE = `Usage: node tools/sync-mirror.mjs [options]
 Two bulk archives, one conditional request each. Never run on a loop.
 `
 
-export async function main() {
-  let options
+export async function main(): Promise<void> {
+  let options: SyncOptions
   try {
     options = parseArgs(process.argv.slice(2))
   } catch (error) {
-    console.error(String(error.message))
+    console.error(String((error as Error).message))
     console.error(USAGE)
     process.exitCode = 2
     return
@@ -400,7 +429,7 @@ export async function main() {
   await fsp.mkdir(options.cache, { recursive: true })
   console.log(`Mirror: ${options.cache}\n`)
 
-  const results = []
+  const results: SyncResult[] = []
   for (const archive of ARCHIVES) {
     results.push(await syncArchive(archive, options))
     console.log('')
