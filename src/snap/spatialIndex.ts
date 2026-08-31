@@ -27,6 +27,7 @@ export class HashSpatialIndex implements SpatialIndex {
   private readonly cells = new Map<string, IndexedPoint[]>();
   private readonly byBrick = new Map<BrickId, Entry[]>();
   private readonly boundsOf = new Map<BrickId, Bounds>();
+  private readonly placed = new Map<BrickId, { part: PartDef; transform: Mat4 }>();
 
   insert(brick: BrickId, part: PartDef, transform: Mat4): void {
     this.remove(brick);
@@ -54,6 +55,7 @@ export class HashSpatialIndex implements SpatialIndex {
     }
     this.byBrick.set(brick, entries);
     this.boundsOf.set(brick, worldBounds(part.bounds, transform));
+    this.placed.set(brick, { part, transform });
   }
 
   remove(brick: BrickId): void {
@@ -68,6 +70,7 @@ export class HashSpatialIndex implements SpatialIndex {
     }
     this.byBrick.delete(brick);
     this.boundsOf.delete(brick);
+    this.placed.delete(brick);
   }
 
   near(point: Vec3, radius: number): readonly IndexedPoint[] {
@@ -104,6 +107,11 @@ export class HashSpatialIndex implements SpatialIndex {
 
   bricks(): readonly BrickId[] {
     return [...this.byBrick.keys()];
+  }
+
+  /** The part and placement behind an indexed brick, for narrow-phase collision. */
+  partAt(brick: BrickId): { part: PartDef; transform: Mat4 } | undefined {
+    return this.placed.get(brick);
   }
 
   /** Points currently indexed, for tests and diagnostics. */
