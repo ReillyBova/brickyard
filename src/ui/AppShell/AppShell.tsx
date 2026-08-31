@@ -5,12 +5,18 @@ import './AppShell.css';
 interface AppShellProps {
   chestPanel: ReactNode;
   colorPanel: ReactNode;
+  /**
+   * Fills the viewport. Passed in as a node so this slice never imports from
+   * `src/scene/` — the composition root decides what renders there. Omitted, the
+   * empty state shows instead.
+   */
+  viewport?: ReactNode;
 }
 
 /**
  * The app frame: a full-bleed viewport with the parts chest and color palette floating
- * over it, per docs/DESIGN.md. The viewport itself is a placeholder — the scene slice
- * fills `.by-viewport` later; this component owns only the chrome around it.
+ * over it, per docs/DESIGN.md. The viewport content arrives as a prop, so this
+ * component owns only the chrome around it.
  *
  * The chest is a full-height rail on the left. The color palette is not: it's a
  * frequently-touched, browse-y control rather than a settings list, so it floats as a
@@ -20,15 +26,17 @@ interface AppShellProps {
  * At narrow widths both panels collapse into on-demand overlays opened from a compact
  * bar, so the viewport always keeps the full window.
  */
-export function AppShell({ chestPanel, colorPanel }: AppShellProps) {
+export function AppShell({ chestPanel, colorPanel, viewport }: AppShellProps) {
   const [openRail, setOpenRail] = useState<'chest' | 'color' | null>(null);
 
   return (
     <div className="by-viewport">
-      <div className="by-empty">
-        <p className="by-empty__title">Nothing on the baseplate yet</p>
-        <p className="by-empty__body">Open the chest and pick a piece.</p>
-      </div>
+      {viewport ?? (
+        <div className="by-empty">
+          <p className="by-empty__title">Nothing on the baseplate yet</p>
+          <p className="by-empty__body">Open the chest and pick a piece.</p>
+        </div>
+      )}
 
       <div className="by-shell">
         <div className="by-shell__bar">
