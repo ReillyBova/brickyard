@@ -144,6 +144,12 @@ export interface SpatialIndex {
   nearBricks(bounds: Bounds): readonly BrickId[];
   /** Every brick currently indexed, for whole-scene solves. */
   bricks(): readonly BrickId[];
+  /**
+   * The part and placement behind an indexed brick. Narrow-phase collision needs the
+   * part itself, not just its points, and without this on the interface a consumer
+   * typed against `SpatialIndex` silently degrades to broad phase only.
+   */
+  partAt(brick: BrickId): { part: PartDef; transform: Mat4 } | undefined;
 }
 
 /**
