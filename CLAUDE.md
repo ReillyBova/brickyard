@@ -32,7 +32,7 @@ the model is continuous transforms, constrained by connection matching.
 `docs/ARCHITECTURE.md` holds the type contracts. They are frozen; changing one is a deliberate,
 announced act, not a drive-by edit.
 
-UI work follows `docs/DESIGN.md`. Take every colour, size, radius and duration from
+UI work follows `docs/DESIGN.md`. Take every color, size, radius and duration from
 `src/styles/tokens.css` and build with the classes in `src/styles/components.css` — never a raw hex,
 font name or px value. `design-language.html` renders the whole system in both themes.
 

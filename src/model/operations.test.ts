@@ -134,7 +134,7 @@ describe('applyOperation', () => {
     expect(doc.bricks.get(bid('b1'))?.transform).toEqual(IDENTITY);
   });
 
-  it('recolor sets the colour code', () => {
+  it('recolor sets the color code', () => {
     const doc = applyOperation(base(), {
       type: 'recolor',
       changes: [{ id: bid('b1'), from: 4, to: 25 }],

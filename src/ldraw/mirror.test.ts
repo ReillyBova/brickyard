@@ -127,7 +127,7 @@ describe('mirror layout', () => {
     expect(await readArchiveMeta('complete', MIRROR)).toBeNull()
   })
 
-  it('reads the colour library from the mirror', async () => {
+  it('reads the color library from the mirror', async () => {
     const { colors, version } = await readColorLibrary(MIRROR)
     expect(version).toBe('2026-05-29')
     expect(colors.get(4)).toMatchObject({ name: 'Red' })

@@ -22,7 +22,7 @@ const LDCONFIG = readFileSync(
 describe('parseColorLibrary, against the real LDConfig.ldr', () => {
   const colors = parseColorLibrary(LDCONFIG)
 
-  it('parses every declared colour', () => {
+  it('parses every declared color', () => {
     const declared = LDCONFIG.split(/\r?\n/).filter((line) =>
       line.trim().startsWith('0 !COLOUR'),
     ).length
@@ -30,7 +30,7 @@ describe('parseColorLibrary, against the real LDConfig.ldr', () => {
     expect(colors.size).toBe(322)
   })
 
-  it('reads a solid colour exactly', () => {
+  it('reads a solid color exactly', () => {
     expect(colors.get(0)).toEqual({
       code: 0,
       name: 'Black',
@@ -41,7 +41,7 @@ describe('parseColorLibrary, against the real LDConfig.ldr', () => {
     expect(colors.get(4)).toMatchObject({ name: 'Red', value: 0xb40000, material: 'solid' })
   })
 
-  it('reads alpha and classes the colour transparent', () => {
+  it('reads alpha and classes the color transparent', () => {
     expect(colors.get(47)).toEqual({
       code: 47,
       name: 'Trans_Clear',
@@ -52,12 +52,12 @@ describe('parseColorLibrary, against the real LDConfig.ldr', () => {
     })
   })
 
-  it('omits alpha for opaque colours', () => {
+  it('omits alpha for opaque colors', () => {
     expect(colors.get(0)?.alpha).toBeUndefined()
     expect(colors.get(0)?.luminance).toBeUndefined()
   })
 
-  it('reads luminance where a colour declares it', () => {
+  it('reads luminance where a color declares it', () => {
     expect(colors.get(21)).toMatchObject({ name: 'Glow_In_Dark_Opaque', alpha: 245, luminance: 15 })
   })
 
@@ -81,7 +81,7 @@ describe('parseColorLibrary, against the real LDConfig.ldr', () => {
     expect(glitter?.alpha).toBe(128)
   })
 
-  it('does not mistake a MATERIAL particle VALUE for the colour value', () => {
+  it('does not mistake a MATERIAL particle VALUE for the color value', () => {
     // 0 !COLOUR ... VALUE #DF6695 ... MATERIAL GLITTER VALUE #923978 ...
     expect(colors.get(114)?.value).toBe(0xdf6695)
   })
@@ -107,7 +107,7 @@ describe('parseColorLibrary, line handling', () => {
     expect(colors.get(24)).toMatchObject({ code: 24, material: 'solid' })
   })
 
-  it('resolves an EDGE given as a colour code', () => {
+  it('resolves an EDGE given as a color code', () => {
     const colors = parseColorLibrary(
       ['0 !COLOUR Blue CODE 1 VALUE #1E5AA8 EDGE #333333', '0 !COLOUR Odd CODE 9 VALUE #FFFFFF EDGE 1'].join(
         '\n',

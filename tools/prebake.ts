@@ -112,7 +112,7 @@ interface ConnectionResolution {
  * Both readers have the signature `(relativePath: string) => Promise<string | null>` and are
  * already constructed below. When that lands, this function returns the resolved parts and the
  * writer gains `connections.bin` (packed points for the whole annotated corpus, ~4,200 parts) and
- * `geometry.bin` (flattened geometry, chest only). Until then the bake emits the colour library
+ * `geometry.bin` (flattened geometry, chest only). Until then the bake emits the color library
  * and a catalog carrying real titles, which exercises the mirror end to end.
  * =========================================================================
  */
@@ -247,7 +247,7 @@ async function bake(options: BakeOptions): Promise<void> {
   console.log('')
   console.log(`library version   ${manifest.libraryVersion}`)
   console.log(`shadow revision   ${manifest.shadowVersion}`)
-  console.log(`colours           ${colors.size}`)
+  console.log(`colors           ${colors.size}`)
   console.log(`catalog entries   ${catalog.length}`)
   console.log(
     `connections       ${

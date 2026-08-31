@@ -324,7 +324,7 @@ a:hover { color: var(--by-accent-hover); }
 
 /* ── Part tile ──────────────────────────────────────────────────────────────
    The chest's atom. Square thumbnail, caption below, whole tile is the hit
-   target. Selected state is a filled accent ring, not a border colour change:
+   target. Selected state is a filled accent ring, not a border color change:
    the thumbnails are photographic and a 1px line disappears against them.
    ------------------------------------------------------------------------- */
 .by-tile-grid {
@@ -367,9 +367,9 @@ a:hover { color: var(--by-accent-hover); }
 .by-tile.is-selected .by-tile__label { color: var(--by-accent-text); }
 .by-tile.is-selected .by-tile__thumb { box-shadow: 0 0 0 2px var(--by-accent); }
 
-/* ── Colour picker ──────────────────────────────────────────────────────────
+/* ── Color picker ──────────────────────────────────────────────────────────
    The LDraw palette is the data; we don't reinterpret it. Swatches carry the
-   actual LDraw RGB, so a swatch may be any colour at all — which is exactly
+   actual LDraw RGB, so a swatch may be any color at all — which is exactly
    why the selected ring is drawn in the theme accent OUTSIDE the swatch, and
    why transparent and chrome finishes get a marker rather than a tint.
    ------------------------------------------------------------------------- */

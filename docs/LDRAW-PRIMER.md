@@ -25,7 +25,7 @@ Every line begins with an integer type.
 | Type | Meaning |
 | --- | --- |
 | `0` | Comment or meta command |
-| `1` | Reference to another file, with colour and transform |
+| `1` | Reference to another file, with color and transform |
 | `2` | Line segment |
 | `3` | Triangle |
 | `4` | Quadrilateral |
@@ -52,10 +52,10 @@ applied to everything inside `<file>`. References nest arbitrarily, and paths us
 So a part is a tree of transformed references bottoming out in triangles. Walking that tree while
 multiplying transforms is the central operation in `src/snap/`.
 
-### Colour
+### Color
 
-Colour `16` means "inherit from the parent reference", which is how one part file renders in any
-colour. Colour `24` is the matching edge colour. All other codes index the official palette defined
+Color `16` means "inherit from the parent reference", which is how one part file renders in any
+color. Color `24` is the matching edge color. All other codes index the official palette defined
 in `LDConfig.ldr`, which also carries alpha, luminance, and material class (chrome, pearlescent,
 metallic, rubber, glitter).
 

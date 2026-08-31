@@ -1,7 +1,7 @@
 /**
  * Shared constructors for document-level test values.
  *
- * These are document values — ids, colour codes, transforms, mates — not part
+ * These are document values — ids, color codes, transforms, mates — not part
  * geometry. Parser fixtures use real captured part data; nothing here stands in for
  * that.
  *
