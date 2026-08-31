@@ -30,3 +30,12 @@ export function SearchIcon(props: SVGProps<SVGSVGElement>) {
     </Icon>
   );
 }
+
+/** Disclosure chevron for the colour picker's finishes accordion; rotates via CSS. */
+export function ChevronDownIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon data-lucide="chevron-down" {...props}>
+      <path d="m6 9 6 6 6-6" />
+    </Icon>
+  );
+}

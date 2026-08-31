@@ -1,33 +1,29 @@
 /**
  * The chest's tile thumbnail. Per docs/DESIGN.md, hand-drawn axonometric brick geometry
  * is the only artwork in the system besides Lucide icons, and its three visible faces
- * are fixed hex steps of the accent ramps — the same treatment as `public/icon.svg` and
- * the tile examples in `design-language.html`, copied here rather than reinvented.
+ * are shaded steps of one real LDraw colour — the colour currently active for
+ * placement, so a tile previews what the user is about to place rather than a
+ * meaningless per-part hash. The shading itself (`shadesFromHex`) is derived data, not
+ * a fixed swatch: the exception in docs/DESIGN.md for "true LDraw RGB values" covers it.
  *
  * This is a generic pictogram, not a per-part render: the chest is built against mock
- * data with no geometry available, so tone and stud count are a coarse hint (how many
- * studs the part's title implies, up to four) rather than an accurate model of the part.
+ * data with no geometry available, so stud count is a coarse hint (how many studs the
+ * part's title implies, up to four) rather than an accurate model of the part.
  */
 
-import type { BrickTone, StudCount } from './brickPictogram';
-
-const TONES: Record<BrickTone, { left: string; right: string; top: string; hi: string }> = {
-  clay: { left: '#b2622d', right: '#d67f48', top: '#f6a06b', hi: '#ffc6a5' },
-  deepClay: { left: '#8c491a', right: '#b2622d', top: '#d67f48', hi: '#ffc6a5' },
-  sage: { left: '#728157', right: '#8fa073', top: '#aebf92', hi: '#ccdbb2' },
-  neutral: { left: '#645c50', right: '#82796a', top: '#a19786', hi: '#c0b6a5' },
-};
+import { shadesFromHex, type StudCount } from './brickPictogram';
 
 interface AxonBrickProps {
-  tone: BrickTone;
+  /** '#rrggbb' — the active LDraw colour, real data rather than a design token. */
+  hex: string;
   studs: StudCount;
   /** Round parts (plates, bricks) get a turned-disc pictogram instead of a brick block. */
   round?: boolean;
   size?: number;
 }
 
-export function AxonBrick({ tone, studs, round = false, size = 52 }: AxonBrickProps) {
-  const c = TONES[tone];
+export function AxonBrick({ hex, studs, round = false, size = 52 }: AxonBrickProps) {
+  const c = shadesFromHex(hex);
 
   if (round) {
     return (

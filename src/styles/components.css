@@ -266,6 +266,11 @@ a:hover { color: var(--by-accent-hover); }
 .by-panel {
   display: flex;
   flex-direction: column;
+  /* Fills whatever box the layout gives it (a grid row, an absolutely-positioned
+     rail) rather than shrink-wrapping its content — the panel body's own
+     `overflow-y: auto` below only has something to scroll within if the panel
+     itself is height-constrained instead of growing past the viewport. */
+  height: 100%;
   min-height: 0;
   border-radius: var(--by-radius-md);
   background: var(--by-panel);
@@ -371,7 +376,7 @@ a:hover { color: var(--by-accent-hover); }
    The LDraw palette is the data; we don't reinterpret it. Swatches carry the
    actual LDraw RGB, so a swatch may be any color at all — which is exactly
    why the selected ring is drawn in the theme accent OUTSIDE the swatch, and
-   why transparent and chrome finishes get a marker rather than a tint.
+   why every finish gets an overlay mark rather than a tint of its own fill.
    ------------------------------------------------------------------------- */
 .by-swatch-grid {
   display: grid;
@@ -379,20 +384,213 @@ a:hover { color: var(--by-accent-hover); }
   gap: 6px;
 }
 .by-swatch {
+  position: relative;
   aspect-ratio: 1;
   border: 1px solid var(--by-line);
   border-radius: var(--by-radius-pill);
   padding: 0;
   cursor: pointer;
+  overflow: hidden;
   transition: transform var(--by-dur-instant) var(--by-ease-snap);
 }
 .by-swatch:hover { transform: scale(1.12); }
 .by-swatch.is-selected {
   box-shadow: 0 0 0 2px var(--by-panel), 0 0 0 4px var(--by-accent);
 }
-/* Finish markers — LDraw distinguishes solid, transparent, pearl, chrome. */
-.by-swatch--trans { opacity: 0.55; }
-.by-swatch--metal { background-image: linear-gradient(135deg, rgb(255 255 255 / 0.55), transparent 55%); }
+
+/* Finish marks — a layer drawn ON TOP of the true LDraw fill (set inline as
+   `background-color`, untouched here), never a change to the fill itself. Each has to
+   read at swatch size (26–32px) with no legend: a diagonal sheen for chrome, a soft
+   glow for pearl, brushed lines for metallic, grain for rubber, flecks for glitter and
+   speckle, a woven cross-hatch for fabric, a glassy streak plus inset depth for
+   transparent.
+
+   These reach the neutral RAMP (--color-neutral-100/900) rather than a semantic --by-*
+   token, deliberately: a material mark represents a physical property of the swatch,
+   not chrome elevation, so it must read the same in both themes instead of flipping
+   with them the way a panel surface does. */
+.by-swatch--trans {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--color-neutral-100) 45%, transparent),
+    inset 0 -6px 10px -4px color-mix(in srgb, var(--color-neutral-900) 35%, transparent);
+}
+.by-swatch--trans::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    120deg,
+    color-mix(in srgb, var(--color-neutral-100) 55%, transparent) 0%,
+    transparent 38%
+  );
+}
+
+.by-swatch--chrome::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(115deg, transparent 30%, color-mix(in srgb, var(--color-neutral-100) 80%, transparent) 46%, transparent 62%),
+    linear-gradient(115deg, transparent 55%, color-mix(in srgb, var(--color-neutral-900) 45%, transparent) 68%, transparent 82%);
+}
+
+.by-swatch--pearl::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    circle at 32% 28%,
+    color-mix(in srgb, var(--color-neutral-100) 70%, transparent) 0%,
+    transparent 55%
+  );
+}
+
+.by-swatch--metallic::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  mix-blend-mode: overlay;
+  background: repeating-linear-gradient(
+    100deg,
+    color-mix(in srgb, var(--color-neutral-100) 30%, transparent) 0 2px,
+    transparent 2px 5px
+  );
+}
+
+.by-swatch--rubber {
+  box-shadow: inset 0 0 4px color-mix(in srgb, var(--color-neutral-900) 30%, transparent);
+}
+.by-swatch--rubber::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0.6;
+  background: radial-gradient(circle, color-mix(in srgb, var(--color-neutral-900) 40%, transparent) 1px, transparent 1.4px);
+  background-size: 6px 6px;
+}
+
+.by-swatch--glitter::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 22% 30%, color-mix(in srgb, var(--color-neutral-100) 95%, transparent) 0 1.3px, transparent 1.6px),
+    radial-gradient(circle at 62% 20%, color-mix(in srgb, var(--color-neutral-100) 95%, transparent) 0 1px, transparent 1.3px),
+    radial-gradient(circle at 40% 60%, color-mix(in srgb, var(--color-neutral-100) 95%, transparent) 0 1.2px, transparent 1.5px),
+    radial-gradient(circle at 78% 68%, color-mix(in srgb, var(--color-neutral-100) 95%, transparent) 0 1px, transparent 1.3px),
+    radial-gradient(circle at 55% 85%, color-mix(in srgb, var(--color-neutral-100) 95%, transparent) 0 1.1px, transparent 1.4px);
+}
+
+.by-swatch--speckle::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 30% 35%, color-mix(in srgb, var(--color-neutral-100) 85%, transparent) 0 2.4px, transparent 2.8px),
+    radial-gradient(circle at 68% 55%, color-mix(in srgb, var(--color-neutral-900) 55%, transparent) 0 2px, transparent 2.4px),
+    radial-gradient(circle at 45% 75%, color-mix(in srgb, var(--color-neutral-100) 85%, transparent) 0 1.8px, transparent 2.2px);
+}
+
+.by-swatch--fabric::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    repeating-linear-gradient(45deg, color-mix(in srgb, var(--color-neutral-900) 22%, transparent) 0 1px, transparent 1px 4px),
+    repeating-linear-gradient(-45deg, color-mix(in srgb, var(--color-neutral-100) 22%, transparent) 0 1px, transparent 1px 4px);
+}
+
+/* ── Colour palette ─────────────────────────────────────────────────────────
+   The lower-right floating alternative to a settings-style swatch grid: a current-pick
+   "blob" up top (what's loaded, at a glance) and a loosely wrapped cluster of dabs
+   below instead of an aligned grid. The asymmetric corner echoes a hand-held palette
+   board rather than a panel — built from the same radius tokens as everything else, no
+   new shape primitive. Solids show by default; every other finish sits behind
+   `.by-accordion` (99% of real usage is a base solid colour).
+   ------------------------------------------------------------------------- */
+.by-palette {
+  border-radius: var(--by-radius-lg) var(--by-radius-pill) var(--by-radius-lg) var(--by-radius-lg);
+}
+
+.by-palette__current {
+  display: flex;
+  align-items: center;
+  gap: var(--by-space-3);
+  padding: var(--by-space-2);
+  margin-bottom: var(--by-space-3);
+  border-radius: var(--by-radius-md);
+  background: var(--by-panel-sunken);
+}
+.by-palette__blob {
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  overflow: hidden;
+  border: 1px solid var(--by-line);
+  border-radius: var(--by-radius-pill);
+  box-shadow: 0 0 0 2px var(--by-panel), 0 0 0 3px var(--by-line);
+}
+.by-palette__current-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.by-palette__current-name {
+  overflow: hidden;
+  font-family: var(--by-font-display);
+  font-weight: var(--by-font-display-weight);
+  font-size: var(--by-text-md);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.by-palette__cluster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--by-space-1);
+}
+.by-palette__cluster .by-swatch {
+  width: 26px;
+  height: 26px;
+  flex: none;
+}
+
+/* ── Accordion ──────────────────────────────────────────────────────────────
+   A native <details>/<summary> disclosure — free keyboard and screen-reader support,
+   no roving-tabindex bookkeeping needed. Used to tuck away the color palette's
+   non-solid finishes.
+   ------------------------------------------------------------------------- */
+.by-accordion {
+  margin-top: var(--by-space-4);
+}
+.by-accordion__summary {
+  display: flex;
+  align-items: center;
+  gap: var(--by-space-2);
+  padding: var(--by-space-2) 0;
+  list-style: none;
+  color: var(--by-text-muted);
+  font-size: var(--by-text-sm);
+  cursor: pointer;
+  user-select: none;
+}
+.by-accordion__summary::-webkit-details-marker { display: none; }
+.by-accordion__summary:hover { color: var(--by-text); }
+.by-accordion__chevron {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  transition: transform var(--by-dur-fast) var(--by-ease-out);
+}
+.by-accordion[open] > .by-accordion__summary .by-accordion__chevron { transform: rotate(180deg); }
+.by-accordion__body {
+  padding-top: var(--by-space-1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .by-accordion__chevron { transition: none; }
+}
 
 /* ── Keyboard ───────────────────────────────────────────────────────────────
    Shortcuts are first-class here: the operation set is large and the mouse

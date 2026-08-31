@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 
 import { AxonBrick } from '../AxonBrick';
-import { studsForTitle, toneForId } from '../brickPictogram';
+import { studsForTitle } from '../brickPictogram';
 import { SearchIcon } from '../icons';
 import { useRovingGrid } from '../useRovingGrid';
 import type { ChestPart } from './types';
@@ -10,6 +10,9 @@ interface PartsChestProps {
   parts: readonly ChestPart[];
   selectedId?: string;
   onSelect: (id: string) => void;
+  /** '#rrggbb' — the color currently active for placement. Every thumbnail renders in
+   * it, so the chest previews what the next click actually places. */
+  activeColorHex: string;
 }
 
 interface Group {
@@ -33,7 +36,7 @@ function groupByCategory(parts: readonly ChestPart[]): Group[] {
  * one flat keyboard-navigable grid (arrow keys, Home/End) per docs/DESIGN.md's
  * `.by-tile-grid` / `.by-tile`.
  */
-export function PartsChest({ parts, selectedId, onSelect }: PartsChestProps) {
+export function PartsChest({ parts, selectedId, onSelect, activeColorHex }: PartsChestProps) {
   const [query, setQuery] = useState('');
 
   const filtered = useMemo(() => {
@@ -57,7 +60,7 @@ export function PartsChest({ parts, selectedId, onSelect }: PartsChestProps) {
   return (
     <div className="by-panel">
       <div className="by-panel__head">
-        <div className="by-panel__title">Chest</div>
+        <div className="by-panel__title">Parts &amp; Pieces</div>
       </div>
       <div style={{ padding: '0 var(--by-space-3) var(--by-space-2)' }}>
         <div className="by-search">
@@ -112,7 +115,7 @@ export function PartsChest({ parts, selectedId, onSelect }: PartsChestProps) {
                   >
                     <span className="by-tile__thumb">
                       <AxonBrick
-                        tone={toneForId(part.id)}
+                        hex={activeColorHex}
                         studs={studsForTitle(part.title)}
                         round={group.category === 'Round'}
                       />

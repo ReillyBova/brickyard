@@ -8,12 +8,17 @@ interface AppShellProps {
 }
 
 /**
- * The app frame: a full-bleed viewport with the chest and colour panels floating over
- * it as rails, per docs/DESIGN.md. The viewport itself is a placeholder — the scene
- * slice fills `.by-viewport` later; this component owns only the chrome around it.
+ * The app frame: a full-bleed viewport with the parts chest and color palette floating
+ * over it, per docs/DESIGN.md. The viewport itself is a placeholder — the scene slice
+ * fills `.by-viewport` later; this component owns only the chrome around it.
  *
- * At narrow widths the rails would crowd the viewport, so they collapse into on-demand
- * overlays opened from a compact bar, and the viewport always keeps the full window.
+ * The chest is a full-height rail on the left. The color palette is not: it's a
+ * frequently-touched, browse-y control rather than a settings list, so it floats as a
+ * smaller card anchored to the lower-right quadrant instead of claiming a whole rail
+ * (see `.by-shell__rail--color` in AppShell.css).
+ *
+ * At narrow widths both panels collapse into on-demand overlays opened from a compact
+ * bar, so the viewport always keeps the full window.
  */
 export function AppShell({ chestPanel, colorPanel }: AppShellProps) {
   const [openRail, setOpenRail] = useState<'chest' | 'color' | null>(null);
@@ -35,7 +40,7 @@ export function AppShell({ chestPanel, colorPanel }: AppShellProps) {
               aria-pressed={openRail === 'chest'}
               onClick={() => setOpenRail((current) => (current === 'chest' ? null : 'chest'))}
             >
-              Chest
+              Parts
             </button>
             <button
               type="button"
@@ -43,7 +48,7 @@ export function AppShell({ chestPanel, colorPanel }: AppShellProps) {
               aria-pressed={openRail === 'color'}
               onClick={() => setOpenRail((current) => (current === 'color' ? null : 'color'))}
             >
-              Colour
+              Color
             </button>
           </div>
         </div>

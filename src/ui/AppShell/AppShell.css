@@ -1,12 +1,18 @@
 /*
- * Layout glue for the app frame: positions the chest and colour rails as floating
- * panels over the viewport, per docs/DESIGN.md ("panels are rafts, with a gutter to the
- * window edge, so the scene reads as continuous underneath"). No new component classes
+ * Layout glue for the app frame: positions the chest rail and the color palette over
+ * the viewport, per docs/DESIGN.md ("panels are rafts, with a gutter to the window
+ * edge, so the scene reads as continuous underneath"). No new component classes here
  * — this only arranges the ones in components.css, and every value is a token.
  *
- * The viewport is the priority at small widths: below --by-shell-breakpoint the side
- * rails stop taking grid columns and become on-demand overlays, opened from a compact
- * top bar, so a narrow window never crowds the canvas.
+ * The chest is a full-height grid column on the left. The color palette is not a grid
+ * participant: it's a smaller card, sized and positioned to occupy the lower-right
+ * quadrant of the viewport (`top: 50%` starts it at the vertical midpoint; the right
+ * and bottom edges keep the standard window-edge gutter).
+ *
+ * The viewport is the priority at small widths: below --by-shell-breakpoint the chest
+ * rail stops taking a grid column and both panels become on-demand overlays, opened
+ * from a compact top bar, so a narrow window never crowds the canvas. The palette keeps
+ * its lower-right anchor even there.
  */
 
 .by-shell {
@@ -14,7 +20,7 @@
   inset: 0;
   z-index: var(--by-z-chrome);
   display: grid;
-  grid-template-columns: var(--by-panel-w) 1fr var(--by-panel-w);
+  grid-template-columns: var(--by-panel-w) 1fr;
   grid-template-rows: auto 1fr;
   gap: var(--by-space-3);
   padding: var(--by-space-3);
@@ -37,9 +43,15 @@
   grid-row: 2;
 }
 
+/* Taken out of grid flow deliberately: it floats over the viewport column rather than
+   claiming one, sized to the lower-right quadrant of the whole frame. */
 .by-shell__rail--color {
-  grid-column: 3;
-  grid-row: 2;
+  position: absolute;
+  top: 50%;
+  right: var(--by-space-3);
+  bottom: var(--by-space-3);
+  width: var(--by-panel-w);
+  z-index: var(--by-z-popover);
 }
 
 @media (max-width: 860px) {
@@ -82,10 +94,14 @@
     grid-column: 1;
   }
 
+  /* Still the lower-right quadrant on a narrow window, just measured against the
+     overlay's own top bound rather than the full frame. */
   .by-shell__rail--color {
     grid-column: 1;
+    top: 50%;
     right: var(--by-space-3);
     left: auto;
+    max-width: 360px;
   }
 
   .by-shell__rail.is-closed {
