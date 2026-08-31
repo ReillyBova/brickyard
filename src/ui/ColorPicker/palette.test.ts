@@ -10,10 +10,12 @@ describe('LDRAW_PALETTE', () => {
     expect(LDRAW_PALETTE.some((color) => color.code === 24)).toBe(false);
   });
 
-  it('is sorted by colour code', () => {
+  it('is sorted by hue, not by colour code', () => {
+    // The old order (ascending code) is what sortColorsByHue replaces; a palette this
+    // large should not come out in that order by coincidence.
     const codes = LDRAW_PALETTE.map((color) => color.code);
-    const sorted = [...codes].sort((a, b) => a - b);
-    expect(codes).toEqual(sorted);
+    const sortedByCode = [...codes].sort((a, b) => a - b);
+    expect(codes).not.toEqual(sortedByCode);
   });
 
   it('shapes a known solid colour correctly', () => {

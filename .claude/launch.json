@@ -4,8 +4,8 @@
     {
       "name": "brickyard-ui-shell",
       "runtimeExecutable": "env",
-      "runtimeArgs": ["PORT=5178", "npm", "run", "dev"],
-      "port": 5178
+      "runtimeArgs": ["PORT=5179", "npm", "run", "dev"],
+      "port": 5179
     }
   ]
 }

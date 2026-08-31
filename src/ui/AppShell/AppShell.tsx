@@ -1,5 +1,7 @@
 import { useState, type ReactNode } from 'react';
 
+import { MoonIcon, SunIcon } from '../icons';
+import { useTheme } from '../useTheme';
 import './AppShell.css';
 
 interface AppShellProps {
@@ -28,6 +30,7 @@ interface AppShellProps {
  */
 export function AppShell({ chestPanel, colorPanel, viewport }: AppShellProps) {
   const [openRail, setOpenRail] = useState<'chest' | 'color' | null>(null);
+  const [theme, toggleTheme] = useTheme();
 
   return (
     <div className="by-viewport">
@@ -41,7 +44,16 @@ export function AppShell({ chestPanel, colorPanel, viewport }: AppShellProps) {
       <div className="by-shell">
         <div className="by-shell__bar">
           <span className="by-shell__wordmark">BrickYard</span>
-          <div className="by-seg" role="group" aria-label="Panels">
+          <button
+            type="button"
+            className="by-icon-btn"
+            aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+            title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+            onClick={toggleTheme}
+          >
+            {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
+          </button>
+          <div className="by-seg by-shell__panels" role="group" aria-label="Panels">
             <button
               type="button"
               className={`by-seg__opt${openRail === 'chest' ? ' is-active' : ''}`}

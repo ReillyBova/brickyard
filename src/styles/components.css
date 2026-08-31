@@ -503,13 +503,37 @@ a:hover { color: var(--by-accent-hover); }
 /* ── Colour palette ─────────────────────────────────────────────────────────
    The lower-right floating alternative to a settings-style swatch grid: a current-pick
    "blob" up top (what's loaded, at a glance) and a loosely wrapped cluster of dabs
-   below instead of an aligned grid. The asymmetric corner echoes a hand-held palette
-   board rather than a panel — built from the same radius tokens as everything else, no
-   new shape primitive. Solids show by default; every other finish sits behind
-   `.by-accordion` (99% of real usage is a base solid colour).
+   below instead of an aligned grid. Fixed and short — a floating tool, not a rail —
+   because the accordion keeps every non-solid finish out of the way by default.
+   Solids show by default; every other finish sits behind `.by-accordion` (99% of real
+   usage is a base solid colour).
+
+   The silhouette is a slight "Utah" outline: a rounded rectangle with a rounded
+   rectangular notch bitten out of the top-right corner, standing in for an artist's
+   palette's thumb hole without drawing one literally. `border-radius` can't produce
+   that (no shape primitive gives a rounded concave corner), and a pseudo-element over
+   the corner would paint the notch in the panel colour instead of leaving it genuinely
+   transparent to the viewport behind it — this floats over the 3D scene, so the notch
+   has to actually show through. `clip-path: path()` is the one mechanism that can
+   round every corner, including the notch's own (nothing in this system is mitred),
+   while leaving the cut-away area transparent.
+
+   The trade-off: `path()` takes literal coordinates, not custom properties, so this
+   shape only lines up with the box if the box is exactly this size. `.by-palette`
+   therefore fixes its own width/height instead of inheriting `.by-panel`'s 100%-of-rail
+   sizing — width must keep tracking `--by-panel-w` (268px today) by hand if that token
+   ever changes, and the height (320px) is this shape's own literal value, not read from
+   a token, because nothing in tokens.css names it. If `--by-panel-w` changes, this path
+   needs updating with it; there is no automatic way to keep them in sync.
    ------------------------------------------------------------------------- */
 .by-palette {
-  border-radius: var(--by-radius-lg) var(--by-radius-pill) var(--by-radius-lg) var(--by-radius-lg);
+  width: 268px; /* keep equal to --by-panel-w */
+  height: 320px;
+  flex: none;
+  border-radius: var(--by-radius-lg);
+  clip-path: path(
+    'M 28 0 L 210 0 A 14 14 0 0 1 224 14 L 224 30 A 14 14 0 0 0 238 44 L 254 44 A 14 14 0 0 1 268 58 L 268 292 A 28 28 0 0 1 240 320 L 28 320 A 28 28 0 0 1 0 292 L 0 28 A 28 28 0 0 1 28 0 Z'
+  );
 }
 
 .by-palette__current {

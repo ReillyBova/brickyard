@@ -7,6 +7,7 @@
 import { isSentinelCode, parseColorLibrary } from '../../ldraw/colors';
 import type { LDrawColor } from '../../ldraw/types';
 import ldConfigText from '../../ldraw/__fixtures__/mirror/library/LDConfig.ldr?raw';
+import { sortColorsByHue } from './hueSort';
 import type { Swatch } from './types';
 
 function toHex(value: number): string {
@@ -35,9 +36,11 @@ const library = parseColorLibrary(ldConfigText);
 /**
  * Every real LDraw colour, sentinels (16 "inherit", 24 "edge") excluded because they
  * resolve against a referencing line rather than naming a colour a user can pick.
- * Sorted by colour code for a stable, deterministic order.
+ * Sorted by hue (`sortColorsByHue`) so a particular colour can be found by scanning
+ * rather than by knowing its LDraw code — see `hueSort.ts`. The color-picker's
+ * solid/accordion split groups the result further by material; hue order applies
+ * within each of those groups.
  */
-export const LDRAW_PALETTE: readonly Swatch[] = Array.from(library.values())
-  .filter((color) => !isSentinelCode(color.code))
-  .sort((a, b) => a.code - b.code)
-  .map(toSwatch);
+export const LDRAW_PALETTE: readonly Swatch[] = sortColorsByHue(
+  Array.from(library.values()).filter((color) => !isSentinelCode(color.code)),
+).map(toSwatch);
