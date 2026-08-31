@@ -87,12 +87,13 @@ export function BuilderCanvas(): React.JSX.Element {
       void renderer.addBrick(brick);
       setCount((n) => n + 1);
     };
-    // Scoped to the canvas, not the window: Tab is the browser's own navigation key and
-    // swallowing it globally would trap keyboard users once the chest and palette are
-    // mounted alongside this.
+    // Candidate cycling deliberately does NOT use Tab. Tab is the browser's own
+    // navigation key, and swallowing it here trapped keyboard users on the canvas with
+    // no way out — the canvas is the first focusable element in the document, so tabbing
+    // in made the toolbar, chest and palette permanently unreachable. Bracket keys carry
+    // no browser meaning and sit under the same hand as R.
     const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Tab') {
-        event.preventDefault();
+      if (event.key === ']') {
         placement.cycle();
       } else if (event.key.toLowerCase() === 'r') {
         placement.rotate(lastPointer);
@@ -134,7 +135,7 @@ export function BuilderCanvas(): React.JSX.Element {
         <span>{blocked ? 'Blocked — that space is taken' : 'Ready'}</span>
         <span>{status}</span>
         <span>
-          <kbd className="by-kbd">R</kbd> rotate · <kbd className="by-kbd">Tab</kbd> next fit
+          <kbd className="by-kbd">R</kbd> rotate · <kbd className="by-kbd">]</kbd> next fit
         </span>
       </div>
     </>

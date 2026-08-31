@@ -84,7 +84,7 @@
   /* Ink */
   --by-text:          var(--color-ink);
   --by-text-muted:    color-mix(in srgb, var(--color-ink) 58%, transparent);
-  --by-text-faint:    color-mix(in srgb, var(--color-ink) 38%, transparent);
+  --by-text-faint:    color-mix(in srgb, var(--color-ink) 66%, transparent);
   --by-text-on-accent: var(--color-bg);
 
   /* Lines. BrickYard has no hairline-only geometry — a line is a last resort
@@ -140,7 +140,7 @@
 
   --by-text:          var(--color-neutral-100);
   --by-text-muted:    color-mix(in srgb, var(--color-neutral-100) 62%, transparent);
-  --by-text-faint:    color-mix(in srgb, var(--color-neutral-100) 40%, transparent);
+  --by-text-faint:    color-mix(in srgb, var(--color-neutral-100) 55%, transparent);
   --by-text-on-accent: var(--color-accent-900);
 
   --by-line:          color-mix(in srgb, var(--color-neutral-100) 14%, transparent);
