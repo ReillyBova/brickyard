@@ -138,7 +138,7 @@ sequenceDiagram
   SI-->>SE: nearby connection points
   SE->>SE: filter compatible, solveMating, findMates
   SE-->>IC: ranked candidates
-  IC->>R: ghost transform, mate count, validity
+  IC->>R: ghost transform, validity
   U->>IC: pointerdown
   IC->>D: Transaction "Place brick"
   D->>G: apply add, update edges incrementally
@@ -612,8 +612,10 @@ The residual ambiguity is which of the *moving* part's points mates to the targe
 of a 2×4 land the brick 60 LDU apart on the same target stud. Continuity resolves it, keeping the
 piece near where it already sits rather than teleporting.
 
-Mate count still earns its place as placement-confidence feedback, as a tiebreaker when cursor
-distance is genuinely ambiguous, and as the mate list recorded on the graph edge.
+Mate count still earns its place as a tiebreaker when cursor distance is genuinely ambiguous, and as
+the mate list recorded on the graph edge. It is **not** surfaced in the viewport: per
+[`DESIGN.md`](DESIGN.md), snapping is shown by snapping. If the ghost lands where the user meant, a
+badge tells them nothing; if it does not, a badge does not help.
 
 When `hit` is absent the cursor is over empty space or the baseplate, and placement falls back to a
 ground-plane intersection. Candidates are cycled with <kbd>Tab</kbd> and rolled with <kbd>R</kbd>.
