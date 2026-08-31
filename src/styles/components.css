@@ -139,12 +139,14 @@ a:hover { color: var(--by-accent-hover); }
 /* Menu — an icon-triggered popover list. New variant: a category filter has more than
    the four options `.by-seg` is for, and a bare `<select>` carries browser chrome the
    rest of the system doesn't. `.by-icon-btn` opens it; the panel itself borrows the
-   floating-surface treatment `.by-tooltip` and `.by-dialog` already use. */
-.by-menu { position: relative; display: inline-flex; }
+   floating-surface treatment `.by-tooltip` and `.by-dialog` already use.
+
+   The panel is portaled into `document.body` (see CategoryMenu.tsx) rather than laid out
+   as a child here, so a scrolling ancestor like `.by-panel__body` can't clip it — `fixed`
+   with JS-computed top/left in viewport px, not `absolute` against an offset parent. */
+.by-menu { display: inline-flex; }
 .by-menu__panel {
-  position: absolute;
-  top: calc(100% + var(--by-space-1));
-  left: 0;
+  position: fixed;
   z-index: 20;
   min-width: 176px;
   max-height: 60vh;
