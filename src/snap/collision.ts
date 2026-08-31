@@ -421,23 +421,62 @@ function isOccupiedAt(mask: OccupancyMask, bounds: Bounds, local: Vec3): boolean
 }
 
 /**
+ * Voxel index range of `part` covering the region where `other` could possibly reach,
+ * or null when the two cannot touch at all.
+ *
+ * `other`'s world AABB, pulled back into `part`'s local frame, bounds every point of
+ * `other` that exists — so a `part` voxel outside it cannot map onto `other`'s occupancy
+ * grid, and testing it is wasted work. Both AABBs are conservative (an AABB of a
+ * transformed AABB only grows), and the range is padded by one cell because a mask's
+ * dims round up: `other`'s grid can extend up to a cell past its own bounds. Nothing
+ * inside the true overlap is skipped — the clip is an early-out, not an approximation.
+ */
+function overlapVoxelRange(
+  part: PartDef,
+  partInverse: Mat4,
+  other: PartDef,
+  otherTransform: Mat4,
+): { lo: [number, number, number]; hi: [number, number, number] } | null {
+  const dims = part.occupancy.dims;
+  const reach = worldBounds(worldBounds(other.bounds, otherTransform), partInverse);
+  const lo: [number, number, number] = [0, 0, 0];
+  const hi: [number, number, number] = [0, 0, 0];
+  for (let a = 0; a < 3; a++) {
+    const from = Math.floor((reach.min[a] - part.bounds.min[a]) / OCC_CELL) - 1;
+    const to = Math.floor((reach.max[a] - part.bounds.min[a]) / OCC_CELL) + 1;
+    lo[a] = Math.max(0, from);
+    hi[a] = Math.min(dims[a] - 1, to);
+    if (lo[a] > hi[a]) return null;
+  }
+  return { lo, hi };
+}
+
+/**
  * True if any occupied voxel of `part` (world space, via `transform`) lands inside an
  * occupied voxel of `other` (world space, via `otherTransform`). Sampled at voxel
  * centers, so it is a coarse test in both directions — callers run it both ways round to
  * catch a solid `other` voxel whose center a `part` voxel narrowly missed.
+ *
+ * Only the voxels `other` can actually reach are visited (`overlapVoxelRange`). A part's
+ * grid is its whole bounding box — a 6x6 dish is 384,000 voxels — while two placed parts
+ * touch over a small fraction of that, and this runs per candidate brick, both ways
+ * round, on every frame of a drag.
  */
 function anyOccupiedVoxelInside(
   part: PartDef,
   transform: Mat4,
+  partInverse: Mat4,
   other: PartDef,
   otherTransform: Mat4,
   otherInverse: Mat4,
 ): boolean {
   const { dims, bits } = part.occupancy;
-  const [nx, ny, nz] = dims;
-  for (let iz = 0; iz < nz; iz++) {
-    for (let iy = 0; iy < ny; iy++) {
-      for (let ix = 0; ix < nx; ix++) {
+  const range = overlapVoxelRange(part, partInverse, other, otherTransform);
+  if (!range) return false;
+  const { lo, hi } = range;
+  for (let iz = lo[2]; iz <= hi[2]; iz++) {
+    for (let iy = lo[1]; iy <= hi[1]; iy++) {
+      for (let ix = lo[0]; ix <= hi[0]; ix++) {
         const idx = voxelIndex(dims, ix, iy, iz);
         if (!getBit(bits, idx)) continue;
         const local: Vec3 = [
@@ -489,10 +528,14 @@ export const collides: Collides = (part, transform, index, ignore) => {
     const entry = lookup.partAt(brick);
     if (!entry) continue; // index without narrow-phase data: broad phase only
     const otherInverse = invert(entry.transform);
-    if (anyOccupiedVoxelInside(part, transform, entry.part, entry.transform, otherInverse)) {
+    if (
+      anyOccupiedVoxelInside(part, transform, inverseTransform, entry.part, entry.transform, otherInverse)
+    ) {
       return true;
     }
-    if (anyOccupiedVoxelInside(entry.part, entry.transform, part, transform, inverseTransform)) {
+    if (
+      anyOccupiedVoxelInside(entry.part, entry.transform, otherInverse, part, transform, inverseTransform)
+    ) {
       return true;
     }
   }
