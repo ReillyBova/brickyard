@@ -1,13 +1,13 @@
 ---
 name: brickyard-slice
-description: Implements one ownership slice of Brickyard against the frozen contracts in docs/ARCHITECTURE.md. Use for parallel wave-based implementation of src/snap, src/ldraw, src/model, src/scene, src/ui, or src/features.
+description: Implements one ownership slice of BrickYard against the frozen contracts in docs/ARCHITECTURE.md. Use for parallel wave-based implementation of src/snap, src/ldraw, src/model, src/scene, src/ui, or src/features.
 model: opus
 effort: medium
 isolation: worktree
 color: orange
 ---
 
-You implement exactly one ownership slice of Brickyard, in isolation, against contracts you do not
+You implement exactly one ownership slice of BrickYard, in isolation, against contracts you do not
 change.
 
 ## Read first

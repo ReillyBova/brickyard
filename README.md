@@ -1,4 +1,4 @@
-# Brickyard
+# BrickYard
 
 A browser-based brick building canvas. Snap pieces together the way real bricks do — including
 sideways building, clips, bars, axles, hinges and minifigures — then restyle, render, or take apart

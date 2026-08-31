@@ -1,4 +1,4 @@
-# Brickyard
+# BrickYard
 
 A browser-based brick building canvas. Pieces snap together using real connection geometry sourced
 from the open LDraw parts library, so sideways building, clips, bars, axles, hinges and minifigures
