@@ -295,4 +295,15 @@ describe('packKey', () => {
     expect((key >> 5) & 0b11).toBe(0);
     expect((key >> 7) & 0xff).toBe(0);
   });
+
+  it('packs the radius bucket ceiling (255) without throwing', () => {
+    // round(127.5 / 0.5) === 255, the exact top of the 8-bit field.
+    const key = packKey('cyl', 'M', parseSections('R 127.5 4'), false);
+    expect((key >> 7) & 0xff).toBe(255);
+  });
+
+  it('throws rather than silently collapsing a radius above the packable ceiling', () => {
+    // round(127.75 / 0.5) === 256, one past the 8-bit field's ceiling.
+    expect(() => packKey('cyl', 'M', parseSections('R 127.75 4'), false)).toThrow(RangeError);
+  });
 });

@@ -236,6 +236,9 @@ const VARIANT_CODE: Readonly<Record<SectionVariant, number>> = { R: 1, S: 2, A: 
 /** Radius bucket resolution: half an LDU. Distinguishes 2.5 from 3, and 4 from 6 from 8. */
 const RADIUS_QUANTUM = 0.5;
 
+/** The radius field is 8 bits (see `packKey`), so `round(radius / RADIUS_QUANTUM)` must fit in 0..255. */
+const RADIUS_BUCKET_MAX = 255;
+
 /**
  * The section that actually does the mating. A male connector is limited by its widest
  * section — that is what has to fit — and a female one by its narrowest, the bore. So a
@@ -259,12 +262,19 @@ export function matingSection(sections: readonly Section[], gender: Gender): Sec
  *  bits  0..2   kind          1 cyl · 2 clip · 3 finger · 4 general
  *  bits  3..4   gender        1 M · 2 F
  *  bits  5..6   variant       1 R · 2 S · 3 A   (of the mating section)
- *  bits  7..14  radius        round(radius / 0.5), clamped to 0..255
+ *  bits  7..14  radius        round(radius / 0.5), must fit in 0..255
  *  bit   15     slide
  * ```
  *
  * Zero in the variant and radius fields means "no section profile", which is how a
  * SNAP_GEN point with a degenerate bounding volume reads.
+ *
+ * The radius bucket is not clamped. A part whose mating radius rounds to more than 255
+ * half-LDU steps (roughly 127.75 LDU, ~51mm) would silently collapse into the same bucket
+ * as every other oversized part and read as compatible with them — a correctness bug, not
+ * a display quirk, since this key drives the mating solver. Throwing surfaces the part
+ * immediately instead of shipping a latent false-positive match; if a real part needs it,
+ * the fix is to widen the field, not to clamp quietly.
  */
 export function packKey(
   kind: SnapKind,
@@ -274,7 +284,16 @@ export function packKey(
 ): number {
   const sec = matingSection(sections, gender);
   const variant = sec ? VARIANT_CODE[sec.variant] : 0;
-  const bucket = sec ? Math.min(255, Math.max(0, Math.round(sec.radius / RADIUS_QUANTUM))) : 0;
+  let bucket = 0;
+  if (sec) {
+    bucket = Math.max(0, Math.round(sec.radius / RADIUS_QUANTUM));
+    if (bucket > RADIUS_BUCKET_MAX) {
+      throw new RangeError(
+        `packKey: radius ${sec.radius} LDU exceeds the packable range ` +
+          `(max ${RADIUS_BUCKET_MAX * RADIUS_QUANTUM} LDU); widen the radius field, don't clamp it.`,
+      );
+    }
+  }
   return (
     KIND_CODE[kind] |
     (GENDER_CODE[gender] << 3) |

@@ -11,7 +11,7 @@
  * reader, which is what keeps this safe in a worker and offline in tests.
  */
 
-import type { Mat3, Vec3 } from '../types';
+import type { Mat3, Mat4, Vec3 } from '../types';
 import type { ConnectionPoint, Gender, Section, SnapKind } from './types';
 import type { SnapAttributes, SnapCommand } from './parseMeta';
 import {
@@ -28,6 +28,7 @@ import {
   parseSnapLine,
   parseVec3,
 } from './parseMeta';
+import { IDENTITY, fromBasis, fromTranslation, multiply, positionOf, transformDirection } from '../math';
 
 /**
  * Reads one library file. Paths are namespaced: `ldraw/parts/3001.dat` for geometry,
@@ -45,73 +46,29 @@ export interface ResolveOptions {
 const DEFAULT_MAX_DEPTH = 24;
 
 // ---------------------------------------------------------------------------
-// Column-major 4x4 helpers, matching the layout of `Mat4` and `Matrix4.elements`.
-// Element (row r, column c) is at index c * 4 + r.
+// Matrix helpers built on the shared `../math` adapter.
 // ---------------------------------------------------------------------------
-
-type M4 = number[];
-
-const IDENTITY: M4 = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
-
-function multiply(a: M4, b: M4): M4 {
-  const out = new Array<number>(16).fill(0);
-  for (let c = 0; c < 4; c++) {
-    for (let r = 0; r < 4; r++) {
-      let sum = 0;
-      for (let k = 0; k < 4; k++) sum += a[k * 4 + r] * b[c * 4 + k];
-      out[c * 4 + r] = sum;
-    }
-  }
-  return out;
-}
-
-/** Builds a 4x4 from a column-major 3x3 basis and a translation. */
-function compose(basis: Mat3, position: Vec3, scale: Vec3 = [1, 1, 1]): M4 {
-  return [
-    basis[0] * scale[0],
-    basis[1] * scale[0],
-    basis[2] * scale[0],
-    0,
-    basis[3] * scale[1],
-    basis[4] * scale[1],
-    basis[5] * scale[1],
-    0,
-    basis[6] * scale[2],
-    basis[7] * scale[2],
-    basis[8] * scale[2],
-    0,
-    position[0],
-    position[1],
-    position[2],
-    1,
-  ];
-}
-
-const translationOf = (m: M4): Vec3 => [m[12], m[13], m[14]];
 
 /**
  * The part-local basis, with each column normalised. References may carry scale or a
  * mirror; normalising keeps `orientation` an actual basis while preserving handedness,
- * which the mating solver relies on.
+ * which the mating solver relies on. `transformDirection` already normalises, so
+ * transforming the three local axes gives normalised basis columns directly.
  */
-function basisOf(m: M4): Mat3 {
-  const out = [m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10]];
-  for (let c = 0; c < 3; c++) {
-    const i = c * 3;
-    const len = Math.hypot(out[i], out[i + 1], out[i + 2]);
-    if (len > 1e-9) {
-      out[i] /= len;
-      out[i + 1] /= len;
-      out[i + 2] /= len;
-    }
-  }
-  return out;
+function basisOf(m: Mat4): Mat3 {
+  const bx = transformDirection(m, [1, 0, 0]);
+  const by = transformDirection(m, [0, 1, 0]);
+  const bz = transformDirection(m, [0, 0, 1]);
+  return [...bx, ...by, ...bz];
 }
 
-/** `1 <colour> x y z a b c d e f g h i <file>` — the 3x3 is row-major. */
-function referenceMatrix(n: number[]): M4 {
+/**
+ * `1 <colour> x y z a b c d e f g h i <file>` — the 3x3 is row-major, and `fromBasis`
+ * expects column-major, so the transpose here is the format conversion, not a bug.
+ */
+function referenceMatrix(n: number[]): Mat4 {
   const [x, y, z, a, b, c, d, e, f, g, h, i] = n;
-  return [a, d, g, 0, b, e, h, 0, c, f, i, 0, x, y, z, 1];
+  return fromBasis([a, d, g, b, e, h, c, f, i], [x, y, z]);
 }
 
 // ---------------------------------------------------------------------------
@@ -182,7 +139,7 @@ interface ShadowResult {
 async function collectShadow(
   ctx: Context,
   shadowRel: string,
-  world: M4,
+  world: Mat4,
   depth: number,
   chain: ReadonlySet<string>,
 ): Promise<ShadowResult> {
@@ -204,16 +161,16 @@ async function collectShadow(
       continue;
     }
 
-    const local = compose(parseOrientation(attrs.ori), parseVec3(attrs.pos));
+    const local = fromBasis(parseOrientation(attrs.ori), parseVec3(attrs.pos));
     const scale = attrs.scale ? parseNumbers(attrs.scale) : [];
     const scaled =
       command === 'SNAP_INCL' && scale.length >= 3
-        ? multiply(local, compose([1, 0, 0, 0, 1, 0, 0, 0, 1], [0, 0, 0], [scale[0], scale[1], scale[2]]))
+        ? multiply(local, fromBasis([scale[0], 0, 0, 0, scale[1], 0, 0, 0, scale[2]], [0, 0, 0]))
         : local;
 
     for (const offset of gridOffsets(parseGrid(attrs.grid))) {
       // The lattice steps along the snap's own X and Z, so the offset goes inside `ori`.
-      const placed = multiply(scaled, compose([1, 0, 0, 0, 1, 0, 0, 0, 1], offset));
+      const placed = multiply(scaled, fromTranslation(offset));
       const m = multiply(world, placed);
 
       if (command === 'SNAP_INCL') {
@@ -238,7 +195,7 @@ async function collectShadow(
 function buildPoint(
   command: SnapCommand,
   attrs: SnapAttributes,
-  m: M4,
+  m: Mat4,
   source: string,
 ): RawPoint | null {
   const kind: SnapKind | undefined = KIND_BY_COMMAND[command];
@@ -294,7 +251,7 @@ function buildPoint(
     kind,
     gender,
     sections,
-    position: translationOf(m),
+    position: positionOf(m),
     orientation: basisOf(m),
     slide,
     ...(group ? { group } : {}),
@@ -313,15 +270,19 @@ function applyClears(points: RawPoint[], clears: (string | undefined)[]): RawPoi
 async function walk(
   ctx: Context,
   ldrawRel: string,
-  world: M4,
+  world: Mat4,
   depth: number,
+  chain: ReadonlySet<string>,
 ): Promise<RawPoint[]> {
-  if (depth > ctx.maxDepth) return [];
+  // `chain` catches a cyclic pair of files (A references B references A) immediately;
+  // `maxDepth` remains as a backstop against depth alone, e.g. a long but acyclic tree.
+  if (depth > ctx.maxDepth || chain.has(ldrawRel)) return [];
   const text = await readFile(ctx, `ldraw/${ldrawRel}`);
   if (text === null) return [];
 
   const shadow = await collectShadow(ctx, ldrawRel, world, 0, new Set());
 
+  const nested = new Set(chain).add(ldrawRel);
   const inherited: RawPoint[] = [];
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
@@ -333,7 +294,7 @@ async function walk(
     const child = await resolveReference(ctx, tok.slice(14).join(' '), 'ldraw/');
     if (!child) continue;
     inherited.push(
-      ...(await walk(ctx, child, multiply(world, referenceMatrix(numbers)), depth + 1)),
+      ...(await walk(ctx, child, multiply(world, referenceMatrix(numbers)), depth + 1, nested)),
     );
   }
 
@@ -380,5 +341,5 @@ export async function resolvePart(
   };
   const rel = /\.(dat|ldr)$/i.test(partId) ? normalise(partId) : `parts/${normalise(partId)}.dat`;
   const entry = (await resolveReference(ctx, rel, 'ldraw/')) ?? rel;
-  return finalise(await walk(ctx, entry, IDENTITY, 0));
+  return finalise(await walk(ctx, entry, IDENTITY, 0, new Set()));
 }

@@ -328,6 +328,59 @@ describe('reference resolution', () => {
     );
     expect(points).toHaveLength(1);
   });
+
+  it('skips a type-1 line with too few tokens rather than throwing', async () => {
+    const points = await resolvePart(
+      'host',
+      readerFor({
+        // Missing the trailing file token entirely, and missing several transform fields.
+        'ldraw/parts/host.dat': ['1 16 0 0 0 1 0 0 0 1 0 0 0 1', ref('present.dat')].join('\n'),
+        'ldraw/p/present.dat': '0 present',
+        'shadow/p/present.dat': stud('M'),
+      }),
+    );
+    expect(points).toHaveLength(1);
+  });
+
+  it('skips a type-1 line with a non-numeric transform field rather than throwing', async () => {
+    const points = await resolvePart(
+      'host',
+      readerFor({
+        'ldraw/parts/host.dat': [
+          '1 16 0 0 0 1 NaN 0 0 1 0 0 0 1 bad.dat',
+          ref('present.dat'),
+        ].join('\n'),
+        'ldraw/p/bad.dat': '0 bad',
+        'shadow/p/bad.dat': stud('M', 'badStud'),
+        'ldraw/p/present.dat': '0 present',
+        'shadow/p/present.dat': stud('M'),
+      }),
+    );
+    // Only the well-formed reference contributes; the malformed line is skipped outright,
+    // not resolved with garbage numbers.
+    expect(points).toHaveLength(1);
+    expect(points[0].source).toBe('p/present.dat');
+  });
+});
+
+describe('cyclic geometry references', () => {
+  it('terminates on a two-file reference cycle instead of recursing to the depth cap', async () => {
+    const ref = (file: string) => `1 16 0 0 0 1 0 0 0 1 0 0 0 1 ${file}`;
+    const points = await resolvePart(
+      'a',
+      readerFor({
+        // a.dat references b.dat, which references a.dat back — an unbounded cycle if
+        // nothing tracks the chain. Each file also carries its own annotation, so a
+        // depth-capped-but-undetected walk would emit many duplicates instead of two.
+        'ldraw/parts/a.dat': ref('b.dat'),
+        'ldraw/p/b.dat': ref('a.dat'),
+        'shadow/parts/a.dat': stud('M', 'aStud'),
+        'shadow/p/b.dat': stud('M', 'bStud'),
+      }),
+    );
+    expect(points).toHaveLength(2);
+    expect(points.map((p) => p.source).sort()).toEqual(['p/b.dat', 'parts/a.dat']);
+  });
 });
 
 describe('transform accumulation', () => {
