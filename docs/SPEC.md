@@ -1,4 +1,4 @@
-# Brickyard — Product Spec
+# BrickYard — Product Spec
 
 ## What we're building
 
