@@ -324,6 +324,44 @@ describe('spatial index', () => {
     expect(index.size).toBe(p.connections.length);
   });
 
+  it('finds points at negative coordinates', async () => {
+    // LDraw uses negative coordinates heavily — +Y is down, so anything stacked upward
+    // has a negative Y — and integer division of negatives is a classic off-by-one.
+    const p = await part('3001');
+    const index = new HashSpatialIndex();
+    const at = fromTranslation([-137, -240, -63]);
+    index.insert(brick(1), p, at);
+
+    for (const c of p.connections) {
+      const where = worldPoint(c, at).position;
+      expect(index.near(where, MATE_TOLERANCE).length).toBeGreaterThan(0);
+    }
+  });
+
+  it('finds a point sitting exactly on a cell boundary, queried from either side', async () => {
+    const p = await part('3001');
+    const index = new HashSpatialIndex();
+    // CELL_SIZE is 20 and the stud pitch is 20, so studs land on boundaries by nature.
+    const at = fromTranslation([0, 0, 0]);
+    index.insert(brick(1), p, at);
+
+    for (const c of p.connections) {
+      const [x, y, z] = worldPoint(c, at).position;
+      const eps = 1e-4;
+      expect(index.near([x - eps, y, z], MATE_TOLERANCE).length).toBeGreaterThan(0);
+      expect(index.near([x + eps, y, z], MATE_TOLERANCE).length).toBeGreaterThan(0);
+    }
+  });
+
+  it('a query radius wider than one cell still finds everything inside it', async () => {
+    const p = await part('3001');
+    const index = new HashSpatialIndex();
+    index.insert(brick(1), p, IDENTITY);
+    // 60 LDU spans three cells, so the neighbour scan has to widen rather than assume one.
+    const found = index.near([0, 12, 0], 60);
+    expect(found.length).toBe(p.connections.length);
+  });
+
   it('finds points across a cell boundary', async () => {
     const p = await part('3001');
     const index = new HashSpatialIndex();

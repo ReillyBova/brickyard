@@ -40,8 +40,10 @@ that matter here.
 - Compatibility keys: opposite genders match, same genders do not, radius bucketing, axle-in-round
   rejection.
 - `solveMating`: resulting transform places the moving point coincident with the target and
-  co-directional with it; roll rotates about the shared axis only; the placement is never a
-  reflection, including when a connector basis is left-handed.
+  co-directional with it; roll rotates about the shared axis only; a left-handed connector basis
+  does not reflect the placed part. Note the placement still inherits the handedness of the target
+  brick's own world transform, so a mirrored brick yields a mirrored placement — nothing creates one
+  today, and closing that needs a decision about what mirroring a brick should mean.
 - `findMates`: an eight-stud coincidence is found for a squarely-stacked 2×4 pair.
 
 **`model/`**
