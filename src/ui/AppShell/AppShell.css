@@ -1,0 +1,103 @@
+/*
+ * Layout glue for the app frame: positions the chest and colour rails as floating
+ * panels over the viewport, per docs/DESIGN.md ("panels are rafts, with a gutter to the
+ * window edge, so the scene reads as continuous underneath"). No new component classes
+ * — this only arranges the ones in components.css, and every value is a token.
+ *
+ * The viewport is the priority at small widths: below --by-shell-breakpoint the side
+ * rails stop taking grid columns and become on-demand overlays, opened from a compact
+ * top bar, so a narrow window never crowds the canvas.
+ */
+
+.by-shell {
+  position: absolute;
+  inset: 0;
+  z-index: var(--by-z-chrome);
+  display: grid;
+  grid-template-columns: var(--by-panel-w) 1fr var(--by-panel-w);
+  grid-template-rows: auto 1fr;
+  gap: var(--by-space-3);
+  padding: var(--by-space-3);
+  pointer-events: none;
+}
+
+.by-shell__bar {
+  display: none;
+  grid-column: 1 / -1;
+  pointer-events: auto;
+}
+
+.by-shell__rail {
+  min-height: 0;
+  pointer-events: auto;
+}
+
+.by-shell__rail--chest {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.by-shell__rail--color {
+  grid-column: 3;
+  grid-row: 2;
+}
+
+@media (max-width: 860px) {
+  .by-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .by-shell__bar {
+    display: flex;
+    align-items: center;
+    gap: var(--by-space-2);
+    height: var(--by-toolbar-h);
+    padding: 0 var(--by-space-3);
+    border-radius: var(--by-radius-pill);
+    background: var(--by-panel);
+    box-shadow: var(--by-shadow-md);
+  }
+
+  .by-shell__wordmark {
+    margin-right: auto;
+    font-family: var(--by-font-display);
+    font-weight: var(--by-font-display-weight);
+    font-size: var(--by-text-lg);
+    letter-spacing: var(--by-tracking-display);
+  }
+
+  .by-shell__rail {
+    position: absolute;
+    top: calc(var(--by-toolbar-h) + var(--by-space-3) * 2);
+    bottom: var(--by-space-3);
+    left: var(--by-space-3);
+    right: var(--by-space-3);
+    max-width: 360px;
+    z-index: var(--by-z-popover);
+    box-shadow: var(--by-shadow-lg);
+    transition: transform var(--by-dur-base) var(--by-ease-out), opacity var(--by-dur-base) var(--by-ease-out);
+  }
+
+  .by-shell__rail--chest {
+    grid-column: 1;
+  }
+
+  .by-shell__rail--color {
+    grid-column: 1;
+    right: var(--by-space-3);
+    left: auto;
+  }
+
+  .by-shell__rail.is-closed {
+    opacity: 0;
+    transform: translateY(-8px);
+    pointer-events: none;
+    visibility: hidden;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .by-shell__rail {
+    transition: none;
+  }
+}
