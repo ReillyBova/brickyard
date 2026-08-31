@@ -66,15 +66,39 @@ Bundling is what every visitor downloads, so it must stay small. **Hosting is no
 served on demand from our own origin costs nothing to visitors who never request it. GitHub Pages
 allows a 1 GB published site and 100 GB of monthly bandwidth, which is far more than we need.
 
-So we host pre-flattened, single-file geometry for the ~4,200 parts the shadow library covers — the
-parts that actually appear in real models. One same-origin, HTTP/2, CDN-backed request per part,
-instead of ~20 cross-origin requests walking a subfile tree against a rate-limited third-party host.
-At an estimated ~17 KB per flattened part that is on the order of 70 MB, comfortably inside the
-limit. The real number gets measured during the first full bake; if flattening proves larger than
-estimated, the hosted set narrows to the most common parts rather than growing the deploy.
+So we host pre-flattened geometry for the ~4,200 parts the shadow library covers — **one file per
+part**, fetched on demand. One same-origin, HTTP/2, CDN-backed request per part, instead of ~20
+cross-origin requests walking a subfile tree against a rate-limited third-party host.
 
-Deploy time is the binding constraint rather than storage — Pages times out at 10 minutes — so the
-hosted set stays bounded and is only rebuilt when the mirror changes.
+### Why one file per part, and not packages
+
+Part usage across 24 published models, spanning 29 to 4,511 parts:
+
+| Measure | Value |
+| --- | --- |
+| Median unique parts per model | 89 |
+| Distinct parts across the sample | 1,037 |
+| Top 158 parts | cover 50% of usage |
+| Top 789 parts | cover 90% of usage |
+| Parts appearing in exactly one model | 600, or 58% of distinct parts |
+
+The tail dominates: more than half of all distinct parts appear in a single model. Fixed-size
+packages fail against that shape — a median model's 89 parts would scatter across most packages,
+pulling tens of megabytes to obtain about 1.5 MB of useful geometry. Package layout would have to
+follow co-occurrence to pay off, and with 58% singletons there is not enough co-occurrence to cluster
+on.
+
+Per-part files transfer exactly what a model needs (~1.5 MB at the median), multiplex over a single
+HTTP/2 connection, and cache independently, so the second model a user opens reuses everything the
+first one pulled. Geometry streams in and parts render as they arrive rather than blocking on the
+full set.
+
+Per-part size is estimated at ~17 KB pending the first full bake. If flattening proves materially
+larger, the hosted set narrows to the most-used parts rather than growing the deploy — deploy time is
+the binding constraint, since Pages times out at 10 minutes.
+
+GitHub Pages serves its own cache headers and we cannot override them, so a service worker handles
+long-lived caching of part geometry, which also makes previously-opened models work offline.
 
 ## What gets baked
 
