@@ -32,6 +32,10 @@ the model is continuous transforms, constrained by connection matching.
 `docs/ARCHITECTURE.md` holds the type contracts. They are frozen; changing one is a deliberate,
 announced act, not a drive-by edit.
 
+`docs/LDRAW-PRIMER.md` covers the LDraw file format and the LDCad shadow library — line types,
+transforms, meta commands, and the connectivity model. Read it before working in `src/snap/` or
+`src/ldraw/`.
+
 ```
 src/ldraw/     part fetch + cache, LDConfig colors, baked catalog
 src/snap/      shadow parser, ConnectionPoint, compatibility, mating solver
