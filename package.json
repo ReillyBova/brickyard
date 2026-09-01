@@ -13,7 +13,7 @@
     "sync-mirror": "node tools/sync-mirror.ts",
     "prebake": "node tools/prebake.ts",
     "mcp": "node tools/bridge.ts",
-    "build-chest-catalog": "node tools/build-chest-catalog.ts",
+    "build-chest-catalog": "node tools/run-with-vite.mjs tools/build-chest-catalog.ts",
     "build-model-manifests": "node tools/run-with-vite.mjs tools/build-model-manifests.ts",
     "test:perf": "vitest run --config vitest.perf.config.ts",
     "storybook": "storybook dev -p 6006",

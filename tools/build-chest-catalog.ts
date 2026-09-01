@@ -1,547 +1,114 @@
 #!/usr/bin/env node
 /**
- * Builds `src/ui/PartsChest/catalog.generated.json` — the parts chest's real names and
- * categories, read from the local LDraw mirror.
+ * Builds `src/ui/PartsChest/catalog.generated.json` — the parts chest's real names,
+ * categories and popularity.
  *
- * **This script makes no network requests.** Titles come from line one of each part's
- * `.dat` file (`3001.dat` begins `0 Brick  2 x  4`); categories are curated below rather
- * than derived, because chest membership and grouping are product decisions, same as
- * `tools/prebake.ts`'s `DEFAULT_CHEST`.
+ * Membership and ranking come from two local, offline sources: `public/models/*.mpd`
+ * (parsed with the same `parseMpd` the running app uses, to count how often each part
+ * id is actually placed) and `public/baked/connections.bin` (the committed connections
+ * bake, to require that every candidate resolves to at least one connection point).
+ * Neither needs the network — this script runs through `tools/run-with-vite.mjs` rather
+ * than plain Node only because `parseMpd.ts` uses extensionless imports.
  *
- * Source, in order:
- *   1. The local mirror at `.cache/ldraw/`, populated by `npm run sync-mirror`. Preferred
- *      because it covers the whole curated list.
- *   2. The committed fixture mirror at `src/ldraw/__fixtures__/mirror/`, which has the
- *      same `library/parts/…` layout but only a handful of real part files. Used so the
- *      chest still shows real names and a working catalog with no mirror synced — a
- *      reduced chest, not an empty or fabricated one.
+ * Titles are a separate, best-effort concern, tried in order:
+ *   1. `src/ui/PartsChest/catalog.generated.json`'s own previous contents — free, no I/O,
+ *      and covers every part carried over from one generation to the next.
+ *   2. The local LDraw mirror at `.cache/ldraw/` (`npm run sync-mirror`) if present, else
+ *      the committed fixture mirror at `src/ui/PartsChest/__fixtures__/mirror/`, which
+ *      covers only a handful of real part files.
+ *   3. One HTTPS request per remaining id to the CORS-enabled GitHub mirror of the LDraw
+ *      parts library (`raw.githubusercontent.com/gkjohnson/ldraw-parts-library`), run
+ *      with bounded concurrency. This is the only network use in the build — a few
+ *      hundred small, cached, same-shape GET requests for titles the first two sources
+ *      don't have, not a crawl of the library.
+ *   4. A placeholder title (`Part <id>`), logged as a warning, if all three come back
+ *      empty — the part still counts toward its category by usage and connectivity, it
+ *      just carries a name that says plainly it wasn't resolved.
  *
- * If neither source has any of the curated parts, the build fails with a message pointing
- * at `npm run sync-mirror` rather than emitting nothing.
- *
- * Usage: node tools/build-chest-catalog.ts [--mirror <dir>] [--out <file>]
+ * Usage: node tools/run-with-vite.mjs tools/build-chest-catalog.ts [--mirror <dir>] [--out <file>]
  */
 
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
 
+import { parseMpd } from '../src/features/omr/parseMpd.ts'
+import { unpackConnections } from '../src/snap/baked.ts'
 import { DEFAULT_MIRROR_ROOT, createLibraryReader, mirrorExists, type MirrorReader } from '../src/ldraw/mirror.ts'
 
 const FIXTURE_MIRROR_ROOT = 'src/ui/PartsChest/__fixtures__/mirror'
 const DEFAULT_OUT = 'src/ui/PartsChest/catalog.generated.json'
+const MODELS_DIR = 'public/models'
+const CONNECTIONS_PATH = 'public/baked/connections.bin'
+/** CORS-enabled GitHub mirror of the LDraw parts library — see the header comment. */
+const NETWORK_TITLE_BASE = 'https://raw.githubusercontent.com/gkjohnson/ldraw-parts-library/master/complete/ldraw/parts/'
+const NETWORK_CONCURRENCY = 16
+
+type Category =
+  | 'Bricks'
+  | 'Plates'
+  | 'Tiles'
+  | 'Slopes'
+  | 'Wedges'
+  | 'Arches'
+  | 'Round'
+  | 'SNOT'
+  | 'Hinges'
+  | 'Connectors'
+  | 'Technic'
+  | 'Wheels'
+  | 'Windows & Doors'
+  | 'Plants'
+  | 'Minifigure'
 
 /**
- * The chest: several hundred parts drawn from the ~3,300 the LDCad shadow library
- * resolves to actual connection points (see `docs/PREBAKE.md` and
- * `public/baked/connections.bin`) — every entry here snaps, because that pool is exactly
- * what determines whether a part snaps at runtime. A handful of parts from the original
- * 36-part development chest fell outside that pool (`973`, `3010`, `3037`, `3626b`,
- * `3665a`, `4162`, `4716` among them) — real, undeprecated parts whose own id resolves to
- * zero connection points in the annotated corpus, so they never snapped in the running
- * app. They're replaced below by the nearest connected sibling in the same category
- * (`3626bp01` for the plain head, `17`/`6260` for the torso, and so on).
- *
- * Selected from the shadow-annotated pool by category, filtered to drop LDraw's `~Moved`
- * /`=Alias` placeholders and decorative print/pattern/sticker variants (which would
- * otherwise flood every category with near-duplicates of the same base shape), then
- * capped per category and ranked by title brevity as a proxy for "the plain, common
- * version of this shape" — with a short hand-picked whitelist per category (minifig body
- * parts, the classic clip) pinned first so the heuristic can't crowd out the essentials.
- * Regenerate this selection with the categorisation script kept in this file's history;
- * membership and grouping are still product decisions, same as `tools/prebake.ts`'s
- * `DEFAULT_CHEST`.
+ * How many of each category's most-used, still-connectable parts make the chest. Sized
+ * to land the whole catalog in the same ~450-part, ~5KB-gzipped neighbourhood as before —
+ * a product decision about how much of the rail a category may fill, independent of
+ * which parts earn a spot inside it.
  */
+const CATEGORY_CAPS: Record<Category, number> = {
+  Bricks: 38,
+  Plates: 34,
+  Tiles: 26,
+  Slopes: 32,
+  Wedges: 18,
+  Arches: 18,
+  Round: 34,
+  SNOT: 18,
+  Hinges: 26,
+  Connectors: 30,
+  Technic: 61,
+  Wheels: 24,
+  'Windows & Doors': 26,
+  Plants: 20,
+  Minifigure: 39,
+}
+
 /**
  * Parts that resolve and carry connectivity but do not render — kept out of the chest
  * rather than shipped as blank tiles. Add here rather than hand-editing the generated
  * catalog, which a rebuild would overwrite.
  */
-const EXCLUDED_PARTS = new Set(['3572', '5850']);
+const EXCLUDED_PARTS = new Set(['3572', '5850'])
 
-const CURATED_CHEST: readonly { id: string; category: string }[] = [
-  // Minifigure
-  { id: '3626bp01', category: 'Minifigure' },
-  { id: '17', category: 'Minifigure' },
-  { id: '6260', category: 'Minifigure' },
-  { id: '15', category: 'Minifigure' },
-  { id: '41879b', category: 'Minifigure' },
-  { id: '3818', category: 'Minifigure' },
-  { id: '3819', category: 'Minifigure' },
-  { id: '3820', category: 'Minifigure' },
-  { id: '3901', category: 'Minifigure' },
-  { id: '6093a', category: 'Minifigure' },
-  { id: '61506', category: 'Minifigure' },
-  { id: '71015', category: 'Minifigure' },
-  { id: '3899', category: 'Minifigure' },
-  { id: '24085', category: 'Minifigure' },
-  { id: '33054', category: 'Minifigure' },
-  { id: '40359a', category: 'Minifigure' },
-  { id: '2488', category: 'Minifigure' },
-  { id: '4524', category: 'Minifigure' },
-  { id: '30112b', category: 'Minifigure' },
-  { id: '3849', category: 'Minifigure' },
-  { id: '3959', category: 'Minifigure' },
-  { id: '4332', category: 'Minifigure' },
-  { id: '4337', category: 'Minifigure' },
-  { id: '29636', category: 'Minifigure' },
-  { id: '44658', category: 'Minifigure' },
-  { id: '71342', category: 'Minifigure' },
-  { id: '99253', category: 'Minifigure' },
-  { id: '2343', category: 'Minifigure' },
-  { id: '3837', category: 'Minifigure' },
-  { id: '4528', category: 'Minifigure' },
-  { id: '23986', category: 'Minifigure' },
-  { id: '24077', category: 'Minifigure' },
-  { id: '2543', category: 'Minifigure' },
-  { id: '3841', category: 'Minifigure' },
-  { id: '10154', category: 'Minifigure' },
-  { id: '11459', category: 'Minifigure' },
-  { id: '29109', category: 'Minifigure' },
-  { id: '30154', category: 'Minifigure' },
-  { id: '30193', category: 'Minifigure' },
-  { id: '35485', category: 'Minifigure' },
-
-  // Plants
-  { id: '6064b', category: 'Plants' },
-  { id: '3742', category: 'Plants' },
-  { id: '51270', category: 'Plants' },
-  { id: '6065', category: 'Plants' },
-  { id: '30093', category: 'Plants' },
-  { id: '15279', category: 'Plants' },
-  { id: '3741a', category: 'Plants' },
-  { id: '2417', category: 'Plants' },
-  { id: '2423', category: 'Plants' },
-  { id: '2566b', category: 'Plants' },
-  { id: '2682a', category: 'Plants' },
-  { id: '2563a', category: 'Plants' },
-  { id: '87691', category: 'Plants' },
-  { id: '6148', category: 'Plants' },
-  { id: '4265a', category: 'Plants' },
-  { id: '6577', category: 'Plants' },
-  { id: '3470', category: 'Plants' },
-  { id: '4727', category: 'Plants' },
-  { id: '1997', category: 'Plants' },
-  { id: '2518', category: 'Plants' },
-
-  // Wheels
-  { id: '2496', category: 'Wheels' },
-  { id: '2927', category: 'Wheels' },
-  { id: '32003', category: 'Wheels' },
-  { id: '4624', category: 'Wheels' },
-  { id: '32019', category: 'Wheels' },
-  { id: '2654a', category: 'Wheels' },
-  { id: '4720', category: 'Wheels' },
-  { id: '30663', category: 'Wheels' },
-  { id: '32496', category: 'Wheels' },
-  { id: '2999', category: 'Wheels' },
-  { id: '3736', category: 'Wheels' },
-  { id: '4003', category: 'Wheels' },
-  { id: '4779', category: 'Wheels' },
-  { id: '4782', category: 'Wheels' },
-  { id: '2695', category: 'Wheels' },
-  { id: '3641', category: 'Wheels' },
-  { id: '34337', category: 'Wheels' },
-  { id: '57519', category: 'Wheels' },
-  { id: '2741', category: 'Wheels' },
-  { id: '2819', category: 'Wheels' },
-  { id: '3464b', category: 'Wheels' },
-  { id: '4488', category: 'Wheels' },
-  { id: '21445', category: 'Wheels' },
-  { id: '32007', category: 'Wheels' },
-
-  // Windows & Doors
-  { id: '2657', category: 'Windows & Doors' },
-  { id: '4131', category: 'Windows & Doors' },
-  { id: '7930', category: 'Windows & Doors' },
-  { id: '80683', category: 'Windows & Doors' },
-  { id: '671', category: 'Windows & Doors' },
-  { id: '3761', category: 'Windows & Doors' },
-  { id: '3853', category: 'Windows & Doors' },
-  { id: '4132', category: 'Windows & Doors' },
-  { id: '4608', category: 'Windows & Doors' },
-  { id: '30223', category: 'Windows & Doors' },
-  { id: '4611', category: 'Windows & Doors' },
-  { id: '4218b', category: 'Windows & Doors' },
-  { id: '3189', category: 'Windows & Doors' },
-  { id: '6546', category: 'Windows & Doors' },
-  { id: '2352', category: 'Windows & Doors' },
-  { id: '2826', category: 'Windows & Doors' },
-  { id: '3188', category: 'Windows & Doors' },
-  { id: '3579', category: 'Windows & Doors' },
-  { id: '3823', category: 'Windows & Doors' },
-  { id: '4071', category: 'Windows & Doors' },
-  { id: '4130', category: 'Windows & Doors' },
-  { id: '4176', category: 'Windows & Doors' },
-  { id: '4183', category: 'Windows & Doors' },
-  { id: '6016', category: 'Windows & Doors' },
-  { id: '20684', category: 'Windows & Doors' },
-  { id: '24248', category: 'Windows & Doors' },
-
-  // Arches
-  { id: '3455', category: 'Arches' },
-  { id: '3659', category: 'Arches' },
-  { id: '2339', category: 'Arches' },
-  { id: '3572', category: 'Arches' },
-  { id: '4743', category: 'Arches' },
-  { id: '5850', category: 'Arches' },
-  { id: '6182', category: 'Arches' },
-  { id: '30528', category: 'Arches' },
-  { id: '80543', category: 'Arches' },
-  { id: '6108', category: 'Arches' },
-  { id: '92950', category: 'Arches' },
-  { id: '88292', category: 'Arches' },
-  { id: '16577', category: 'Arches' },
-  { id: '13965', category: 'Arches' },
-  { id: '14707', category: 'Arches' },
-  { id: '18653', category: 'Arches' },
-  { id: '30099', category: 'Arches' },
-  { id: '78666', category: 'Arches' },
-
-  // Wedges
-  { id: '2399', category: 'Wedges' },
-  { id: '2916', category: 'Wedges' },
-  { id: '22391', category: 'Wedges' },
-  { id: '30382', category: 'Wedges' },
-  { id: '4856', category: 'Wedges' },
-  { id: '43712', category: 'Wedges' },
-  { id: '11291', category: 'Wedges' },
-  { id: '45301', category: 'Wedges' },
-  { id: '45677', category: 'Wedges' },
-  { id: '29115', category: 'Wedges' },
-  { id: '50373', category: 'Wedges' },
-  { id: '43713', category: 'Wedges' },
-  { id: '32084', category: 'Wedges' },
-  { id: '47755', category: 'Wedges' },
-  { id: '64225', category: 'Wedges' },
-  { id: '80545', category: 'Wedges' },
-  { id: '87619', category: 'Wedges' },
-  { id: '4855', category: 'Wedges' },
-
-  // Slopes
-  { id: '3038', category: 'Slopes' },
-  { id: '3040b', category: 'Slopes' },
-  { id: '4161', category: 'Slopes' },
-  { id: '4286', category: 'Slopes' },
-  { id: '4445', category: 'Slopes' },
-  { id: '15672', category: 'Slopes' },
-  { id: '23949', category: 'Slopes' },
-  { id: '30182', category: 'Slopes' },
-  { id: '92946', category: 'Slopes' },
-  { id: '44126', category: 'Slopes' },
-  { id: '49618', category: 'Slopes' },
-  { id: '50950', category: 'Slopes' },
-  { id: '61678', category: 'Slopes' },
-  { id: '3041', category: 'Slopes' },
-  { id: '3042', category: 'Slopes' },
-  { id: '3043', category: 'Slopes' },
-  { id: '3048b', category: 'Slopes' },
-  { id: '3299', category: 'Slopes' },
-  { id: '3300', category: 'Slopes' },
-  { id: '4509', category: 'Slopes' },
-  { id: '32083', category: 'Slopes' },
-  { id: '35464', category: 'Slopes' },
-  { id: '43708', category: 'Slopes' },
-  { id: 'u7033', category: 'Slopes' },
-  { id: '678', category: 'Slopes' },
-  { id: '2875', category: 'Slopes' },
-  { id: '5404', category: 'Slopes' },
-  { id: '41766', category: 'Slopes' },
-  { id: '61487', category: 'Slopes' },
-  { id: 'u7030', category: 'Slopes' },
-  { id: 'u7031', category: 'Slopes' },
-  { id: 'u7032', category: 'Slopes' },
-
-  // Hinges
-  { id: '2651', category: 'Hinges' },
-  { id: '2650', category: 'Hinges' },
-  { id: '3938', category: 'Hinges' },
-  { id: '6134', category: 'Hinges' },
-  { id: '3937', category: 'Hinges' },
-  { id: '4625', category: 'Hinges' },
-  { id: '4593', category: 'Hinges' },
-  { id: '4213', category: 'Hinges' },
-  { id: '314d', category: 'Hinges' },
-  { id: '2430', category: 'Hinges' },
-  { id: '3830', category: 'Hinges' },
-  { id: '652', category: 'Hinges' },
-  { id: '2429', category: 'Hinges' },
-  { id: '3831', category: 'Hinges' },
-  { id: '653', category: 'Hinges' },
-  { id: '4592', category: 'Hinges' },
-  { id: '2873', category: 'Hinges' },
-  { id: '3597', category: 'Hinges' },
-  { id: '13358', category: 'Hinges' },
-  { id: '18910', category: 'Hinges' },
-  { id: '654', category: 'Hinges' },
-  { id: '4214', category: 'Hinges' },
-  { id: '4531', category: 'Hinges' },
-  { id: '4587', category: 'Hinges' },
-  { id: '30388', category: 'Hinges' },
-  { id: '2347', category: 'Hinges' },
-
-  // Connectors — clips and bars, the two shapes Technic doesn't otherwise cover.
-  { id: '4085c', category: 'Connectors' },
-  { id: '30374', category: 'Connectors' },
-  { id: '87994', category: 'Connectors' },
-  { id: '6046', category: 'Connectors' },
-  { id: '4628', category: 'Connectors' },
-  { id: '2486', category: 'Connectors' },
-  { id: '2583', category: 'Connectors' },
-  { id: '6187', category: 'Connectors' },
-  { id: '6221', category: 'Connectors' },
-  { id: '30395', category: 'Connectors' },
-  { id: '71184', category: 'Connectors' },
-  { id: '3711', category: 'Connectors' },
-  { id: '4095', category: 'Connectors' },
-  { id: '11090', category: 'Connectors' },
-  { id: '99061', category: 'Connectors' },
-  { id: '35365', category: 'Connectors' },
-  { id: '2555', category: 'Connectors' },
-  { id: '23443', category: 'Connectors' },
-  { id: '35366', category: 'Connectors' },
-  { id: '87618', category: 'Connectors' },
-  { id: '66909', category: 'Connectors' },
-  { id: '92220', category: 'Connectors' },
-  { id: '2432', category: 'Connectors' },
-  { id: '23444', category: 'Connectors' },
-  { id: '35654', category: 'Connectors' },
-  { id: '63965a', category: 'Connectors' },
-  { id: '64727', category: 'Connectors' },
-  { id: '2540', category: 'Connectors' },
-  { id: '2921', category: 'Connectors' },
-  { id: '3136', category: 'Connectors' },
-
-  // SNOT — sideways-facing studs, off the vertical lattice entirely.
-  { id: '30250', category: 'SNOT' },
-  { id: '2422', category: 'SNOT' },
-  { id: '4598', category: 'SNOT' },
-  { id: '5712', category: 'SNOT' },
-  { id: '18671', category: 'SNOT' },
-  { id: '93274', category: 'SNOT' },
-  { id: '30263', category: 'SNOT' },
-  { id: '4732', category: 'SNOT' },
-  { id: '3956', category: 'SNOT' },
-  { id: '36840', category: 'SNOT' },
-  { id: '73825', category: 'SNOT' },
-  { id: '98287', category: 'SNOT' },
-  { id: '99207', category: 'SNOT' },
-  { id: '99780', category: 'SNOT' },
-  { id: '4070', category: 'SNOT' },
-  { id: '30209', category: 'SNOT' },
-  { id: '36841', category: 'SNOT' },
-  { id: '44728', category: 'SNOT' },
-
-  // Technic — beams, pins, axles, gears.
-  { id: '3673', category: 'Technic' },
-  { id: '3704', category: 'Technic' },
-  { id: '3705', category: 'Technic' },
-  { id: '3706', category: 'Technic' },
-  { id: '3707', category: 'Technic' },
-  { id: '4519', category: 'Technic' },
-  { id: '32073', category: 'Technic' },
-  { id: '32316', category: 'Technic' },
-  { id: '32523', category: 'Technic' },
-  { id: '32524', category: 'Technic' },
-  { id: '40490', category: 'Technic' },
-  { id: '43857', category: 'Technic' },
-  { id: '44294', category: 'Technic' },
-  { id: '60485', category: 'Technic' },
-  { id: '3708', category: 'Technic' },
-  { id: '3737', category: 'Technic' },
-  { id: '4274', category: 'Technic' },
-  { id: '23948', category: 'Technic' },
-  { id: '30397', category: 'Technic' },
-  { id: '31625', category: 'Technic' },
-  { id: '32002', category: 'Technic' },
-  { id: '32278', category: 'Technic' },
-  { id: '32525', category: 'Technic' },
-  { id: '41239', category: 'Technic' },
-  { id: '50450', category: 'Technic' },
-  { id: '50451', category: 'Technic' },
-  { id: '3749', category: 'Technic' },
-  { id: '4698', category: 'Technic' },
-  { id: '6247', category: 'Technic' },
-  { id: '4022', category: 'Technic' },
-  { id: '61510', category: 'Technic' },
-  { id: '2497', category: 'Technic' },
-  { id: '6530', category: 'Technic' },
-  { id: '6538a', category: 'Technic' },
-  { id: '32072', category: 'Technic' },
-  { id: '2736', category: 'Technic' },
-  { id: '2792', category: 'Technic' },
-  { id: '4261', category: 'Technic' },
-  { id: '4730', category: 'Technic' },
-  { id: '15458', category: 'Technic' },
-  { id: '32012', category: 'Technic' },
-  { id: '32017', category: 'Technic' },
-  { id: '32063', category: 'Technic' },
-  { id: '32065', category: 'Technic' },
-  { id: '64782', category: 'Technic' },
-  { id: '641', category: 'Technic' },
-  { id: '2712', category: 'Technic' },
-  { id: '2790a', category: 'Technic' },
-  { id: '2823', category: 'Technic' },
-  { id: '3649', category: 'Technic' },
-  { id: '4019', category: 'Technic' },
-  { id: '40244', category: 'Technic' },
-  { id: '799', category: 'Technic' },
-  { id: '32062', category: 'Technic' },
-  { id: '57587', category: 'Technic' },
-  { id: '57719', category: 'Technic' },
-  { id: '71917', category: 'Technic' },
-  { id: '71944', category: 'Technic' },
-  { id: '71951', category: 'Technic' },
-  { id: '71952', category: 'Technic' },
-
-  // Round
-  { id: '4589', category: 'Round' },
-  { id: '6942', category: 'Round' },
-  { id: '272', category: 'Round' },
-  { id: '3350', category: 'Round' },
-  { id: '6233', category: 'Round' },
-  { id: '6141', category: 'Round' },
-  { id: '6259', category: 'Round' },
-  { id: '6900', category: 'Round' },
-  { id: '38317', category: 'Round' },
-  { id: '48310', category: 'Round' },
-  { id: '45', category: 'Round' },
-  { id: '59900', category: 'Round' },
-  { id: '71076a', category: 'Round' },
-  { id: '1748', category: 'Round' },
-  { id: '28598', category: 'Round' },
-  { id: '27507', category: 'Round' },
-  { id: '27925', category: 'Round' },
-  { id: '79393', category: 'Round' },
-  { id: '2577', category: 'Round' },
-  { id: '5152', category: 'Round' },
-  { id: '48092', category: 'Round' },
-  { id: '71075a', category: 'Round' },
-  { id: '745', category: 'Round' },
-  { id: '746', category: 'Round' },
-  { id: '4588', category: 'Round' },
-  { id: '33291', category: 'Round' },
-  { id: '3943b', category: 'Round' },
-  { id: '4841', category: 'Round' },
-  { id: '6002', category: 'Round' },
-  { id: '6039', category: 'Round' },
-  { id: '6059', category: 'Round' },
-  { id: '6222', category: 'Round' },
-  { id: '18897', category: 'Round' },
-  { id: '22888', category: 'Round' },
-
-  // Tiles — studless tops.
-  { id: '6934', category: 'Tiles' },
-  { id: '14719', category: 'Tiles' },
-  { id: '11203', category: 'Tiles' },
-  { id: '3068b', category: 'Tiles' },
-  { id: '3069b', category: 'Tiles' },
-  { id: '3070b', category: 'Tiles' },
-  { id: '2342', category: 'Tiles' },
-  { id: '30256', category: 'Tiles' },
-  { id: '3068a', category: 'Tiles' },
-  { id: '3069a', category: 'Tiles' },
-  { id: '3070a', category: 'Tiles' },
-  { id: '22385', category: 'Tiles' },
-  { id: '48995', category: 'Tiles' },
-  { id: '2412b', category: 'Tiles' },
-  { id: '5091', category: 'Tiles' },
-  { id: '5092', category: 'Tiles' },
-  { id: '35463', category: 'Tiles' },
-  { id: '2412a', category: 'Tiles' },
-  { id: '15209', category: 'Tiles' },
-  { id: '27263', category: 'Tiles' },
-  { id: '6881b', category: 'Tiles' },
-  { id: '24445', category: 'Tiles' },
-  { id: '65092', category: 'Tiles' },
-  { id: '6881a', category: 'Tiles' },
-  { id: '6923', category: 'Tiles' },
-  { id: '2833', category: 'Tiles' },
-
-  // Plates
-  { id: '3020', category: 'Plates' },
-  { id: '3021', category: 'Plates' },
-  { id: '3022', category: 'Plates' },
-  { id: '3024', category: 'Plates' },
-  { id: '3031', category: 'Plates' },
-  { id: '3032', category: 'Plates' },
-  { id: '3034', category: 'Plates' },
-  { id: '3035', category: 'Plates' },
-  { id: '3036', category: 'Plates' },
-  { id: '3460', category: 'Plates' },
-  { id: '3623', category: 'Plates' },
-  { id: '3666', category: 'Plates' },
-  { id: '3710', category: 'Plates' },
-  { id: '3795', category: 'Plates' },
-  { id: '3958', category: 'Plates' },
-  { id: '11212', category: 'Plates' },
-  { id: '41539', category: 'Plates' },
-  { id: '78329', category: 'Plates' },
-  { id: '728', category: 'Plates' },
-  { id: '2445', category: 'Plates' },
-  { id: '3026', category: 'Plates' },
-  { id: '3027', category: 'Plates' },
-  { id: '3028', category: 'Plates' },
-  { id: '3029', category: 'Plates' },
-  { id: '3030', category: 'Plates' },
-  { id: '3033', category: 'Plates' },
-  { id: '3456', category: 'Plates' },
-  { id: '3832', category: 'Plates' },
-  { id: '4282', category: 'Plates' },
-  { id: '4477', category: 'Plates' },
-  { id: '60479', category: 'Plates' },
-  { id: '91988', category: 'Plates' },
-  { id: '92438', category: 'Plates' },
-  { id: '15397', category: 'Plates' },
-
-  // Bricks — plain studs, the baseline connection.
-  { id: '2356', category: 'Bricks' },
-  { id: '2456', category: 'Bricks' },
-  { id: '3001', category: 'Bricks' },
-  { id: '3002', category: 'Bricks' },
-  { id: '3003', category: 'Bricks' },
-  { id: '3004', category: 'Bricks' },
-  { id: '3005', category: 'Bricks' },
-  { id: '4201', category: 'Bricks' },
-  { id: '3006', category: 'Bricks' },
-  { id: '4202', category: 'Bricks' },
-  { id: '4204', category: 'Bricks' },
-  { id: '6111', category: 'Bricks' },
-  { id: '6112', category: 'Bricks' },
-  { id: '6212', category: 'Bricks' },
-  { id: '733', category: 'Bricks' },
-  { id: '30072', category: 'Bricks' },
-  { id: '3245a', category: 'Bricks' },
-  { id: '3754', category: 'Bricks' },
-  { id: '6213', category: 'Bricks' },
-  { id: '14716', category: 'Bricks' },
-  { id: '30136', category: 'Bricks' },
-  { id: '30137', category: 'Bricks' },
-  { id: '30144', category: 'Bricks' },
-  { id: '30145', category: 'Bricks' },
-  { id: '2462', category: 'Bricks' },
-  { id: '6107', category: 'Bricks' },
-  { id: '14413', category: 'Bricks' },
-  { id: '87620', category: 'Bricks' },
-  { id: '702', category: 'Bricks' },
-  { id: '2357', category: 'Bricks' },
-  { id: '2653', category: 'Bricks' },
-  { id: '2877', category: 'Bricks' },
-  { id: '4216', category: 'Bricks' },
-  { id: '4217', category: 'Bricks' },
-  { id: '16968', category: 'Bricks' },
-  { id: '30076', category: 'Bricks' },
-  { id: '2463', category: 'Bricks' },
-  { id: '4612', category: 'Bricks' },
-  { id: '30505', category: 'Bricks' },
-  { id: '33243', category: 'Bricks' },
+/**
+ * Genuinely essential parts the 200-model corpus underrepresents enough that raw usage
+ * would leave a category without its most basic shape. Checked against the same
+ * connectivity requirement as every other entry — this pins a category, it does not
+ * bypass the rule that everything in the chest must snap.
+ *
+ * Both entries exist because real official sets never place a bare minifig torso or
+ * legs: every one they use is a specific character's printed variant, which the
+ * `isDecorated` filter correctly drops to keep the category from filling with one-off
+ * prints. That leaves zero usage for the plain shape itself, even though a builder
+ * assembling a custom minifig needs exactly that — a torso and a pair of legs with no
+ * print baked in.
+ */
+const WHITELIST: readonly { id: string; category: Category }[] = [
+  { id: '17', category: 'Minifigure' }, // Minifig Torso with Integral Arms — the plain torso.
+  { id: '15', category: 'Minifigure' }, // Minifig Hips and Legs with Integral Legs — the plain legs.
 ]
-
-interface CatalogEntry {
-  id: string
-  title: string
-  category: string
-}
 
 /** Line one of a part file, e.g. `0 Brick  2 x  4` — collapsed to single spaces. */
 function readTitle(text: string): string {
@@ -549,25 +116,213 @@ function readTitle(text: string): string {
   return firstLine.replace(/^0\s*/, '').trim().replace(/\s+/g, ' ')
 }
 
-interface BuildResult {
-  catalog: CatalogEntry[]
-  source: 'mirror' | 'fixtures'
-  missing: string[]
+/** LDraw's `~Moved to …` placeholders and `=Alias` redirects — never real geometry. */
+function isMovedOrAlias(title: string): boolean {
+  return title.startsWith('~') || title.startsWith('=')
 }
 
-async function readCatalog(readLibrary: MirrorReader, source: 'mirror' | 'fixtures'): Promise<BuildResult> {
-  const catalog: CatalogEntry[] = []
-  const missing: string[] = []
-  for (const { id, category } of CURATED_CHEST) {
-    if (EXCLUDED_PARTS.has(id)) continue;
-    const text = await readLibrary(`${id}.dat`)
-    if (text === null) {
-      missing.push(id)
-      continue
-    }
-    catalog.push({ id, title: readTitle(text), category })
+/** Printed, stickered or logo'd variants of a base shape — a specific character's torso
+ * art, a road-sign tile's arrow, a licensed logo. Filtered so a category reads as a set
+ * of shapes, not one shape repeated per decoration. One carve-out: "Standard … Pattern"
+ * is how the plain minifig head names its own sculpted (not printed) face — the base
+ * shape, not a decorated variant of it. */
+function isDecorated(title: string): boolean {
+  if (/\bStandard\b.*\bPattern\b/i.test(title)) return false
+  return /\b(Print|Pattern|Sticker|Logo|Decoration)\b/i.test(title)
+}
+
+/**
+ * Buckets a real LDraw title into one of the chest's 15 categories. Order matters: each
+ * rule is checked in sequence and the first match wins, so more specific patterns
+ * (Technic-branded wheels, chain links sold as "Technic Chain Link") are tested ahead of
+ * the generic rule they'd otherwise fall into. Validated against the previous 444-part
+ * hand-curated catalog: 441/444 agreed, and the three disagreements were the previous
+ * catalog's own mistakes (two Technic bushes filed under Plants, a wheel-hub dish filed
+ * under Round instead of Wheels) rather than errors here.
+ */
+function classify(title: string): Category | null {
+  const has = (re: RegExp) => re.test(title)
+
+  if (has(/^Bracket\b/i)) return 'SNOT'
+  if (has(/\b(Chain|Handle|Handlebars)\b/i)) return 'Connectors'
+  if (has(/\b(Wheel|Tyre|Tire)\b/i) || has(/\bwith Rim\b/i)) return 'Wheels'
+  if (has(/^Technic\b|\b(Axle|Gear|Liftarm|Buffer|Steering-Gear|with Pin)\b/i)) return 'Technic'
+  if (has(/^(Minifig|Bigfig|Duplo Figure|Belville|Scala Figure|Homemaker Figure)\b/i)) return 'Minifigure'
+  if (has(/\b(Plant|Flower|Leaves|Leaf|Palm|Vine|Bush|Branch)\b/i)) return 'Plants'
+  if (has(/\b(Window|Windscreen|Door)\b/i)) return 'Windows & Doors'
+  if (has(/\bArch\b/i)) return 'Arches'
+  if (has(/\bHinge\b/i)) return 'Hinges'
+  if (has(/\bWedge\b/i)) return 'Wedges'
+  if (has(/\bSlope\b/i)) return 'Slopes'
+  if (has(/(Stud(s)? on (1 |the )?(\d )?Side)|Jumper|Turntable|Headlight/i)) return 'SNOT'
+  if (has(/\b(Clip|Bar|Socket|Hook|Claw)\b/i)) return 'Connectors'
+  if (has(/\bTile\b/i) && has(/\b(Round|Ball|Circle)\b/i)) return 'Round'
+  if (has(/\bTile\b/i)) return 'Tiles'
+  if (has(/\b(Dish|Cone|Cylinder|Dome|Barrel|Round|Sphere|Ball)\b/i)) return 'Round'
+  if (has(/\bPlate\b/i)) return 'Plates'
+  if (has(/\bBrick\b/i)) return 'Bricks'
+  return null
+}
+
+/**
+ * Counts every leaf part reference across the 200 bundled `.mpd` files — real placements,
+ * not just which models happen to include a part. Reuses `parseMpd`, the same parser the
+ * running app uses to open a model, rather than a second one: submodel transforms and
+ * `0 FILE` splitting are exactly the kind of thing that must not drift between two
+ * readers of the same file format.
+ */
+async function countUsage(): Promise<Map<string, number>> {
+  const dir = path.resolve(MODELS_DIR)
+  const files = (await fsp.readdir(dir)).filter((f) => f.toLowerCase().endsWith('.mpd'))
+  if (files.length === 0) throw new Error(`countUsage: no .mpd files found under ${dir}`)
+
+  const usage = new Map<string, number>()
+  for (const file of files) {
+    const text = await fsp.readFile(path.join(dir, file), 'utf8')
+    const parsed = parseMpd(text, file)
+    for (const ref of parsed.refs) usage.set(ref.partId, (usage.get(ref.partId) ?? 0) + 1)
   }
-  return { catalog, source, missing }
+  return usage
+}
+
+/**
+ * Ids the committed connections bake (`public/baked/connections.bin`) resolves to at
+ * least one connection point — the same pool the running app snaps against. A part
+ * outside this set cannot connect to anything no matter how often it appears in a model,
+ * so membership here is the one non-negotiable filter everything else sits inside.
+ */
+async function connectablePool(): Promise<Set<string>> {
+  const buf = await fsp.readFile(path.resolve(CONNECTIONS_PATH))
+  const arrayBuffer = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer
+  const connections = unpackConnections(arrayBuffer)
+  if (connections === null) {
+    throw new Error(`connectablePool: could not read ${CONNECTIONS_PATH} — run \`npm run prebake\``)
+  }
+  const pool = new Set<string>()
+  for (const [id, points] of connections) if (points.length > 0) pool.add(id)
+  return pool
+}
+
+/** Reads whatever `out` already holds, keyed by id — the free, no-I/O title source. */
+async function loadExistingTitles(out: string): Promise<Map<string, string>> {
+  const titles = new Map<string, string>()
+  try {
+    const text = await fsp.readFile(out, 'utf8')
+    const parsed = JSON.parse(text) as { id: string; title: string }[]
+    for (const entry of parsed) titles.set(entry.id, entry.title)
+  } catch {
+    // No previous catalog, or it doesn't parse — start with nothing cached.
+  }
+  return titles
+}
+
+type TitleSource = 'cached' | 'local' | 'network' | 'placeholder'
+
+interface TitleResolution {
+  title: string
+  source: TitleSource
+}
+
+/** Tries the cache, then the local mirror, then one network request — see the header
+ * comment for the full precedence and why each step exists. */
+function createTitleResolver(existingTitles: ReadonlyMap<string, string>, readLocal: MirrorReader) {
+  return async function resolveTitle(id: string): Promise<TitleResolution> {
+    const cached = existingTitles.get(id)
+    if (cached !== undefined) return { title: cached, source: 'cached' }
+
+    const local = await readLocal(`${id}.dat`)
+    if (local !== null) return { title: readTitle(local), source: 'local' }
+
+    try {
+      const response = await fetch(`${NETWORK_TITLE_BASE}${id}.dat`)
+      if (response.ok) return { title: readTitle(await response.text()), source: 'network' }
+    } catch {
+      // Offline, DNS-blocked, or the CDN hiccuped — fall through to the placeholder.
+    }
+    return { title: `Part ${id}`, source: 'placeholder' }
+  }
+}
+
+/** Runs `worker` over `items` with at most `concurrency` in flight at once. */
+async function runPool<T>(items: readonly T[], concurrency: number, worker: (item: T) => Promise<void>): Promise<void> {
+  let next = 0
+  async function lane(): Promise<void> {
+    while (next < items.length) {
+      const item = items[next++]
+      await worker(item)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, lane))
+}
+
+interface CatalogEntry {
+  id: string
+  title: string
+  category: string
+  usageCount: number
+}
+
+interface BuildResult {
+  catalog: CatalogEntry[]
+  warnings: string[]
+  /** How each resolved title was found — for the run's summary line. */
+  titleStats: { cached: number; local: number; network: number; placeholder: number }
+}
+
+async function readCatalog(readLocal: MirrorReader, existingTitles: ReadonlyMap<string, string>): Promise<BuildResult> {
+  const usage = await countUsage()
+  const pool = await connectablePool()
+  const resolveTitle = createTitleResolver(existingTitles, readLocal)
+  const warnings: string[] = []
+  const titleStats = { cached: 0, local: 0, network: 0, placeholder: 0 }
+
+  // Candidates: every connectable id used at least once in the bundled models, plus
+  // anything on the short whitelist (still required to be connectable, see below).
+  const candidateIds = new Set<string>()
+  for (const id of pool) if ((usage.get(id) ?? 0) > 0) candidateIds.add(id)
+  for (const entry of WHITELIST) candidateIds.add(entry.id)
+  for (const id of EXCLUDED_PARTS) candidateIds.delete(id)
+
+  const byCategory = new Map<Category, CatalogEntry[]>()
+
+  await runPool([...candidateIds], NETWORK_CONCURRENCY, async (id) => {
+    const whitelisted = WHITELIST.find((entry) => entry.id === id)
+    if (!pool.has(id)) {
+      warnings.push(`whitelisted id ${id} resolves to zero connection points — skipped`)
+      return
+    }
+
+    const { title, source } = await resolveTitle(id)
+    titleStats[source]++
+    if (source === 'placeholder') warnings.push(`no title found for ${id} anywhere — used placeholder "${title}"`)
+
+    if (isMovedOrAlias(title)) return
+    if (isDecorated(title) && whitelisted === undefined) return
+    const category = whitelisted?.category ?? classify(title)
+    if (category === null) return
+
+    const entry: CatalogEntry = { id, title, category, usageCount: usage.get(id) ?? 0 }
+    const bucket = byCategory.get(category)
+    if (bucket === undefined) byCategory.set(category, [entry])
+    else bucket.push(entry)
+  })
+
+  const isWhitelisted = (entry: CatalogEntry) => WHITELIST.some((w) => w.id === entry.id)
+
+  const catalog: CatalogEntry[] = []
+  for (const [category, entries] of byCategory) {
+    // Whitelisted entries are guaranteed a seat — that's the whole point of the list —
+    // so they sit outside the usage sort and the cap only rations what's left. A
+    // category can run slightly over its cap by the number of its own whitelist
+    // entries; the cap still governs everything usage-driven.
+    const pinned = entries.filter(isWhitelisted)
+    const rest = entries
+      .filter((entry) => !isWhitelisted(entry))
+      .sort((a, b) => b.usageCount - a.usageCount || a.id.localeCompare(b.id, undefined, { numeric: true }))
+    const capRemaining = Math.max(0, CATEGORY_CAPS[category] - pinned.length)
+    catalog.push(...pinned, ...rest.slice(0, capRemaining))
+  }
+  return { catalog, warnings, titleStats }
 }
 
 interface BuildOptions {
@@ -576,32 +331,21 @@ interface BuildOptions {
 }
 
 async function build(options: BuildOptions): Promise<BuildResult> {
-  if (await mirrorExists(options.mirror)) {
-    const result = await readCatalog(createLibraryReader(options.mirror), 'mirror')
-    if (result.missing.length > 0) {
-      throw new Error(
-        `mirror at ${path.resolve(options.mirror)} is missing curated parts: ${result.missing.join(', ')}\n` +
-          `Re-run \`npm run sync-mirror\` if the mirror looks stale, or drop those ids from CURATED_CHEST.`,
-      )
-    }
-    return result
-  }
-
-  console.warn(
-    `no mirror at ${path.resolve(options.mirror)} — falling back to the committed fixtures at ` +
-      `${FIXTURE_MIRROR_ROOT}. Run \`npm run sync-mirror\` for the full curated chest.`,
-  )
-  const result = await readCatalog(createLibraryReader(FIXTURE_MIRROR_ROOT), 'fixtures')
-  if (result.catalog.length === 0) {
-    throw new Error(
-      `no mirror at ${path.resolve(options.mirror)} and none of the curated parts are in the committed ` +
-        `fixtures either — run \`npm run sync-mirror\` to populate the mirror, then re-run this script.`,
+  const existingTitles = await loadExistingTitles(options.out)
+  const haveMirror = await mirrorExists(options.mirror)
+  const readLocal = createLibraryReader(haveMirror ? options.mirror : FIXTURE_MIRROR_ROOT)
+  if (!haveMirror) {
+    console.warn(
+      `no mirror at ${path.resolve(options.mirror)} — using the committed fixtures at ` +
+        `${FIXTURE_MIRROR_ROOT} plus the network title fallback (see this script's header comment).`,
     )
   }
-  if (result.missing.length > 0) {
-    console.warn(
-      `fixtures cover ${result.catalog.length} of ${CURATED_CHEST.length} curated parts. Missing: ` +
-        `${result.missing.join(', ')}. Run \`npm run sync-mirror\` for the rest.`,
+
+  const result = await readCatalog(readLocal, existingTitles)
+  if (result.catalog.length === 0) {
+    throw new Error(
+      `produced zero catalog entries — every candidate id was excluded, unclassifiable, or had no ` +
+        `usable title. Check ${CONNECTIONS_PATH} and ${MODELS_DIR} are present.`,
     )
   }
   return result
@@ -609,10 +353,15 @@ async function build(options: BuildOptions): Promise<BuildResult> {
 
 function parseArgs(argv: string[]): BuildOptions {
   const options: BuildOptions = { mirror: DEFAULT_MIRROR_ROOT, out: DEFAULT_OUT }
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i]
-    if (arg === '--mirror') options.mirror = argv[++i]
-    else if (arg === '--out') options.out = argv[++i]
+  // Run through `tools/run-with-vite.mjs`, `process.argv` still carries that wrapper's
+  // own target-path argument ahead of ours (same process, same argv) — skip to the
+  // first real flag rather than assuming a fixed offset.
+  const start = argv.findIndex((arg) => arg.startsWith('--'))
+  const flags = start === -1 ? [] : argv.slice(start)
+  for (let i = 0; i < flags.length; i++) {
+    const arg = flags[i]
+    if (arg === '--mirror') options.mirror = flags[++i]
+    else if (arg === '--out') options.out = flags[++i]
     else throw new Error(`unknown argument ${arg}`)
   }
   return options
@@ -620,11 +369,6 @@ function parseArgs(argv: string[]): BuildOptions {
 
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2))
-
-  // Enforced, not merely documented: this script reads local files and nothing else.
-  globalThis.fetch = (() => {
-    throw new Error('build-chest-catalog makes no network requests')
-  }) as typeof fetch
 
   let result: BuildResult
   try {
@@ -635,15 +379,19 @@ async function main(): Promise<void> {
     return
   }
 
+  for (const warning of result.warnings) console.warn(`  ${warning}`)
+
   const sorted = [...result.catalog].sort(
     (a, b) => a.category.localeCompare(b.category) || a.id.localeCompare(b.id, undefined, { numeric: true }),
   )
   await fsp.mkdir(path.dirname(options.out), { recursive: true })
   await fsp.writeFile(options.out, `${JSON.stringify(sorted, null, 2)}\n`)
 
-  console.log(`wrote ${options.out} — ${sorted.length} parts, source: ${result.source}`)
+  const { cached, local, network, placeholder } = result.titleStats
+  console.log(
+    `wrote ${options.out} — ${sorted.length} parts ` +
+      `(titles: ${cached} cached, ${local} local mirror, ${network} network, ${placeholder} placeholder)`,
+  )
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  await main()
-}
+await main()

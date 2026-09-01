@@ -5,6 +5,7 @@ import { useTooltipDelegate } from '../tooltip';
 import { useRovingGrid } from '../useRovingGrid';
 import { CategoryMenu } from './CategoryMenu';
 import { PartTile } from './PartTile';
+import { SortToggle, type SortMode } from './SortToggle';
 import type { ThumbnailSource } from '../../scene/thumbnail';
 import type { ChestPart } from './types';
 
@@ -55,7 +56,8 @@ function byCategoryOrder(a: string, b: string): number {
 }
 
 interface Group {
-  category: string;
+  /** `null` renders no `.by-eyebrow` header — the flat popularity ordering. */
+  category: string | null;
   parts: ChestPart[];
 }
 
@@ -69,8 +71,19 @@ function groupByCategory(parts: readonly ChestPart[]): Group[] {
   // Sorted, not insertion-ordered: the Map follows catalog order, which is not the
   // order a builder wants to read. Same ranking the filter list uses.
   return Array.from(byCategory, ([category, group]) => ({ category, parts: group })).sort((a, b) =>
-    byCategoryOrder(a.category, b.category),
+    byCategoryOrder(a.category, b.category ?? ''),
   );
+}
+
+/** Most-used first, per `usageCount` — see `SortToggle`. Ties (including the `undefined`
+ * mock/test-data case, which sorts as 0) break on title so the order stays stable. One
+ * ungrouped list: popularity is a ranking across the whole chest, not per category. */
+function sortByPopularity(parts: readonly ChestPart[]): Group[] {
+  if (parts.length === 0) return [];
+  const sorted = [...parts].sort(
+    (a, b) => (b.usageCount ?? 0) - (a.usageCount ?? 0) || a.title.localeCompare(b.title),
+  );
+  return [{ category: null, parts: sorted }];
 }
 
 /**
@@ -89,6 +102,7 @@ export function PartsChest({
   const [query, setQuery] = useState('');
   /** `undefined` means no category filter — "All categories". */
   const [category, setCategory] = useState<string | undefined>(undefined);
+  const [sortMode, setSortMode] = useState<SortMode>('category');
 
   const categories = useMemo(() => {
     const present = new Set(parts.map((part) => part.category));
@@ -107,7 +121,10 @@ export function PartsChest({
     });
   }, [parts, query, category]);
 
-  const groups = useMemo(() => groupByCategory(filtered), [filtered]);
+  const groups = useMemo(
+    () => (sortMode === 'popular' ? sortByPopularity(filtered) : groupByCategory(filtered)),
+    [filtered, sortMode],
+  );
   const { containerRef, onKeyDown } = useRovingGrid(filtered.length);
   // One delegated listener for the whole chest rather than a tooltip hook per tile — the
   // catalog runs into the hundreds of parts.
@@ -144,6 +161,7 @@ export function PartsChest({
             onChange={(event) => setQuery(event.target.value)}
           />
         </div>
+        <SortToggle value={sortMode} onChange={setSortMode} />
         <CategoryMenu categories={categories} value={category} onChange={setCategory} allLabel={ALL_CATEGORIES} />
       </div>
       <div className="by-panel__body" ref={containerRef}>
@@ -166,17 +184,19 @@ export function PartsChest({
           </div>
         )}
         {groups.map((group, groupIndex) => (
-          <div key={group.category}>
-            <div
-              className="by-eyebrow"
-              style={{
-                marginBottom: 'var(--by-space-2)',
-                marginTop: groupIndex === 0 ? 0 : 'var(--by-space-4)',
-              }}
-            >
-              {group.category}
-            </div>
-            <div className="by-tile-grid" aria-label={group.category}>
+          <div key={group.category ?? '__popular__'}>
+            {group.category !== null && (
+              <div
+                className="by-eyebrow"
+                style={{
+                  marginBottom: 'var(--by-space-2)',
+                  marginTop: groupIndex === 0 ? 0 : 'var(--by-space-4)',
+                }}
+              >
+                {group.category}
+              </div>
+            )}
+            <div className="by-tile-grid" aria-label={group.category ?? 'Parts by popularity'}>
               {group.parts.map((part) => {
                 const index = flatIndexById.get(part.id)!;
                 return (
@@ -185,7 +205,7 @@ export function PartsChest({
                     part={part}
                     index={index}
                     isSelected={part.id === selectedId}
-                    isRound={group.category === 'Round'}
+                    isRound={part.category === 'Round'}
                     activeColorHex={activeColorHex}
                     thumbnailSource={thumbnailSource}
                     onSelect={onSelect}

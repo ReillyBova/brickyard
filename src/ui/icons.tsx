@@ -327,3 +327,24 @@ export function Trash2Icon(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+/** The chest's sort toggle: group-by-category order. Lucide `layout-grid`. */
+export function LayoutGridIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon data-lucide="layout-grid" {...props}>
+      <rect width="7" height="7" x="3" y="3" rx="1" />
+      <rect width="7" height="7" x="14" y="3" rx="1" />
+      <rect width="7" height="7" x="14" y="14" rx="1" />
+      <rect width="7" height="7" x="3" y="14" rx="1" />
+    </Icon>
+  );
+}
+
+/** The chest's sort toggle: most-used-first order. Lucide `flame`. */
+export function FlameIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon data-lucide="flame" {...props}>
+      <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z" />
+    </Icon>
+  );
+}
