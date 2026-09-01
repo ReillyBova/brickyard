@@ -19,6 +19,8 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 
 import type { Bounds } from '../types';
 import { boundsFromPositions } from '../ldraw/bounds';
+import { ConcurrencyPool } from './concurrencyPool.ts';
+import { withRetry } from './retry.ts';
 
 /** Default source: the upstream LDraw parts library mirror, fetched over HTTPS. */
 export const DEFAULT_PARTS_BASE_URL =
@@ -33,6 +35,31 @@ export interface LoadedPart {
 
 export interface PartGeometrySource {
   load(partId: string): Promise<LoadedPart>;
+}
+
+/**
+ * How many distinct parts may be resolving over the network at once. Each part load
+ * fans out into its own subfile tree (`docs/ARCHITECTURE.md`: "~20 network fetches" per
+ * part cold), so this is not "how many HTTP requests" — it's closer to
+ * `PART_LOAD_CONCURRENCY * 20` requests in flight at the busiest moment. 8 is chosen to
+ * sit comfortably inside a browser's own per-origin HTTP/2 stream allowance while still
+ * giving the upstream mirror (a third party we don't control the rate limits of) room to
+ * keep up — high enough that Saturn V's 141 unique parts resolve in a handful of waves
+ * rather than one unbounded burst, low enough that it isn't indistinguishable from no cap
+ * at all.
+ */
+const PART_LOAD_CONCURRENCY = 8;
+
+/** One retry beyond the first attempt, mainly for transient failures under load — see
+ *  `retry.ts`'s module doc for why this doesn't fix a genuinely-missing upstream file. */
+const PART_LOAD_ATTEMPTS = 2;
+const PART_LOAD_RETRY_DELAY_MS = 250;
+
+export interface PartSourceStats {
+  /** Distinct parts resolved successfully. */
+  loaded: number;
+  /** Distinct parts that failed after every retry — see `SceneRenderer`'s handling. */
+  failed: number;
 }
 
 /**
@@ -92,6 +119,9 @@ export class LDrawPartSource implements PartGeometrySource {
   private readonly loader: LDrawLoader;
   private readonly cache = new Map<string, Promise<LoadedPart>>();
   private materialsReady: Promise<void> | null = null;
+  private readonly pool = new ConcurrencyPool(PART_LOAD_CONCURRENCY);
+  private loaded = 0;
+  private failed = 0;
 
   constructor(baseUrl: string = DEFAULT_PARTS_BASE_URL) {
     this.baseUrl = baseUrl;
@@ -99,6 +129,11 @@ export class LDrawPartSource implements PartGeometrySource {
     this.loader.setPartsLibraryPath(baseUrl);
     this.loader.setConditionalLineMaterial(LDrawConditionalLineMaterial);
     this.loader.smoothNormals = true;
+  }
+
+  /** Distinct parts loaded vs. failed after retry, for `SceneRenderer` to surface. */
+  stats(): PartSourceStats {
+    return { loaded: this.loaded, failed: this.failed };
   }
 
   private ensureMaterials(): Promise<void> {
@@ -112,7 +147,14 @@ export class LDrawPartSource implements PartGeometrySource {
     const cached = this.cache.get(partId);
     if (cached !== undefined) return cached;
 
-    const promise = this.loadUncached(partId);
+    // Queued through the pool *before* the promise is cached, so every concurrent
+    // request for the same never-seen partId still shares this one queued attempt
+    // (the cache.set below happens synchronously, ahead of any await).
+    const promise = this.pool.run(() => withRetry(() => this.loadUncached(partId), PART_LOAD_ATTEMPTS, PART_LOAD_RETRY_DELAY_MS));
+    promise.then(
+      () => this.loaded++,
+      () => this.failed++,
+    );
     this.cache.set(partId, promise);
     return promise;
   }
