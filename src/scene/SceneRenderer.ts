@@ -10,7 +10,7 @@
 
 import * as THREE from 'three';
 
-import { readColorToken, watchTheme } from './theme.ts';
+import { readColorToken, readEasingToken, readNumberToken, watchTheme } from './theme.ts';
 
 import type { BrickId, Mat4, Vec3 } from '../types';
 import type { BrickInstance } from '../model/types';
@@ -27,6 +27,8 @@ import type { SelectionEntry } from './selectionOverlay.ts';
 import { createBaseplateGrid } from './grid.ts';
 import type { BaseplateGrid } from './grid.ts';
 import { SceneCamera } from './camera.ts';
+// A leaf utility, not an interaction-specific one — see `addBrick`'s arrival-sound note.
+import { SnapSound } from './interaction/click.ts';
 
 export interface SceneStats {
   drawCalls: number;
@@ -34,6 +36,35 @@ export interface SceneStats {
   frameTimeMs: number;
   batchCount: number;
   instanceCount: number;
+  /** Parts that failed to load geometry after retry — see `addBrick`. Was previously
+   *  always 0 and unreported: a brick just silently never appeared. */
+  missingGeometry: number;
+}
+
+/**
+ * How many bricks may be mid-flight (animating in) at once. Independent of model size on
+ * purpose: a burst of a few thousand bricks sharing one newly-resolved part all become
+ * ready in the same tick, and animating all of them at once is both unreadable (nobody
+ * can track that many moving pieces) and a frame-budget cliff on a 20k-brick model.
+ * Anything over the cap lands instantly instead of flying in — the natural degrade the
+ * roadmap asks for, without needing to know the model's total brick count up front.
+ */
+const MAX_CONCURRENT_ARRIVALS = 48;
+
+/** However many arrivals land in a burst, the click reads as one seat, not a machine gun —
+ *  see the arrival-sound note in `addBrick`. */
+const ARRIVAL_CLICK_MIN_INTERVAL_MS = 220;
+
+/** One in-flight "fly in and settle" animation. Position-only: rotation is set to its
+ *  final value immediately, which is enough to read as a piece arriving without the
+ *  complexity of slerping an arbitrary starting orientation. */
+interface Arrival {
+  batchKey: string;
+  from: THREE.Vector3;
+  to: THREE.Matrix4;
+  toPosition: THREE.Vector3;
+  startTime: number;
+  duration: number;
 }
 
 interface BrickMeta {
@@ -66,6 +97,12 @@ export class SceneRenderer {
   private readonly geometryCache = new Map<string, Promise<THREE.BufferGeometry>>();
   private readonly brickMeta = new Map<BrickId, BrickMeta>();
 
+  // ---- arrival animation (progressive load: fly in, settle) ---------------------------
+  private readonly arrivals = new Map<BrickId, Arrival>();
+  private readonly arrivalSound = new SnapSound();
+  private lastArrivalClickTime = -Infinity;
+  private missingGeometryCount = 0;
+
   private animationHandle: number | null = null;
   private lastFrameTime = 0;
   private stats: SceneStats = {
@@ -74,7 +111,17 @@ export class SceneRenderer {
     frameTimeMs: 0,
     batchCount: 0,
     instanceCount: 0,
+    missingGeometry: 0,
   };
+
+  /** `--by-dur-arrival` / `--by-ease-snap`, read once and cached rather than on every
+   *  `addBrick` — a bulk import can call this thousands of times in a burst, and
+   *  `getComputedStyle` forces a style recalculation each time. Refreshed on a
+   *  `prefers-reduced-motion` change; the duration token itself doesn't otherwise change
+   *  at runtime (unlike `--by-canvas`, which follows the light/dark toggle). */
+  private arrivalDurationMs = 0;
+  private arrivalEase: (t: number) => number = (t) => t;
+  private stopReducedMotionWatch: (() => void) | null = null;
 
   constructor(canvas: HTMLCanvasElement, options: SceneRendererOptions = {}) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -88,6 +135,16 @@ export class SceneRenderer {
     };
     paintGround();
     this.stopThemeWatch = watchTheme(paintGround);
+
+    const refreshArrivalMotion = (): void => {
+      this.arrivalDurationMs = readNumberToken('--by-dur-arrival', 480);
+      this.arrivalEase = readEasingToken('--by-ease-snap');
+    };
+    refreshArrivalMotion();
+    const reducedMotionQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    reducedMotionQuery?.addEventListener('change', refreshArrivalMotion);
+    this.stopReducedMotionWatch = () =>
+      reducedMotionQuery?.removeEventListener('change', refreshArrivalMotion);
 
     this.root.rotation.x = ROOT_ROTATION_X;
     this.root.add(this.batches.root);
@@ -123,19 +180,149 @@ export class SceneRenderer {
 
   // ---- document sync --------------------------------------------------------------
 
-  /** Loads geometry if needed and adds (or updates) one brick's instance. */
+  /**
+   * Loads geometry if needed and adds (or updates) one brick's instance.
+   *
+   * Called once per brick, in the document's build order (`EditorSession.reconcile`
+   * iterates `SceneDocument.bricks`, a `Map` populated in `parseMpd`'s flattened
+   * traversal/step order — see `docs/ROADMAP.md`'s "Progressive loading" section). Since
+   * `LDrawPartSource` now resolves distinct parts through a small FIFO pool
+   * (`concurrencyPool.ts`), the *first* brick to need a given part is also the first to
+   * queue that part's load — so parts tend to resolve, and bricks tend to appear, in
+   * roughly the order the model was meant to be built, without this method or its
+   * caller needing to coordinate that explicitly.
+   *
+   * A brick that resolves becomes visible by flying in from off-screen and settling with
+   * `--by-ease-snap`'s overshoot (see `updateArrivals`, driven from the frame loop in
+   * `start()`) rather than popping in — that flight *is* the load's progress indicator,
+   * per the roadmap: "make the wait the product" rather than a numeric bar. It degrades
+   * automatically past `MAX_CONCURRENT_ARRIVALS` and skips entirely when
+   * `--by-dur-arrival` reads 0 (`prefers-reduced-motion`).
+   */
   async addBrick(brick: BrickInstance): Promise<void> {
-    const geometry = await this.loadGeometry(brick.partId);
+    let geometry: THREE.BufferGeometry;
+    try {
+      geometry = await this.loadGeometry(brick.partId);
+    } catch (err) {
+      // Part of the Colosseum finding: this used to be a silently-dropped rejection
+      // (`EditorSession.reconcile` calls `void this.scene.addBrick(brick)`) — the brick
+      // just never appeared, with nothing to say why. `LDrawPartSource` already retries
+      // transient failures; anything that reaches here survived those retries and is
+      // worth knowing about, even without a UI surface for it yet.
+      this.missingGeometryCount++;
+      this.stats = { ...this.stats, missingGeometry: this.missingGeometryCount };
+      // eslint-disable-next-line no-console
+      console.warn(
+        `SceneRenderer: geometry failed to load for part "${brick.partId}" (brick ${brick.id}); it will not appear.`,
+        err,
+      );
+      return;
+    }
+
     const material = this.materials.get(brick.colorCode);
     const batch = this.batches.getOrCreate(brick.partId, brick.colorCode, geometry, material);
-
-    const matrix = new THREE.Matrix4().fromArray(brick.transform as unknown as number[]);
-    batch.add(brick.id, matrix);
-    this.batches.trackBrick(brick.id, batchKey(brick.partId, brick.colorCode));
+    const key = batchKey(brick.partId, brick.colorCode);
+    this.batches.trackBrick(brick.id, key);
     this.brickMeta.set(brick.id, { partId: brick.partId, colorCode: brick.colorCode });
+
+    const finalMatrix = new THREE.Matrix4().fromArray(brick.transform as unknown as number[]);
+
+    if (this.arrivalDurationMs <= 0 || this.arrivals.size >= MAX_CONCURRENT_ARRIVALS) {
+      batch.add(brick.id, finalMatrix);
+      return;
+    }
+
+    const position = new THREE.Vector3();
+    const quaternion = new THREE.Quaternion();
+    const scale = new THREE.Vector3();
+    finalMatrix.decompose(position, quaternion, scale);
+
+    const from = this.computeArrivalStart(position);
+    const startMatrix = new THREE.Matrix4().compose(from, quaternion, scale);
+    batch.add(brick.id, startMatrix);
+    this.arrivals.set(brick.id, {
+      batchKey: key,
+      from,
+      to: finalMatrix,
+      toPosition: position,
+      startTime: performance.now(),
+      duration: this.arrivalDurationMs,
+    });
+  }
+
+  /**
+   * A point off-screen, roughly matching the target's distance from the camera, so the
+   * flight reads as coming from the edge of the viewport rather than from an arbitrary
+   * direction. Picks a random point just outside the camera frustum (NDC radius > 1),
+   * casts a ray through it, and finds where that ray crosses the target's own
+   * camera-relative depth.
+   */
+  private computeArrivalStart(targetLocal: THREE.Vector3): THREE.Vector3 {
+    const camera = this.sceneCamera.camera;
+    const targetWorld = this.root.localToWorld(targetLocal.clone());
+
+    const forward = new THREE.Vector3();
+    camera.getWorldDirection(forward);
+    const depth = targetWorld.clone().sub(camera.position).dot(forward);
+
+    const angle = Math.random() * Math.PI * 2;
+    const edgeRadius = 1.35 + Math.random() * 0.35; // safely outside the -1..1 NDC frustum
+    this.raycaster.setFromCamera(
+      new THREE.Vector2(Math.cos(angle) * edgeRadius, Math.sin(angle) * edgeRadius),
+      camera,
+    );
+    const rayDir = this.raycaster.ray.direction;
+    const denom = rayDir.dot(forward);
+    const t = Math.abs(denom) > 1e-6 ? depth / denom : depth;
+
+    const worldStart = camera.position.clone().addScaledVector(rayDir, t);
+    return this.root.worldToLocal(worldStart);
+  }
+
+  /** Advances every in-flight arrival by one frame; called from the render loop. Settled
+   *  arrivals snap exactly to their target transform and play a rate-limited click. */
+  private updateArrivals(now: number): void {
+    if (this.arrivals.size === 0) return;
+    for (const [id, arrival] of this.arrivals) {
+      const batch = this.batches.batchForKey(arrival.batchKey);
+      if (batch === undefined) {
+        this.arrivals.delete(id); // batch (and brick) removed mid-flight
+        continue;
+      }
+
+      const elapsed = now - arrival.startTime;
+      if (elapsed >= arrival.duration) {
+        batch.setTransform(id, arrival.to);
+        this.arrivals.delete(id);
+        this.playArrivalClick();
+        continue;
+      }
+
+      const t = this.arrivalEase(elapsed / arrival.duration);
+      const position = arrival.from.clone().lerp(arrival.toPosition, t);
+      const rotation = new THREE.Quaternion();
+      const scale = new THREE.Vector3();
+      arrival.to.decompose(new THREE.Vector3(), rotation, scale);
+      const frame = new THREE.Matrix4().compose(position, rotation, scale);
+      batch.setTransform(id, frame);
+    }
+  }
+
+  /** At most one click per `ARRIVAL_CLICK_MIN_INTERVAL_MS`, regardless of how many
+   *  arrivals settle in that window — see the module doc: 1,845 individual clicks would
+   *  be unbearable, and step-boundary data isn't threaded through `BrickInstance`. */
+  private playArrivalClick(): void {
+    const now = performance.now();
+    if (now - this.lastArrivalClickTime < ARRIVAL_CLICK_MIN_INTERVAL_MS) return;
+    this.lastArrivalClickTime = now;
+    this.arrivalSound.play(1);
   }
 
   removeBrick(id: BrickId): void {
+    // Cancels any in-flight arrival for this id — part of what makes loading a large
+    // model interruptible: replacing the document mid-flight (a fresh `loadDocument`,
+    // returning to an empty sandbox) removes bricks that never get to finish arriving.
+    this.arrivals.delete(id);
     this.batches.removeBrick(id);
     this.brickMeta.delete(id);
   }
@@ -274,6 +461,7 @@ export class SceneRenderer {
       this.lastFrameTime = now;
 
       this.sceneCamera.update();
+      this.updateArrivals(now);
       this.renderer.render(this.scene, this.sceneCamera.camera);
 
       const info = this.renderer.info.render;
@@ -302,6 +490,10 @@ export class SceneRenderer {
   dispose(): void {
     this.stopThemeWatch?.();
     this.stopThemeWatch = null;
+    this.stopReducedMotionWatch?.();
+    this.stopReducedMotionWatch = null;
+    this.arrivals.clear();
+    this.arrivalSound.dispose();
     this.stop();
     this.batches.dispose();
     this.ghost.dispose();

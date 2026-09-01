@@ -6,6 +6,8 @@
 
 import * as THREE from 'three';
 
+import { cubicBezier, parseCubicBezier, type BezierPoints } from './easing.ts';
+
 function computedToken(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
@@ -21,6 +23,20 @@ export function readNumberToken(name: string, fallback: number): number {
   const raw = computedToken(name);
   const value = Number.parseFloat(raw);
   return Number.isFinite(value) ? value : fallback;
+}
+
+const LINEAR: BezierPoints = { x1: 0, y1: 0, x2: 1, y2: 1 };
+
+/**
+ * Reads a `cubic-bezier()` custom property (e.g. `--by-ease-snap`) as an evaluable
+ * easing function. Falls back to linear for anything that isn't a bezier — which is
+ * exactly what `--by-ease-snap` itself becomes under `prefers-reduced-motion` (see
+ * `tokens.css`), so this naturally degrades to no-overshoot without a separate check.
+ */
+export function readEasingToken(name: string, fallback: BezierPoints = LINEAR): (t: number) => number {
+  const raw = computedToken(name);
+  const parsed = parseCubicBezier(raw) ?? fallback;
+  return cubicBezier(parsed);
 }
 
 /**

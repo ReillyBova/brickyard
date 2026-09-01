@@ -293,6 +293,7 @@
   --by-dur-fast: 140ms;     /* panel reveals, tooltip fade      */
   --by-dur-base: 220ms;     /* dialogs, drawers, mode changes   */
   --by-dur-idle: 5200ms;    /* landing hero — slow ambient drift */
+  --by-dur-arrival: 480ms;  /* a brick flying in during progressive model load */
 
   --by-ease-out: cubic-bezier(0.22, 0.9, 0.3, 1);
   --by-ease-snap: cubic-bezier(0.2, 1.1, 0.3, 1.18);  /* the overshoot */
@@ -304,6 +305,7 @@
     --by-dur-fast: 0ms;
     --by-dur-base: 0ms;
     --by-dur-idle: 0ms;
+    --by-dur-arrival: 0ms;
     --by-ease-snap: linear;
   }
 }
