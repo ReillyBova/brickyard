@@ -339,7 +339,11 @@ export async function resolvePart(
     files: new Map(),
     maxDepth: options.maxDepth ?? DEFAULT_MAX_DEPTH,
   };
-  const rel = /\.(dat|ldr)$/i.test(partId) ? normalise(partId) : `parts/${normalise(partId)}.dat`;
-  const entry = (await resolveReference(ctx, rel, 'ldraw/')) ?? rel;
+  // Unprefixed, so `candidates` runs LDraw's search order — `parts/`, `p/`, `models/` —
+  // rather than being handed an already-namespaced path it returns as-is. A model may
+  // place a primitive directly, and one that cannot be resolved has no connection points,
+  // which reads as a piece that simply refuses to connect to anything.
+  const rel = /\.(dat|ldr)$/i.test(partId) ? normalise(partId) : `${normalise(partId)}.dat`;
+  const entry = (await resolveReference(ctx, rel, 'ldraw/')) ?? `parts/${rel}`;
   return finalise(await walk(ctx, entry, IDENTITY, 0, new Set()));
 }

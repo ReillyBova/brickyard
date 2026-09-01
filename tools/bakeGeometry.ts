@@ -129,7 +129,8 @@ async function collectPartFiles(partId: string, readLibrary: MirrorReader): Prom
     }
   }
 
-  const top = await resolve(`parts/${partId}.dat`)
+  // Search order, not a fixed folder: a model may place a primitive directly.
+  const top = await resolve(`${partId}.dat`)
   if (top === null) throw new Error(`geometry bake: ${partId} not found in the mirror`)
   await walk(top.path, top.text, 0)
   return files
@@ -182,8 +183,10 @@ export async function bakePartGeometry(
   loader.smoothNormals = true
   await loader.preloadMaterials('LDConfig.ldr')
 
-  const topPath = referenceCandidates(`parts/${partId}.dat`)[0]
-  const topText = files.get(topPath)
+  // Whichever candidate `collectPartFiles` actually found, not the first one it would try:
+  // a part lives under `parts/`, a primitive a model places directly lives under `p/`.
+  const topPath = referenceCandidates(`${partId}.dat`).find((candidate) => files.has(candidate))
+  const topText = topPath === undefined ? undefined : files.get(topPath)
   if (topText === undefined) throw new Error(`geometry bake: ${partId} missing after collection`)
 
   const group = await new Promise<THREE.Group>((resolve, reject) => {

@@ -630,3 +630,12 @@ describe('SNAP_GEN', () => {
     expect(pos(points[0])).toEqual([0, 12, 0]);
   });
 });
+
+describe('a part id that names a primitive', () => {
+  it('resolves without connection points rather than failing to resolve at all', async () => {
+    // A primitive has no snap metadata, so an empty list is the right answer — but it has
+    // to be an empty list from a file that was found, not the same empty list a missing
+    // file produces. The two are only distinguishable through the geometry side.
+    await expect(resolvePart('1-4ndis', fixtureReader)).resolves.toEqual([]);
+  });
+});
