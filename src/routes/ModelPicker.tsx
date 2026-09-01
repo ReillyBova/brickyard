@@ -17,17 +17,16 @@
  * can't fetch a model file directly from it at runtime — every `.mpd` here was mirrored
  * once at curation time (see `tools/modelCatalog.ts`) rather than proxied live.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import { Link } from './Link';
 import './ModelPicker.css';
 
 import { useRoute } from './route-context';
+import { useModelIndex } from '../features/omr/modelIndex';
 import type { BundledModelEntry } from '../features/omr/types';
 import { CategoryMenu } from '../ui/PartsChest/CategoryMenu';
 import { SearchIcon } from '../ui/icons';
-
-const MODELS_BASE = `${import.meta.env.BASE_URL}models/`;
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -50,34 +49,6 @@ const SIZE_BUCKETS: readonly SizeBucket[] = [
   'Jumbo (5000pc+)',
 ];
 
-type IndexState =
-  | { status: 'loading' }
-  | { status: 'error'; message: string }
-  | { status: 'ready'; models: readonly BundledModelEntry[] };
-
-function useModelIndex(): IndexState {
-  const [state, setState] = useState<IndexState>({ status: 'loading' });
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch(`${MODELS_BASE}index.json`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-        return res.json() as Promise<BundledModelEntry[]>;
-      })
-      .then((models) => {
-        if (!cancelled) setState({ status: 'ready', models });
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setState({ status: 'error', message: String(err) });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return state;
-}
 
 interface ModelCardProps {
   entry: BundledModelEntry;
@@ -271,5 +242,3 @@ export function ModelPicker({ onOpenModel }: ModelPickerProps) {
     </div>
   );
 }
-
-export { MODELS_BASE };

@@ -7,7 +7,8 @@ import type { PartDef } from '../../snap/types';
  * Declared locally rather than importing the class so this module depends on shape, not
  * on scene/interaction internals — the real `EditorSession` satisfies this structurally
  * (confirmed against `canUndo`/`canRedo`/`undoLabel`/`redoLabel`/`undo`/`redo`/`commit`/
- * `selection`/`document`/`subscribe`/`loadDocument`), and so does a test double.
+ * `selection`/`document`/`subscribe`/`loadDocument`/`mergeDocument`), and so does a test
+ * double.
  *
  * Nullable everywhere this is consumed: the toolbar renders before
  * `BuilderCanvas.onSessionReady` fires (see `useEditorSessionOrNull`,
@@ -25,6 +26,8 @@ export interface ToolbarSession {
   redo(): void;
   commit(tx: Transaction): void;
   subscribe(listener: () => void): () => void;
-  /** Replace the whole document — Save/Load and interop import both go through this. */
+  /** Replace the whole document — opening a saved file, or a fresh sandbox. */
   loadDocument(doc: SceneDocument, parts: Iterable<PartDef>): void;
+  /** Add another document's bricks in as a new connected component. Undoable. */
+  mergeDocument(doc: SceneDocument, parts: Iterable<PartDef>): void;
 }

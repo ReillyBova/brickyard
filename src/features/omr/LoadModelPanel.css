@@ -1,0 +1,62 @@
+/*
+ * Layout for the toolbar's compact model loader. No new classes for anything
+ * components.css already covers (`.by-panel`, `.by-search`, `.by-input`, `.by-empty`) —
+ * only the result list, which is specific to this feature. Every value is a token.
+ */
+
+.by-load-model-panel {
+  width: 100%;
+}
+
+.by-load-model-panel__icon {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  color: var(--by-accent);
+}
+
+.by-load-model-panel__search {
+  margin-bottom: var(--by-space-2);
+}
+
+.by-load-model-panel__status {
+  padding: var(--by-space-2) var(--by-space-1);
+  font-size: var(--by-text-sm);
+}
+
+.by-load-model-panel__list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.by-load-model-panel__item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  border: 0;
+  border-radius: var(--by-radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: var(--by-space-2);
+  transition: background var(--by-dur-instant) var(--by-ease-out);
+}
+.by-load-model-panel__item:hover { background: var(--by-hover-wash); }
+.by-load-model-panel__item:disabled { cursor: default; opacity: 0.5; }
+
+.by-load-model-panel__item-name {
+  font-size: var(--by-text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.by-load-model-panel__item-meta {
+  font-size: var(--by-text-xs);
+}
