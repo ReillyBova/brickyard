@@ -97,3 +97,21 @@ describe('resolutionPolicy', () => {
     expect(sppFor(state)).toBeLessThanOrEqual(DEFAULT_RESOLUTION_POLICY.sppCap);
   });
 });
+
+
+describe('resolutionPolicy — regression under sustained heavy frames', () => {
+  it('gives up a resolution rung once frame cost stays badly over budget after spp bottoms out', () => {
+    let state = runFrames(initialResolutionState(), 60, CHEAP_FRAME_MS);
+    expect(state.level).toBe(DEFAULT_RESOLUTION_POLICY.scales.length - 1);
+
+    state = runFrames(state, 40, 900);
+    expect(sppFor(state)).toBe(1);
+    expect(state.level).toBeLessThan(DEFAULT_RESOLUTION_POLICY.scales.length - 1);
+  });
+
+  it('never climbs a rung while frame time is not comfortably under budget, even once settled', () => {
+    const borderlineMs = DEFAULT_RESOLUTION_POLICY.targetMs * 1.2;
+    const state = runFrames(initialResolutionState(), 60, borderlineMs);
+    expect(state.level).toBe(0);
+  });
+});

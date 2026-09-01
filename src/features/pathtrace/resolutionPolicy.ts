@@ -2,12 +2,15 @@
  * Frame-time controller and resolution ladder for the path tracer. Pure — no three.js, no DOM —
  * so it is unit-tested directly and reusable regardless of what drives it.
  *
- * Ported from a reference SVGF-style tracer the user supplied, with one change: instantaneous
- * per-frame cost is paid for with fractional samples-per-pixel first (the EMA/hysteresis below),
- * and *resolution* only steps up once the image has actually settled for a run of frames. That
- * decoupling is the point: a camera that's been still for a second always reaches full
- * resolution, no matter how expensive a single sample is, because cost is absorbed by spp instead.
- * A camera that's still moving never bothers paying for resolution it's about to throw away.
+ * Ported from a reference SVGF-style tracer the user supplied, with one change found necessary
+ * against a real model (Galaxy Explorer, ~350k triangles): the reference lets resolution climb
+ * on elapsed "settled" frames alone, trusting spp to absorb all of the cost. That works for an
+ * analytic Cornell box; it does not for a real BVH, where resolution itself dominates cost and
+ * spp was already pinned at its floor. Climbing to full resolution there measured under 1fps —
+ * settled frames kept accumulating even while each one took the better part of a second. Both
+ * ascent and regression are therefore gated on measured frame time here, not just elapsed frames:
+ * a rung is only climbed while comfortably under budget, and is given up after a sustained streak
+ * of badly-over-budget frames even once spp has nothing left to give.
  */
 
 export interface ResolutionState {
@@ -36,6 +39,12 @@ export interface ResolutionPolicy {
   readonly sppCap: number;
   /** EMA smoothing factor for frame time. */
   readonly emaAlpha: number;
+  /** A rung only climbs while `ema < targetMs * ascendEmaFactor` — room to spend more. */
+  readonly ascendEmaFactor: number;
+  /** Sustained `ema > targetMs * regressEmaFactor` (with spp already at its floor) gives up a rung. */
+  readonly regressEmaFactor: number;
+  /** Consecutive badly-over-budget frames required before regressing, so one hitch doesn't flap it. */
+  readonly regressStreak: number;
 }
 
 export const DEFAULT_RESOLUTION_POLICY: ResolutionPolicy = {
@@ -44,6 +53,9 @@ export const DEFAULT_RESOLUTION_POLICY: ResolutionPolicy = {
   targetMs: 1000 / 30,
   sppCap: 4,
   emaAlpha: 0.1,
+  ascendEmaFactor: 1.05,
+  regressEmaFactor: 1.5,
+  regressStreak: 5,
 };
 
 export function initialResolutionState(): ResolutionState {
@@ -77,24 +89,24 @@ export function nextResolutionState(
   let overBudgetStreak = prev.overBudgetStreak;
   let justStepped = false;
 
-  if (level < topLevel && settled >= policy.stepAt[level]) {
-    level += 1;
-    justStepped = true;
-    overBudgetStreak = 0;
-  } else if (
-    level > 0 &&
-    settled < policy.stepAt[level - 1] &&
-    Math.round(spp) <= 1 &&
-    ema > policy.targetMs * 1.15
-  ) {
+  const comfortablyUnderBudget = ema < policy.targetMs * policy.ascendEmaFactor;
+  // spp is already at its floor when this is checked, so a still-slow frame means
+  // resolution — not sampling — is the cost that has to give.
+  const badlyOverBudget = ema > policy.targetMs * policy.regressEmaFactor && Math.round(spp) <= 1;
+
+  if (badlyOverBudget) {
     overBudgetStreak += 1;
-    if (overBudgetStreak > 20) {
+    if (overBudgetStreak > policy.regressStreak && level > 0) {
       level -= 1;
       justStepped = true;
       overBudgetStreak = 0;
     }
   } else {
     overBudgetStreak = 0;
+    if (level < topLevel && settled >= policy.stepAt[level] && comfortablyUnderBudget) {
+      level += 1;
+      justStepped = true;
+    }
   }
 
   return { ema, spp, level, settled, overBudgetStreak, justStepped };
