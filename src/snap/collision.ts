@@ -137,20 +137,30 @@ function rayTriangle(origin: Vec3, dir: Vec3, tri: Triangle): number | null {
  * crossing is lost, the ray simply stops being tested against the ~99% of a big part's
  * triangles that lie in other rows entirely.
  */
+/**
+ * The two axes that make up a row when casting rays along `axis` — e.g. `axis === 0`
+ * (cast along X) buckets by (Y, Z), matching the original single-axis implementation.
+ */
+function rowAxes(axis: 0 | 1 | 2): readonly [0 | 1 | 2, 0 | 1 | 2] {
+  return axis === 0 ? [1, 2] : axis === 1 ? [0, 2] : [0, 1];
+}
+
 function bucketByRow(
   triangles: readonly Triangle[],
   bounds: Bounds,
   dims: readonly [number, number, number],
+  axis: 0 | 1 | 2,
 ): { starts: Int32Array; items: Int32Array } {
-  const rows = dims[1] * dims[2];
+  const [a, b] = rowAxes(axis);
+  const rows = dims[a] * dims[b];
   const counts = new Int32Array(rows + 1);
   const ranges: Array<[number, number, number, number]> = new Array(triangles.length);
 
   for (let t = 0; t < triangles.length; t++) {
     const { lo, hi } = triangleVoxelRange(triangles[t], bounds, dims);
-    ranges[t] = [lo[1], hi[1], lo[2], hi[2]];
-    for (let iz = lo[2]; iz <= hi[2]; iz++) {
-      for (let iy = lo[1]; iy <= hi[1]; iy++) counts[iy + dims[1] * iz + 1]++;
+    ranges[t] = [lo[a], hi[a], lo[b], hi[b]];
+    for (let ib = lo[b]; ib <= hi[b]; ib++) {
+      for (let ia = lo[a]; ia <= hi[a]; ia++) counts[ia + dims[a] * ib + 1]++;
     }
   }
   for (let r = 0; r < rows; r++) counts[r + 1] += counts[r];
@@ -159,94 +169,252 @@ function bucketByRow(
   const items = new Int32Array(starts[rows]);
   const cursor = Int32Array.from(starts.subarray(0, rows));
   for (let t = 0; t < triangles.length; t++) {
-    const [y0, y1, z0, z1] = ranges[t];
-    for (let iz = z0; iz <= z1; iz++) {
-      for (let iy = y0; iy <= y1; iy++) items[cursor[iy + dims[1] * iz]++] = t;
+    const [a0, a1, b0, b1] = ranges[t];
+    for (let ib = b0; ib <= b1; ib++) {
+      for (let ia = a0; ia <= a1; ia++) items[cursor[ia + dims[a] * ib]++] = t;
     }
   }
   return { starts, items };
 }
 
 /**
- * Interior fill: a voxel is inside the mesh when a ray cast from its center crosses the
- * surface an odd number of times.
+ * Quantises a vertex to a shared-vertex key. LDraw primitives that are meant to touch
+ * (a neck meeting a barrel, a wall meeting a cap) carry matching coordinates down to
+ * floating-point noise from matrix transforms — far finer than 1e-4 LDU — so this
+ * merges real shared vertices without merging two vertices that only happen to be close.
+ */
+function vertexKey(v: Vec3): string {
+  const q = (x: number) => Math.round(x * 10000);
+  return `${q(v[0])},${q(v[1])},${q(v[2])}`;
+}
+
+/**
+ * Union-find over triangle indices, grouped by shared vertices, so each group is one
+ * connected piece of geometry — a single lump — regardless of how many LDraw primitives
+ * contributed to it.
+ */
+class UnionFind {
+  private readonly parent: Int32Array;
+  constructor(n: number) {
+    this.parent = new Int32Array(n);
+    for (let i = 0; i < n; i++) this.parent[i] = i;
+  }
+  find(x: number): number {
+    let root = x;
+    while (this.parent[root] !== root) root = this.parent[root];
+    while (this.parent[x] !== root) {
+      const next = this.parent[x];
+      this.parent[x] = root;
+      x = next;
+    }
+    return root;
+  }
+  union(a: number, b: number): void {
+    const ra = this.find(a);
+    const rb = this.find(b);
+    if (ra !== rb) this.parent[ra] = rb;
+  }
+}
+
+/**
+ * Splits a part's merged triangle soup into its connected components — the "lumps" a
+ * clip or bracket is really made of (a 1x1 plate body and a separate clip barrel, joined
+ * only by a thin neck, or not joined at all). Two triangles are in the same component
+ * when they share a vertex, transitively, so a part built from many welded LDraw
+ * primitives still comes out as however many *physically* connected pieces it has.
+ *
+ * A single molded brick (or the baseplate) is one component and this is a pass-through:
+ * every triangle groups together, so callers see exactly the triangle list they passed
+ * in, unpartitioned.
+ */
+function connectedComponents(triangles: readonly Triangle[]): Triangle[][] {
+  if (triangles.length === 0) return [];
+  const vertexId = new Map<string, number>();
+  const triVerts: [number, number, number][] = new Array(triangles.length);
+  for (let t = 0; t < triangles.length; t++) {
+    const ids: [number, number, number] = [0, 0, 0];
+    for (let v = 0; v < 3; v++) {
+      const key = vertexKey(triangles[t][v]);
+      let id = vertexId.get(key);
+      if (id === undefined) {
+        id = vertexId.size;
+        vertexId.set(key, id);
+      }
+      ids[v] = id;
+    }
+    triVerts[t] = ids;
+  }
+
+  const uf = new UnionFind(vertexId.size);
+  for (const [a, b, c] of triVerts) {
+    uf.union(a, b);
+    uf.union(b, c);
+  }
+
+  const groupOfRoot = new Map<number, Triangle[]>();
+  for (let t = 0; t < triangles.length; t++) {
+    const root = uf.find(triVerts[t][0]);
+    let group = groupOfRoot.get(root);
+    if (!group) {
+      group = [];
+      groupOfRoot.set(root, group);
+    }
+    group.push(triangles[t]);
+  }
+  return [...groupOfRoot.values()];
+}
+
+/**
+ * Interior fill along one axis: a voxel is inside the mesh when a ray cast from its
+ * center, parallel to `axis`, crosses the surface an odd number of times.
  *
  * Cast one ray per voxel *row* rather than one per voxel. Every voxel in a row shares a
- * single line (axis-aligned along +X through the row's cell center), so one pass over
- * that row's triangles yields every crossing on it; sorting those crossings then gives
- * each voxel on the row its own parity — the count of crossings still ahead of it — for
- * free. Combined with `bucketByRow`, the cost is triangles + rows x (triangles per row)
- * rather than voxels x triangles, which is what keeps large, high-poly parts tractable:
- * part `3947` (a 32x32 crater baseplate: 384,000 voxels, 39,304 triangles) voxelises in
- * about 15ms; testing every voxel against every triangle takes minutes.
+ * single line through the row's cell centers, so one pass over that row's triangles
+ * yields every crossing on it; sorting those crossings then gives each voxel on the row
+ * its own parity — the count of crossings still ahead of it — for free. Combined with
+ * `bucketByRow`, the cost is triangles + rows x (triangles per row) rather than voxels x
+ * triangles, which is what keeps large, high-poly parts tractable: part `3947` (a 32x32
+ * crater baseplate: 384,000 voxels, 39,304 triangles) voxelises in about 15ms per axis;
+ * testing every voxel against every triangle takes minutes.
  *
  * The ray is axis-aligned so that one line serves the whole row, with its origin nudged
- * off the exact cell center by an irrational-looking fraction of a cell — the job the old
- * off-axis direction did — so it rarely grazes a shared edge or a vertex, where parity
- * would double-count. The nudge stays far inside the cell, which keeps the row's bucket
- * correct. Triangles parallel to the ray (a face lying in the row's own plane) are
- * rejected by `rayTriangle`'s determinant test and contribute no crossing, which is the
- * right answer for parity.
+ * off the exact cell center by an irrational-looking fraction of a cell so it rarely
+ * grazes a shared edge or a vertex, where parity would double-count. The nudge stays far
+ * inside the cell, which keeps the row's bucket correct. Triangles parallel to the ray (a
+ * face lying in the row's own plane) are rejected by `rayTriangle`'s determinant test and
+ * contribute no crossing, which is the right answer for parity.
  *
- * Relies on the merged geometry being reasonably watertight. It mostly is — bricks are
- * built from closed primitives — except where a part is deliberately open (a stud
- * socket's mouth, a technic hole), which is exactly where `hasClearance` below already
- * excludes the mask from mattering.
+ * Sets bits directly into `bits` (an OR, never a clear) — callers combining more than one
+ * axis's vote are expected to accumulate into separate arrays and combine afterwards.
  */
-function markInterior(
+function markInteriorAxis(
   triangles: readonly Triangle[],
   bounds: Bounds,
   dims: readonly [number, number, number],
+  axis: 0 | 1 | 2,
   bits: Uint8Array,
 ): void {
   if (triangles.length === 0) return;
-  const { starts, items } = bucketByRow(triangles, bounds, dims);
-  const dir: Vec3 = [1, 0, 0];
+  const { starts, items } = bucketByRow(triangles, bounds, dims, axis);
+  const dir: Vec3 = [0, 0, 0];
+  (dir as [number, number, number])[axis] = 1;
+  const [a, b] = rowAxes(axis);
+  const nudgeA = axis === 0 ? 0.0137 : axis === 1 ? 0.0231 : 0.0119;
+  const nudgeB = axis === 0 ? 0.0231 : axis === 1 ? 0.0119 : 0.0137;
   const ts: number[] = [];
 
-  for (let iz = 0; iz < dims[2]; iz++) {
-    for (let iy = 0; iy < dims[1]; iy++) {
-      const row = iy + dims[1] * iz;
+  for (let ib = 0; ib < dims[b]; ib++) {
+    for (let ia = 0; ia < dims[a]; ia++) {
+      const row = ia + dims[a] * ib;
       const from = starts[row];
       const to = starts[row + 1];
       if (from === to) continue;
 
-      // Start a cell before the grid so a face sitting exactly on the low-x bound still
+      // Start a cell before the grid so a face sitting exactly on the low bound still
       // registers a crossing rather than being swallowed by `rayTriangle`'s t > eps.
-      const origin: Vec3 = [
-        bounds.min[0] - OCC_CELL,
-        bounds.min[1] + (iy + 0.5) * OCC_CELL + 0.0137,
-        bounds.min[2] + (iz + 0.5) * OCC_CELL + 0.0231,
-      ];
+      const origin: Vec3 = [0, 0, 0];
+      (origin as [number, number, number])[axis] = bounds.min[axis] - OCC_CELL;
+      (origin as [number, number, number])[a] = bounds.min[a] + (ia + 0.5) * OCC_CELL + nudgeA;
+      (origin as [number, number, number])[b] = bounds.min[b] + (ib + 0.5) * OCC_CELL + nudgeB;
+
       ts.length = 0;
       for (let k = from; k < to; k++) {
         const t = rayTriangle(origin, dir, triangles[items[k]]);
         if (t !== null) ts.push(t);
       }
       if (ts.length === 0) continue;
-      ts.sort((a, b) => a - b);
+      ts.sort((x, y) => x - y);
 
-      // `dir` is the unit +X axis from `origin`, so a crossing's ray parameter is just
-      // its x offset along the row. Walking the row in order lets one cursor retire the
+      // `dir` is the unit axis from `origin`, so a crossing's ray parameter is just its
+      // offset along the row. Walking the row in order lets one cursor retire the
       // crossings already behind each voxel; an odd number remaining ahead means inside.
       let cursor = 0;
-      for (let ix = 0; ix < dims[0]; ix++) {
-        const dx = (ix + 1.5) * OCC_CELL;
-        while (cursor < ts.length && ts[cursor] <= dx) cursor++;
-        if ((ts.length - cursor) % 2 === 1) setBit(bits, voxelIndex(dims, ix, iy, iz));
+      for (let ic = 0; ic < dims[axis]; ic++) {
+        const dc = (ic + 1.5) * OCC_CELL;
+        while (cursor < ts.length && ts[cursor] <= dc) cursor++;
+        if ((ts.length - cursor) % 2 === 1) {
+          const idx: [number, number, number] = [0, 0, 0];
+          idx[axis] = ic;
+          idx[a] = ia;
+          idx[b] = ib;
+          setBit(bits, voxelIndex(dims, idx[0], idx[1], idx[2]));
+        }
       }
     }
   }
 }
 
 /**
+ * Interior fill for one connected lump of geometry: a voxel counts as inside only when a
+ * *majority* of the three axis-aligned ray-parity passes (`markInteriorAxis` along X, Y
+ * and Z) agree, rather than trusting a single axis.
+ *
+ * Single-axis ray-parity assumes the surface it crosses is closed. A watertight,
+ * reasonably convex lump — the overwhelming majority of real parts — gives the same
+ * answer on every axis, so voting changes nothing for them. But a lump with a genuinely
+ * open boundary (an unclosed end cap, a stud's open bottom rim) or non-manifold seams can
+ * make one axis's ray graze exactly the wrong edge and misclassify everything further
+ * along that row; a *different* axis's rays very rarely share the same blind spot, since
+ * they cross the surface at a different angle entirely. Requiring two of three axes to
+ * agree keeps a real interior solid (all three normally agree) while refusing to invent
+ * volume that only one axis's ray-parity, alone, would have guessed at.
+ *
+ * Three passes over the same triangle list is still the same complexity class as one —
+ * triangles + rows x (triangles per row), just paid three times — so it stays well inside
+ * the performance budget that made row-based ray-parity necessary in the first place.
+ */
+function markInteriorVoting(
+  triangles: readonly Triangle[],
+  bounds: Bounds,
+  dims: readonly [number, number, number],
+  bits: Uint8Array,
+): void {
+  if (triangles.length === 0) return;
+  const total = dims[0] * dims[1] * dims[2];
+  const nbytes = Math.ceil(total / 8);
+  // `votes` tracks "at least one axis has voted inside"; `atLeastTwo` is set the moment a
+  // second axis votes for a bit already in `votes` — with only 3 axes total, "set on a
+  // second (or third) vote" is exactly "at least 2 of 3 agree".
+  const votes = new Uint8Array(nbytes);
+  const atLeastTwo = new Uint8Array(nbytes);
+
+  for (const axis of [0, 1, 2] as const) {
+    const axisBits = new Uint8Array(nbytes);
+    markInteriorAxis(triangles, bounds, dims, axis, axisBits);
+    for (let i = 0; i < nbytes; i++) {
+      atLeastTwo[i] |= votes[i] & axisBits[i];
+      votes[i] |= axisBits[i];
+    }
+  }
+  for (let i = 0; i < nbytes; i++) bits[i] |= atLeastTwo[i];
+}
+
+/**
  * Builds a part's occupancy mask from its triangulated geometry (part-local LDU).
  * Unconditionally solid-ish fill: a surface pass (triangle-vs-voxel AABB overlap) plus
- * an interior pass (ray-parity, one ray per voxel row). Nothing is erased — an unmated
- * connector is ordinary solid material. `connections` is accepted for call
- * compatibility but plays no part in building the mask; connector exemptions are
- * evaluated at query time, in `isExemptOverlap`, where both parts and their transforms
- * are available to check that a mating actually occurred.
+ * an interior pass (three-axis ray-parity voting, `markInteriorVoting`) — run per
+ * connected component. Nothing is erased — an unmated connector is ordinary solid
+ * material. `connections` is accepted for call compatibility but plays no part in
+ * building the mask; connector exemptions are evaluated at query time, in
+ * `isExemptOverlap`, where both parts and their transforms are available to check that a
+ * mating actually occurred.
+ *
+ * A clip or bracket is frequently two (or more) lumps that never touch — a plate body
+ * and a separate clip barrel, joined by nothing wider than a thin neck, or joined by
+ * nothing at all (verified against `4085c`, `6019`: each really is two disconnected
+ * triangle groups, not one mesh with an odd shape). Running a single ray-parity pass over
+ * the whole triangle soup treats that as one mesh: a ray happening to cross both lumps in
+ * the same row toggles parity across the empty span between them, and a lump whose own
+ * surface isn't closed can corrupt every crossing further along its row. Splitting into
+ * `connectedComponents` first means a gap between two lumps is never bridged — no ray is
+ * ever cast across geometry from two different lumps at once — and running each
+ * component through 3-axis voting (`markInteriorVoting`) means a single axis's blind spot
+ * on an imperfectly-closed lump can no longer manufacture solid volume on its own.
+ *
+ * A single molded part (a plain brick, the 32x32 baseplate) is one component, so the
+ * component split is a pass-through for it — same triangles, same rows, same voxels. The
+ * three-axis vote still runs, at three times the cost of the original single-axis pass;
+ * `test:perf`'s budgets are set with headroom for that.
  */
 export function buildOccupancy(
   triangles: readonly Triangle[],
@@ -257,7 +425,9 @@ export function buildOccupancy(
   const dims = dimsOf(bounds);
   const bits = new Uint8Array(Math.ceil((dims[0] * dims[1] * dims[2]) / 8));
   markSurface(triangles, bounds, dims, bits);
-  markInterior(triangles, bounds, dims, bits);
+  for (const component of connectedComponents(triangles)) {
+    markInteriorVoting(component, bounds, dims, bits);
+  }
   return { dims, bits };
 }
 

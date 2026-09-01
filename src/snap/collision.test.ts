@@ -129,6 +129,92 @@ describe('buildOccupancy, across the corpus', () => {
 });
 
 // ---------------------------------------------------------------------------
+// buildOccupancy: parts that are genuinely disjoint lumps (clips, brackets)
+// ---------------------------------------------------------------------------
+
+describe('buildOccupancy, deliberately open parts (clips, brackets)', () => {
+  // `4085c` (plate 1x1 with vertical clip) and `6019` (plate 1x1 with horizontal clip)
+  // are each two disconnected triangle groups — a plate body and a separate clip barrel,
+  // joined only by a thin structural neck (`box3u2p.dat` / `box4-2p.dat` in the source
+  // .dat) — the exact "disjoint lumps" shape a single-mesh ray-parity pass cannot safely
+  // reason about. `2436` (bracket 1x2 - 1x2) is a different family: two plates joined by
+  // a right-angle gusset, no clip barrel involved.
+  //
+  // Measured against the real fixture geometry: the neck and gusset in these specific
+  // parts really are solid plastic (confirmed by inspecting the triangles that fall in
+  // their bounding boxes), so a mathematically exact interior test does not — and should
+  // not — read as dramatically more open than the original single-axis pass. What this
+  // guards against is a *different* failure: a single ray axis inventing solid volume in
+  // a lump's own genuinely open span (a clip's mouth, an unclosed cap) by having its
+  // parity corrupted, which is exactly what `markInteriorVoting` and per-component
+  // scoping in `buildOccupancy` prevent. The assertion here is the physically important
+  // one: fill is well short of "solid brick", and the clip mouth itself — the one span a
+  // user actually needs to be open to snap a bar in — reads open in the mask.
+  const expected: Record<string, number> = {
+    '4085c': 0.756,
+    '6019': 0.756,
+    '2436': 0.486,
+  };
+
+  it.each(Object.entries(expected))('%s fill is a coarse but sane shell, not a solid block (measured %f)', async (id, exp) => {
+    const p = await part(id);
+    const fill = fillFraction(p);
+    // eslint-disable-next-line no-console
+    console.log(`${id} occupancy: dims=${p.occupancy.dims} fill=${(fill * 100).toFixed(1)}%`);
+    expect(fill).toBeGreaterThan(exp - 0.05);
+    expect(fill).toBeLessThan(exp + 0.05);
+    // Never a fully solid block — these are visibly mostly open parts, and a fill at or
+    // near 100% would mean interior fill (or its 3-axis vote) is inventing volume the
+    // surface pass alone does not support.
+    expect(fill).toBeLessThan(0.95);
+  });
+
+  it('4085c and 6019 are each genuinely two disconnected lumps, not one odd-shaped mesh', async () => {
+    // This is the structural fact the fix depends on: if these parts were a single
+    // connected mesh, component-scoping would be a no-op and the fix would be reasoning
+    // about the wrong problem. Verified directly against the captured .dat geometry.
+    for (const id of ['4085c', '6019']) {
+      const triangles = await partTriangles(id, fixtureReader);
+      // A cheap, local re-implementation of the same shared-vertex union-find `collision.ts`
+      // uses internally, kept separate from the module under test so this assertion checks
+      // the real fixture geometry rather than trusting the implementation's own bookkeeping.
+      const key = (v: Vec3) => `${Math.round(v[0] * 10000)},${Math.round(v[1] * 10000)},${Math.round(v[2] * 10000)}`;
+      const parent = new Map<string, string>();
+      const find = (x: string): string => {
+        let r = x;
+        while (parent.get(r) !== r) r = parent.get(r) as string;
+        parent.set(x, r);
+        return r;
+      };
+      for (const tri of triangles) {
+        for (const v of tri) if (!parent.has(key(v))) parent.set(key(v), key(v));
+        const [ka, kb, kc] = tri.map(key);
+        const ra = find(ka);
+        parent.set(ra, find(kb));
+        parent.set(find(kb), find(kc));
+      }
+      const roots = new Set([...parent.keys()].map(find));
+      expect(roots.size).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it('4085c: the clip mouth (deepest tip, mid-width) reads open, not solid', async () => {
+    // The functionally important voxel: a bar has to be able to reach into the clip.
+    // dims=[5,3,9], bounds min=[-10,-4,-24] max=[10,8,10] (measured); the tip is the
+    // z-layer nearest bounds.min[2], and the gap sits at the part's mid-x column.
+    const p = await part('4085c');
+    const [dx, dy] = p.occupancy.dims;
+    const getBit = (i: number) => ((p.occupancy.bits[i >> 3] >> (i & 7)) & 1) === 1;
+    const ix = 2; // mid-width column (x in [-2, 2])
+    const iz = 0; // deepest tip layer
+    for (const iy of [1, 2]) {
+      const idx = ix + dx * (iy + dy * iz);
+      expect(getBit(idx)).toBe(false);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // collides: table-driven across the corpus
 // ---------------------------------------------------------------------------
 
