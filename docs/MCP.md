@@ -62,7 +62,7 @@ what a person performs with a mouse; a model works in batches and wants fewer, l
 | Tool | Workflow |
 | --- | --- |
 | `brick_place` | Place one or many bricks in a single call, each on a named connection point |
-| `brick_transform` | Move, rotate or mirror a set, with the connectivity changes it implies |
+| `brick_transform` | Move or rotate a set about the Y axis, with the connectivity changes it implies |
 | `brick_recolor` | Recolour a set, by handle or by group |
 | `brick_remove` | Delete a set |
 | `model_inspect` | The graph: model summary, one brick's detail, free points, neighbours, component, edges between a pair |

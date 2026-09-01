@@ -16,6 +16,7 @@
 
 import type { BrickId, GroupId, Mat4, Vec3 } from '../../types';
 import type { BrickInstance, ConnectionEdge, GroupDef, SceneDocument, Transaction } from '../../model/types';
+import type { ColorLibrary } from '../../ldraw/types';
 import type { ConnectionPoint, MateGroup, PartDef } from '../../snap/types';
 import { IDENTITY, multiply, positionOf, transformPoint } from '../../math';
 import { allBricks, emptyDocument, getBrick } from '../../model/document';
@@ -113,14 +114,17 @@ export class Session {
   private readonly handles = new HandleTable();
   private readonly parts = new Map<string, PartDef>();
   private readonly source: PartSource;
+  /** Validates `colorCode` against the loaded LDraw palette. Absent skips the check. */
+  private readonly colors?: ColorLibrary;
   /** What the index currently holds, so syncing is a diff rather than a rebuild. */
   private indexed = new Map<BrickId, Mat4>();
   /** Bricks placed by the batch in flight, visible to later requests in the same call. */
   private pending = new Map<BrickId, BrickInstance>();
 
-  constructor(source: PartSource, doc: SceneDocument = emptyDocument()) {
+  constructor(source: PartSource, doc: SceneDocument = emptyDocument(), colors?: ColorLibrary) {
     this.source = source;
     this.history = createHistory(doc);
+    this.colors = colors;
   }
 
   get document(): SceneDocument {
@@ -303,9 +307,17 @@ export class Session {
     return { placed, rejected };
   }
 
+  /** Refuses a colour code the loaded palette does not recognise. No-op with no palette loaded. */
+  private checkColor(code: number): void {
+    if (this.colors !== undefined && !this.colors.has(code)) {
+      throw new SessionError(`${code} is not a colour code in the loaded LDraw palette.`);
+    }
+  }
+
   private async solve(
     request: PlacementRequest,
   ): Promise<{ brick: BrickInstance; part: PartDef; edges: readonly ConnectionEdge[] }> {
+    this.checkColor(request.color);
     const part = await this.part(request.part);
     const id = mintBrickId();
     const transform = request.on ? this.solveOnPoint(part, request) : this.freeTransform(request);
@@ -421,6 +433,11 @@ export class Session {
    * Apply one delta to a set. Connectivity is re-solved rather than carried: the old
    * edges are dropped and whatever the new position engages is recorded, which is what
    * lets undo restore the graph exactly.
+   *
+   * Collision is checked per moved brick against the rest of the scene, the same way
+   * `solve()` checks it on placement, with the moving set exempted exactly as
+   * `findMates` already exempts it below. Any hit refuses the whole call before
+   * anything is computed further — nothing is applied partially.
    */
   transform(names: readonly string[], delta: Mat4, label = 'Move bricks'): readonly string[] {
     const ids = this.requireSelection(names);
@@ -433,6 +450,11 @@ export class Session {
       const part = this.parts.get(brick.partId);
       if (!part) continue;
       const next = multiply(delta, brick.transform);
+      if (collides(part, next, this.index, moving)) {
+        throw new SessionError(
+          `moving ${this.handleOf(id)} would overlap a brick already there. Try a different destination, or move the obstruction first.`,
+        );
+      }
       for (const group of findMates(part, next, this.index, moving)) {
         after.push({ id: edgeIdFor(id, group.brick), a: id, b: group.brick, mates: group.mates });
       }
@@ -450,6 +472,7 @@ export class Session {
   }
 
   recolor(names: readonly string[], color: number): readonly string[] {
+    this.checkColor(color);
     const ids = this.requireSelection(names);
     const changes = ids
       .map((id) => ({ id, from: getBrick(this.document, id)!.colorCode, to: color }))

@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { IDENTITY, fromTranslation } from '../../math';
+import type { ColorLibrary } from '../../ldraw/types';
 import { Session, SessionError } from './session';
 import { fixtureParts } from './__fixtures__/parts';
 
@@ -17,6 +18,13 @@ import { fixtureParts } from './__fixtures__/parts';
 const STUD = 'p/stud.dat#0';
 
 const session = () => new Session(fixtureParts);
+
+/** A minimal real LDraw palette — just the codes this file places bricks with. */
+const PALETTE: ColorLibrary = new Map([
+  [1, { code: 1, name: 'Blue', value: 0x0055bf, edge: 0x000000, material: 'solid' as const }],
+  [2, { code: 2, name: 'Green', value: 0x257a3e, edge: 0x000000, material: 'solid' as const }],
+  [4, { code: 4, name: 'Red', value: 0xc91a09, edge: 0x000000, material: 'solid' as const }],
+]);
 
 /** One 2x4 at the origin, which every stacking test builds on. */
 async function seeded() {
@@ -163,6 +171,81 @@ describe('editing', () => {
     const s = await seeded();
     expect(() => s.remove(['nothing-here'])).toThrow(SessionError);
     expect(() => s.remove(['nothing-here'])).toThrow(/no brick or group by that name/);
+  });
+
+  describe('transform collision', () => {
+    it('refuses to move a brick exactly onto another, leaving the document unchanged', async () => {
+      const s = await seeded();
+      await s.place([{ part: '3001', color: 2, transform: fromTranslation([500, 0, 0]) }]);
+      expect(s.document.bricks.size).toBe(2);
+
+      expect(() => s.transform(['brick-2x4-2'], fromTranslation([-500, 0, 0]))).toThrow(
+        SessionError,
+      );
+      expect(() => s.transform(['brick-2x4-2'], fromTranslation([-500, 0, 0]))).toThrow(
+        /overlap/,
+      );
+
+      // Nothing committed: the brick is still where it was, with no new edges.
+      expect(s.inspect('brick-2x4-2').position).toEqual([500, 0, 0]);
+      expect(s.document.graph.edges.size).toBe(0);
+      expect(s.document.bricks.size).toBe(2);
+    });
+
+    it('still allows moving a brick into a position where it legitimately mates', async () => {
+      const s = await seeded();
+      // Corner stud to corner socket, mating all eight studs — the maximal-overlap case
+      // a naive collision check would be most tempted to flag.
+      await s.place([{ part: '3001', color: 2, on: { brick: 'brick-2x4-1', point: 'p/stud.dat#7' } }]);
+      expect(s.document.graph.edges.size).toBe(1);
+
+      // Move it away, breaking the connection...
+      s.transform(['brick-2x4-2'], fromTranslation([500, 0, 0]));
+      expect(s.document.graph.edges.size).toBe(0);
+
+      // ...then move it back onto the exact same mated position. Must succeed, not be
+      // treated as a collision, and re-form the connection.
+      const moved = s.transform(['brick-2x4-2'], fromTranslation([-500, 0, 0]));
+      expect(moved).toEqual(['brick-2x4-2']);
+      expect(s.document.graph.edges.size).toBe(1);
+    });
+  });
+});
+
+describe('color validation', () => {
+  const withPalette = () => new Session(fixtureParts, undefined, PALETTE);
+
+  it('refuses to place a brick with a colour code outside the loaded palette', async () => {
+    const s = withPalette();
+    const { placed, rejected } = await s.place([{ part: '3001', color: 9999, transform: IDENTITY }]);
+
+    expect(placed).toEqual([]);
+    expect(rejected[0].reason).toMatch(/colour code/);
+    expect(s.document.bricks.size).toBe(0);
+  });
+
+  it('still places a brick with a code the palette recognises', async () => {
+    const s = withPalette();
+    const { placed, rejected } = await s.place([{ part: '3001', color: 4, transform: IDENTITY }]);
+
+    expect(rejected).toEqual([]);
+    expect(placed).toHaveLength(1);
+  });
+
+  it('refuses to recolour to a code outside the loaded palette', async () => {
+    const s = withPalette();
+    await s.place([{ part: '3001', color: 4, transform: IDENTITY }]);
+
+    expect(() => s.recolor(['brick-2x4-1'], 9999)).toThrow(SessionError);
+    expect([...s.document.bricks.values()][0].colorCode).toBe(4);
+  });
+
+  it('skips validation entirely when no palette is loaded', async () => {
+    const s = session();
+    const { placed, rejected } = await s.place([{ part: '3001', color: 9999, transform: IDENTITY }]);
+
+    expect(rejected).toEqual([]);
+    expect(placed).toHaveLength(1);
   });
 });
 
