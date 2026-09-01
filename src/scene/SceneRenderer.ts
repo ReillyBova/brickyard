@@ -37,9 +37,12 @@ export interface SceneStats {
   frameTimeMs: number;
   batchCount: number;
   instanceCount: number;
-  /** Parts that failed to load geometry after retry — see `addBrick`. Was previously
+  /** Bricks that failed to load geometry after retry — see `addBrick`. Was previously
    *  always 0 and unreported: a brick just silently never appeared. */
   missingGeometry: number;
+  /** Distinct part ids behind `missingGeometry`, for naming what's missing rather than
+   *  just counting it. */
+  missingGeometryParts: readonly string[];
 }
 
 /**
@@ -119,6 +122,7 @@ export class SceneRenderer {
   private readonly arrivalSound = new SnapSound();
   private lastArrivalClickTime = -Infinity;
   private missingGeometryCount = 0;
+  private readonly missingGeometryParts = new Set<string>();
 
   private animationHandle: number | null = null;
   private lastFrameTime = 0;
@@ -129,6 +133,7 @@ export class SceneRenderer {
     batchCount: 0,
     instanceCount: 0,
     missingGeometry: 0,
+    missingGeometryParts: [],
   };
 
   /** `--by-dur-arrival` / `--by-ease-snap`, read once and cached rather than on every
@@ -227,7 +232,12 @@ export class SceneRenderer {
       // transient failures; anything that reaches here survived those retries and is
       // worth knowing about, even without a UI surface for it yet.
       this.missingGeometryCount++;
-      this.stats = { ...this.stats, missingGeometry: this.missingGeometryCount };
+      this.missingGeometryParts.add(brick.partId);
+      this.stats = {
+        ...this.stats,
+        missingGeometry: this.missingGeometryCount,
+        missingGeometryParts: [...this.missingGeometryParts],
+      };
       // eslint-disable-next-line no-console
       console.warn(
         `SceneRenderer: geometry failed to load for part "${brick.partId}" (brick ${brick.id}); it will not appear.`,
