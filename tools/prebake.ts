@@ -9,10 +9,15 @@
  * Usage: node tools/prebake.ts [--mirror <dir>] [--out <dir>] [--chest <ids>] [--pretty]
  */
 
+import { availableParallelism } from 'node:os'
 import { createHash } from 'node:crypto'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
+import { fileURLToPath } from 'node:url'
+import { Worker } from 'node:worker_threads'
+
+import type { BakeResult } from './bakeWorker.ts'
 
 import { boundsFromTriangles, partTriangles } from '../src/ldraw/bounds.ts'
 import type { CatalogEntry } from '../src/ldraw/types.ts'
@@ -110,6 +115,8 @@ interface ConnectionResolution {
   occupancy: BakedOccupancy[]
   /** Parts in the annotated set whose geometry or metadata the mirror could not supply. */
   failures: string[]
+  /** The slowest parts, so a pathological one is named rather than merely felt. */
+  slow: { partId: string; seconds: number }[]
   seconds: number
 }
 
@@ -140,6 +147,77 @@ function namespacedReader(readers: ConnectionReaders): ReadFile {
 }
 
 /**
+ * Resolves the corpus across a pool of workers, handing each one part at a time.
+ *
+ * Per-part cost spans three orders of magnitude, so work is dispatched on completion
+ * rather than split up front — a static split leaves the machine waiting on whichever
+ * worker drew the baseplates. Results are collected into a map and emitted in the
+ * caller's order, so the output is identical whatever order the workers finish in and
+ * the bake stays a pure function of the mirror.
+ */
+async function resolveInParallel(
+  partIds: readonly string[],
+  mirror: string,
+  jobs: number,
+): Promise<ConnectionResolution> {
+  const workerPath = fileURLToPath(new URL('./bakeWorker.ts', import.meta.url))
+  const results = new Map<string, BakeResult>()
+  const failures: string[] = []
+  const slow: { partId: string; seconds: number }[] = []
+  const started = Date.now()
+  let next = 0
+  let finished = 0
+
+  await new Promise<void>((resolve, reject) => {
+    let live = jobs
+    for (let i = 0; i < jobs; i++) {
+      const worker = new Worker(workerPath, { workerData: { mirror } })
+
+      const dispatch = (): void => {
+        if (next >= partIds.length) {
+          worker.postMessage(null)
+          return
+        }
+        worker.postMessage({ partId: partIds[next++] })
+      }
+
+      worker.on('message', (result: BakeResult) => {
+        results.set(result.partId, result)
+        if (!result.ok) failures.push(result.partId)
+        if (result.milliseconds > 2000) slow.push({ partId: result.partId, seconds: result.milliseconds / 1000 })
+        finished++
+        if (finished % 250 === 0) {
+          console.log(`  ${finished}/${partIds.length} parts  ${((Date.now() - started) / 1000).toFixed(0)}s`)
+        }
+        dispatch()
+      })
+      worker.on('error', reject)
+      worker.on('exit', () => {
+        live--
+        if (live === 0) resolve()
+      })
+      dispatch()
+    }
+  })
+
+  const connections: BakedConnections[] = []
+  const occupancy: BakedOccupancy[] = []
+  for (const partId of partIds) {
+    const result = results.get(partId)
+    if (result === undefined || !result.ok) continue
+    if (result.points.length > 0) connections.push({ partId, points: result.points })
+    occupancy.push({
+      partId,
+      bounds: result.bounds,
+      occupancy: { dims: result.dims, bits: result.bits },
+    })
+  }
+
+  slow.sort((a, b) => b.seconds - a.seconds)
+  return { connections, occupancy, failures, slow, seconds: (Date.now() - started) / 1000 }
+}
+
+/**
  * Resolves every part in `partIds` to its connection points and its occupancy mask,
  * using the same `src/snap/` code the app runs — one implementation, so a baked part and
  * a cold-resolved one cannot disagree.
@@ -157,9 +235,12 @@ async function resolveCorpus(
   const connections: BakedConnections[] = []
   const occupancy: BakedOccupancy[] = []
   const failures: string[] = []
+  /** Parts that took long enough to be worth naming in the bake's own output. */
+  const slow: { partId: string; seconds: number }[] = []
   const started = Date.now()
 
   for (const [index, partId] of partIds.entries()) {
+    const partStarted = Date.now()
     try {
       const [points, triangles] = await Promise.all([
         resolvePart(partId, read),
@@ -175,13 +256,16 @@ async function resolveCorpus(
     } catch {
       failures.push(partId)
     }
-    if ((index + 1) % 250 === 0) {
+    const took = Date.now() - partStarted
+    if (took > 2000) slow.push({ partId, seconds: took / 1000 })
+    if ((index + 1) % 100 === 0) {
       const elapsed = (Date.now() - started) / 1000
       console.log(`  ${index + 1}/${partIds.length} parts  ${elapsed.toFixed(0)}s`)
     }
   }
 
-  return { connections, occupancy, failures, seconds: (Date.now() - started) / 1000 }
+  slow.sort((a, b) => b.seconds - a.seconds)
+  return { connections, occupancy, failures, slow, seconds: (Date.now() - started) / 1000 }
 }
 
 // ---------------------------------------------------------------------------
@@ -243,6 +327,8 @@ interface BakeOptions {
   pretty: boolean
   /** Caps the corpus, for a fast bake while working on the pipeline itself. */
   limit?: number
+  /** Worker threads to resolve on. 1 runs in-process, which is the readable path to debug. */
+  jobs?: number
   help?: boolean
 }
 
@@ -283,8 +369,12 @@ async function bake(options: BakeOptions): Promise<void> {
   const annotated = await annotatedParts(options.mirror)
   const corpus = [...new Set([...annotated, ...options.chest])].sort()
   const wanted = options.limit === undefined ? corpus : corpus.slice(0, options.limit)
-  console.log(`Resolving ${wanted.length.toLocaleString()} parts from the mirror`)
-  const resolved = await resolveCorpus(wanted, { readLibrary, readShadow })
+  const jobs = options.jobs ?? Math.max(1, Math.min(availableParallelism(), 12))
+  console.log(`Resolving ${wanted.length.toLocaleString()} parts from the mirror on ${jobs} ${jobs === 1 ? 'thread' : 'threads'}`)
+  const resolved =
+    jobs === 1
+      ? await resolveCorpus(wanted, { readLibrary, readShadow })
+      : await resolveInParallel(wanted, options.mirror, jobs)
 
   await fsp.mkdir(options.out, { recursive: true })
   const writer = new Writer(options.out, options.pretty)
@@ -322,6 +412,9 @@ async function bake(options: BakeOptions): Promise<void> {
   console.log(`occupancy         ${resolved.occupancy.length.toLocaleString()} parts`)
   console.log(`unreadable        ${resolved.failures.length.toLocaleString()} parts`)
   console.log(`resolve time      ${resolved.seconds.toFixed(0)}s`)
+  for (const { partId, seconds } of resolved.slow.slice(0, 10)) {
+    console.log(`  slowest: ${partId.padEnd(16)} ${seconds.toFixed(1)}s`)
+  }
 }
 
 const USAGE = `Usage: node tools/prebake.ts [options]
@@ -330,6 +423,7 @@ const USAGE = `Usage: node tools/prebake.ts [options]
   --out <dir>     output directory (default public/baked)
   --chest <ids>   comma-separated part ids to bake into the chest
   --limit <n>     cap the resolved corpus, for a fast bake while iterating
+  --jobs <n>      worker threads (default: cores, capped at 12; 1 runs in-process)
   --pretty        indent the JSON output
   --help          show this message
 
@@ -349,6 +443,7 @@ function parseArgs(argv: string[]): BakeOptions {
     else if (arg === '--out') options.out = argv[++i]
     else if (arg === '--chest') options.chest = argv[++i].split(',').map((id) => id.trim())
     else if (arg === '--limit') options.limit = Number(argv[++i])
+    else if (arg === '--jobs') options.jobs = Math.max(1, Number(argv[++i]))
     else if (arg === '--pretty') options.pretty = true
     else if (arg === '--help' || arg === '-h') options.help = true
     else throw new Error(`unknown argument ${arg}`)
