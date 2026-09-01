@@ -6,16 +6,24 @@
  * them (undo, grouping, select-connected, restyle, save, graph inspection) had nothing
  * to read. This is the single writer: every mutation goes through a `Transaction`, and
  * the spatial index and renderer are projections kept in step with it.
+ *
+ * `commit()` is the generic entry point — any caller that has legitimately built a
+ * `Transaction` from `src/model/operations.ts` (grouping, restyle, reparenting, …)
+ * applies it here rather than touching `History` itself, so there is exactly one place
+ * that writes the document and exactly one place the index and renderer can drift from
+ * it. `place()`, `remove()` and `transformSelection()` are convenience wrappers over the
+ * same primitive for the gestures this slice owns.
  */
 
-import { findMates } from '../../snap/mating';
+import { multiply } from '../../math';
+import { findMates, mateCount } from '../../snap/mating';
 import { HashSpatialIndex } from '../../snap/spatialIndex';
 import type { MateGroup, PartDef } from '../../snap/types';
 import {
   type History,
   canRedo,
   canUndo,
-  commit,
+  commit as commitToHistory,
   createHistory,
   emptyDocument,
   redo,
@@ -61,6 +69,13 @@ export class EditorSession {
   private history: History;
   private readonly parts = new Map<string, PartDef>();
   private readonly listeners = new Set<EditorListener>();
+  /**
+   * View state, per docs/ARCHITECTURE.md: selection lives outside the document and is
+   * not undoable. It lives here rather than in a component so every slice that reads or
+   * drives the canvas (toolbar, restyle, grouping) shares one answer to "what's
+   * selected" instead of each inventing its own.
+   */
+  private selectedIds: ReadonlySet<BrickId> = new Set();
 
   readonly index = new HashSpatialIndex();
   private readonly scene: SceneSync;
@@ -91,6 +106,16 @@ export class EditorSession {
     return redoLabel(this.history);
   }
 
+  get selection(): ReadonlySet<BrickId> {
+    return this.selectedIds;
+  }
+
+  /** Replaces the selection wholesale; an empty iterable clears it. Not undoable. */
+  setSelection(ids: Iterable<BrickId>): void {
+    this.selectedIds = new Set(ids);
+    this.notify();
+  }
+
   /** Part definitions are session-scoped; the document stores only part ids. */
   registerPart(part: PartDef): void {
     this.parts.set(part.id, part);
@@ -117,22 +142,35 @@ export class EditorSession {
   }
 
   /**
-   * Place a brick. Geometry and connectivity land in one transaction so undo restores
-   * both — a `remove` alone would put the brick back with no edges.
+   * Apply any transaction through the one writer. Every other mutator on this class —
+   * `place`, `remove`, `transformSelection` — is a convenience that builds a
+   * `Transaction` and calls this; a caller elsewhere (grouping, restyle, reparenting)
+   * that has built its own `Transaction` from `src/model/operations.ts` uses this
+   * directly instead of touching `History` itself, so the index, the renderer and the
+   * undo stack can never drift from what actually happened.
    */
-  place(brick: BrickInstance, part: PartDef): void {
+  commit(tx: Transaction): void {
+    const before = this.document;
+    this.history = commitToHistory(this.history, tx);
+    this.reconcile(before);
+  }
+
+  /**
+   * Place a brick. Geometry and connectivity land in one transaction so undo restores
+   * both — a `remove` alone would put the brick back with no edges. Returns the total
+   * mate count, which is the only external use for a placement's engagement strength —
+   * see `src/scene/interaction/click.ts`.
+   */
+  place(brick: BrickInstance, part: PartDef): number {
     const groups = findMates(part, brick.transform, this.index);
-    const tx: Transaction = {
+    this.commit({
       label: `Place ${part.title}`,
       ops: [
         { type: 'add', bricks: [brick] },
         { type: 'connect', edges: edgesFor(brick.id, groups) },
       ],
-    };
-    this.history = commit(this.history, tx);
-    this.index.insert(brick.id, part, brick.transform);
-    void this.scene.addBrick(brick);
-    this.notify();
+    });
+    return mateCount(groups);
   }
 
   /** Remove bricks, dropping the edges that held them first so undo can restore both. */
@@ -156,18 +194,70 @@ export class EditorSession {
       }
     }
 
-    this.history = commit(this.history, {
+    this.commit({
       label: bricks.length === 1 ? 'Delete brick' : `Delete ${bricks.length} bricks`,
       ops: [
         { type: 'disconnect', edges: [...edges.values()] },
         { type: 'remove', bricks },
       ],
     });
-    for (const b of bricks) {
-      this.index.remove(b.id);
-      this.scene.removeBrick(b.id);
+  }
+
+  /**
+   * Nudge or rotate a set of already-placed bricks by one rigid world-space `delta`
+   * (the same matrix applied to every brick — see `transformMany`). Edges to bricks
+   * outside `ids` are dropped and re-solved against the landing position; edges between
+   * two co-moving bricks are left alone, because a single rigid delta left-multiplying
+   * both leaves their relative transform — and so their mate geometry — unchanged.
+   */
+  transformSelection(ids: readonly BrickId[], delta: Mat4, label: string): void {
+    const idSet = new Set(ids);
+    const moving = ids
+      .map((id) => this.document.bricks.get(id))
+      .filter((b): b is BrickInstance => !!b);
+    if (moving.length === 0) return;
+
+    const dropped = new Map<string, ConnectionEdge>();
+    for (const id of ids) {
+      const node = this.document.graph.nodes.get(id);
+      if (!node) continue;
+      for (const edgeId of [...node.out, ...node.in, ...node.peer]) {
+        const e = this.document.graph.edges.get(edgeId);
+        if (!e) continue;
+        const other = e.a === id ? e.b : e.a;
+        if (!idSet.has(other)) dropped.set(e.id, e);
+      }
     }
-    this.notify();
+
+    const landing = new Map<BrickId, Mat4>();
+    for (const b of moving) {
+      const to = multiply(delta, b.transform);
+      landing.set(b.id, to);
+      const part = this.parts.get(b.partId);
+      // Re-index at the landing transform before re-solving mates, so findMates sees
+      // the piece where it actually lands rather than where it started.
+      if (part) this.index.insert(b.id, part, to);
+    }
+
+    const newEdges = new Map<string, ConnectionEdge>();
+    for (const b of moving) {
+      const part = this.parts.get(b.partId);
+      if (!part) continue;
+      const to = landing.get(b.id) as Mat4;
+      for (const e of edgesFor(b.id, findMates(part, to, this.index, idSet))) newEdges.set(e.id, e);
+    }
+
+    this.commit({
+      label,
+      ops: [
+        { type: 'disconnect', edges: [...dropped.values()] },
+        {
+          type: 'transform',
+          changes: moving.map((b) => ({ id: b.id, from: b.transform, to: landing.get(b.id) as Mat4 })),
+        },
+        { type: 'connect', edges: [...newEdges.values()] },
+      ],
+    });
   }
 
   undo(): void {
@@ -185,11 +275,13 @@ export class EditorSession {
   }
 
   /**
-   * Bring the index and the renderer back in line after a history move.
+   * Bring the index and the renderer back in line after a history move — and after any
+   * `commit()`, which is what makes it the one place that keeps them from drifting.
    *
-   * Undo replaces the document wholesale rather than replaying inverse operations
-   * against the projections, so the projections are diffed against it instead. Diffing
-   * is what keeps this correct no matter how many operations a transaction carried.
+   * The document is diffed against its prior snapshot rather than replaying the
+   * transaction's operations, which is what lets a single method serve `commit()`
+   * (forward) and `undo`/`redo` (wholesale replacement) alike: it doesn't care how the
+   * new document came about, only what's different about it.
    */
   private reconcile(before: SceneDocument): void {
     const after = this.document;
@@ -210,8 +302,21 @@ export class EditorSession {
       } else if (prior.transform !== brick.transform) {
         this.index.insert(id, part, brick.transform);
         this.scene.setBrickTransform(id, brick.transform);
+      } else if (prior.colorCode !== brick.colorCode) {
+        // No in-place recolor on the renderer's projection: a brick's batch is keyed by
+        // (partId, colorCode), so changing color means changing batch. Remove and
+        // re-add is exactly that, through the same two SceneSync methods everything
+        // else already uses.
+        this.scene.removeBrick(id);
+        void this.scene.addBrick(brick);
       }
     }
+
+    if (this.selectedIds.size > 0) {
+      const pruned = [...this.selectedIds].filter((id) => after.bricks.has(id));
+      if (pruned.length !== this.selectedIds.size) this.selectedIds = new Set(pruned);
+    }
+
     this.notify();
   }
 }
