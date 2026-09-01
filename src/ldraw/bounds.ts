@@ -17,8 +17,8 @@
  * occupancy masks from captured fixtures.
  */
 
-import type { Bounds, Mat4, Vec3 } from '../types';
-import { fromBasis, multiply, transformPoint, IDENTITY } from '../math';
+import type { Bounds, Mat4, Vec3 } from '../types.ts';
+import { fromBasis, multiply, transformPoint, IDENTITY } from '../math.ts';
 
 /** A face, already triangulated, in whatever space the caller walked to. */
 export type Triangle = readonly [Vec3, Vec3, Vec3];

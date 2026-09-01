@@ -6,8 +6,8 @@
  * Reference: https://www.melkert.net/LDCad/tech/meta
  */
 
-import type { Mat3, Vec3 } from '../types';
-import type { Gender, Section, SectionVariant, SnapKind } from './types';
+import type { Mat3, Vec3 } from '../types.ts';
+import type { Gender, Section, SectionVariant, SnapKind } from './types.ts';
 
 export type SnapCommand =
   | 'SNAP_CYL'
