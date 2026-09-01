@@ -216,7 +216,7 @@ describe('scalar attribute parsing', () => {
 });
 
 describe('matingSection', () => {
-  it('takes the bore of a stepped female profile', () => {
+  it('takes the bore of a stepped female profile — the dominant section by length', () => {
     expect(matingSection(parseSections('R 8 2 R 6 16 R 8 2'))).toEqual({
       variant: 'R',
       radius: 6,
@@ -224,26 +224,38 @@ describe('matingSection', () => {
     });
   });
 
-  it('takes the narrowest section of a male profile, not the widest', () => {
-    // p/knob1.dat's real profile: a neck that widens toward the tip. The neck (radius
-    // 5) is what a receiving socket actually grips; the wider tip is what the socket's
-    // opening has to admit, not what determines the fit.
+  it('picks the section with the most total length, not a fixed min or max', () => {
+    // p/knob1.dat's real profile: a short neck (radius 5, length 2) flexing into a
+    // longer widened run (radius 6, length 5). Neither "always widest" nor "always
+    // narrowest" is safe in general — the section that dominates by length is.
     expect(matingSection(parseSections('R 5 2 _L 6 5'))).toEqual({
       variant: 'R',
-      radius: 5,
-      length: 2,
+      radius: 6,
+      length: 5,
     });
   });
 
-  it('takes the narrowest section even when it sits in the middle, flanked by wider ones', () => {
-    // The real Technic pin (3673): a radius-8 collar sandwiched between two radius-6
-    // shafts. The collar is a stop meant to stay outside any single hole; the shafts are
-    // what actually engage the hole's bore, so the narrowest section — not the widest —
-    // has to be what the key is built from for the pin to match its hole.
+  it('picks the dominant section even when it sits in the middle, flanked by narrower ones', () => {
+    // The real Technic pin (3673): two radius-6 shafts (16 LDU each) flank a short
+    // radius-8 collar (4 LDU) and two short radius-6.25 tips (2 LDU each). The shafts
+    // dominate by length, so they — not the collar — key the pin, matching 3700's hole.
     expect(matingSection(parseSections('R 6.25 2 R 6 16 R 8 4 R 6 16 R 6.25 2'))).toEqual({
       variant: 'R',
       radius: 6,
       length: 16,
+    });
+  });
+
+  it('picks the dominant bore over a short, unreachable inner constriction', () => {
+    // The real round brick 3062b's underside socket: a normal radius-6 bore for almost
+    // its whole depth (20 LDU), narrowing to radius 4 only in the last 8 LDU that no
+    // stud ever reaches. Measured against the bundled models, keying on the narrow tail
+    // instead of the bore left every 3062b reading as incompatible with the stud it
+    // visibly sits on.
+    expect(matingSection(parseSections('R 6 20 R 4 8'))).toEqual({
+      variant: 'R',
+      radius: 6,
+      length: 20,
     });
   });
 

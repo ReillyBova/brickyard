@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { IDENTITY, determinant, fromTranslation, multiply, transformPoint } from '../math';
+import { IDENTITY, determinant, fromTranslation, invert, multiply, transformPoint } from '../math';
 import type { BrickId, Mat4 } from '../types';
 import { fixtureReader } from './__fixtures__/reader';
 import { isCompatible, keysCompatible, unpackKey } from './compat';
@@ -214,6 +214,36 @@ describe('hard connections, end to end on real parts', () => {
     index.remove(brick(1));
   });
 
+  it('a Technic pin pushed only halfway into a hole, from either end, still mates', async () => {
+    // resolvePart collapses a pin's whole shaft to one centred point, and a real single
+    // Technic hole is shallower than the pin that passes through it — so a pin actually
+    // seated in one hole has its own centre well away from the hole's, along their
+    // shared axis, with the rest of the shaft protruding freely. Measured directly
+    // against the bundled models: this — not a compatibility or parsing bug — is what
+    // left most real Technic connections unfound.
+    const brickPart = await part('3700');
+    const pin = await part('3673');
+    const hole = brickPart.connections.find((c) => c.source === 'p/connhole.dat')!;
+    const peg = pin.connections.find((c) => c.gender === 'M')!;
+    index.insert(brick(1), brickPart, IDENTITY);
+
+    const seated = solveMating(pin, peg, hole, IDENTITY, 0);
+    const { position: holePos, axis } = worldPoint(hole, IDENTITY);
+
+    // Slide the perfectly-seated placement 10 LDU along the shared axis — half the
+    // pin's engaging shaft — so the pin's centre point no longer coincides with the
+    // hole's at all, the way a pin actually pushed into one hole never does.
+    const offset: Mat4 = fromTranslation([axis[0] * 10, axis[1] * 10, axis[2] * 10]);
+    const halfway = multiply(offset, seated);
+    const pegNow = worldPoint(peg, halfway);
+    expect(Math.hypot(...pegNow.position.map((v, i) => v - holePos[i]))).toBeGreaterThan(9);
+
+    const groups = findMates(pin, halfway, index);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].mates.some((m) => m.aPoint === peg.id && m.bPoint === hole.id)).toBe(true);
+    index.remove(brick(1));
+  });
+
   it('a Technic pin refuses a Technic axle hole', async () => {
     const pin = await part('3673');
     const gear = await part('4716'); // Technic Worm Gear 2L — mounts on an axle
@@ -240,6 +270,42 @@ describe('hard connections, end to end on real parts', () => {
     index.insert(brick(1), gear, IDENTITY);
     const placed = solveMating(axlePart, axle, axleHole, IDENTITY, 0);
     const groups = findMates(axlePart, placed, index);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].mates.some((m) => m.aPoint === axle.id && m.bPoint === axleHole.id)).toBe(
+      true,
+    );
+    index.remove(brick(1));
+  });
+
+  it('an axle threaded from the opposite direction still mates — sliding connectors have no one true end', async () => {
+    // p/axlehole.dat and p/connhole.dat are both drawn open at both faces (`caps=none`),
+    // so an axle entering from the "wrong" side is exactly as valid as one entering from
+    // the modelled direction. Its world axis reads as the exact negation, not a near
+    // match — flip the seated placement 180 degrees about an axis perpendicular to the
+    // connector (so the position stays put but the axle points the other way) and
+    // confirm findMates still finds it. Measured directly against the bundled models,
+    // this was rejecting every axle approached from that side, full stop.
+    const axlePart = await part('3705');
+    const gear = await part('4716');
+    const axle = axlePart.connections.find((c) => c.source === 'parts/3705.dat')!;
+    const axleHole = gear.connections.find((c) => c.gender === 'F')!;
+    index.insert(brick(1), gear, IDENTITY);
+
+    const seated = solveMating(axlePart, axle, axleHole, IDENTITY, 0);
+    // 180 degrees about the connector's *own* local X, conjugated by its point matrix so
+    // the pivot is the connector's world position regardless of its own orientation
+    // quirks: flips its world +Y (the connector axis) without moving that position.
+    const flipAboutX: Mat4 = [1, 0, 0, 0, 0, -1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1];
+    const pm = pointMatrix(axle);
+    const flipped = multiply(seated, multiply(pm, multiply(flipAboutX, invert(pm))));
+
+    const before = worldPoint(axle, seated);
+    const after = worldPoint(axle, flipped);
+    expect(after.position).toEqual(before.position); // same seat, axis reversed
+    const dot = after.axis[0] * before.axis[0] + after.axis[1] * before.axis[1] + after.axis[2] * before.axis[2];
+    expect(dot).toBeCloseTo(-1, 6);
+
+    const groups = findMates(axlePart, flipped, index);
     expect(groups).toHaveLength(1);
     expect(groups[0].mates.some((m) => m.aPoint === axle.id && m.bPoint === axleHole.id)).toBe(
       true,
