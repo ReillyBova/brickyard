@@ -14,16 +14,27 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
 
+import { boundsFromTriangles, partTriangles } from '../src/ldraw/bounds.ts'
 import type { CatalogEntry } from '../src/ldraw/types.ts'
 import {
   DEFAULT_MIRROR_ROOT,
   createLibraryReader,
   createShadowReader,
   mirrorExists,
+  mirrorLayout,
   readArchiveMeta,
   readColorLibrary,
   type MirrorReader,
 } from '../src/ldraw/mirror.ts'
+import {
+  BAKED_FORMAT_VERSION,
+  packConnections,
+  packOccupancy,
+  type BakedConnections,
+  type BakedOccupancy,
+} from '../src/snap/baked.ts'
+import { buildOccupancy } from '../src/snap/collision.ts'
+import { resolvePart, type ReadFile } from '../src/snap/resolvePart.ts'
 
 /**
  * The chest during development. It grows into a curated popular set before shipping; the list is
@@ -95,34 +106,82 @@ interface ConnectionReaders {
 }
 
 interface ConnectionResolution {
-  parts: unknown[]
-  covered: number
-  implemented: boolean
+  connections: BakedConnections[]
+  occupancy: BakedOccupancy[]
+  /** Parts in the annotated set whose geometry or metadata the mirror could not supply. */
+  failures: string[]
+  seconds: number
 }
 
 /**
- * ============================ INTEGRATION SEAM ============================
- * Connection-point resolution plugs in here. It belongs to the `src/snap/` slice, which owns the
- * shadow parser and the reference walk; this file deliberately does not import from it.
- *
- * The parser is injected with two readers, so it stays offline and testable:
- *
- *   resolvePart(partId, { readLibrary, readShadow }) -> PartDef
- *
- * Both readers have the signature `(relativePath: string) => Promise<string | null>` and are
- * already constructed below. When that lands, this function returns the resolved parts and the
- * writer gains `connections.bin` (packed points for the whole annotated corpus, ~4,200 parts) and
- * `geometry.bin` (flattened geometry, chest only). Until then the bake emits the color library
- * and a catalog carrying real titles, which exercises the mirror end to end.
- * =========================================================================
+ * The parts the shadow library annotates, which is the set connection data covers. Read
+ * from the mirror's own directory listing rather than a checked-in list, so a shadow
+ * release that adds or drops coverage is picked up by re-syncing.
  */
-async function resolveConnections(
-  partIds: string[],
+async function annotatedParts(mirror: string): Promise<string[]> {
+  const directory = path.join(mirrorLayout(mirror).shadow, 'parts')
+  const names = await fsp.readdir(directory)
+  return names
+    .filter((name) => name.toLowerCase().endsWith('.dat'))
+    .map((name) => name.replace(/\.dat$/i, ''))
+    .sort()
+}
+
+/**
+ * `resolvePart` and `partTriangles` read namespaced paths (`ldraw/parts/3001.dat`,
+ * `shadow/p/stud.dat`); the mirror readers are already rooted at each library. This is
+ * the whole adapter between them.
+ */
+function namespacedReader(readers: ConnectionReaders): ReadFile {
+  return (relativePath) =>
+    relativePath.startsWith('shadow/')
+      ? readers.readShadow(relativePath.slice('shadow/'.length))
+      : readers.readLibrary(relativePath.replace(/^ldraw\//, ''))
+}
+
+/**
+ * Resolves every part in `partIds` to its connection points and its occupancy mask,
+ * using the same `src/snap/` code the app runs — one implementation, so a baked part and
+ * a cold-resolved one cannot disagree.
+ *
+ * Sequential, because the work is CPU-bound in one process and ordered output keeps the
+ * bake a pure function of the mirror. Parts whose geometry or shadow file is unreadable
+ * are counted and skipped: a part missing from an upstream release should not fail a
+ * bake of the other four thousand.
+ */
+async function resolveCorpus(
+  partIds: readonly string[],
   readers: ConnectionReaders,
 ): Promise<ConnectionResolution> {
-  void partIds
-  void readers
-  return { parts: [], covered: 0, implemented: false }
+  const read = namespacedReader(readers)
+  const connections: BakedConnections[] = []
+  const occupancy: BakedOccupancy[] = []
+  const failures: string[] = []
+  const started = Date.now()
+
+  for (const [index, partId] of partIds.entries()) {
+    try {
+      const [points, triangles] = await Promise.all([
+        resolvePart(partId, read),
+        partTriangles(partId, read),
+      ])
+      if (triangles.length === 0) {
+        failures.push(partId)
+        continue
+      }
+      const bounds = boundsFromTriangles(triangles)
+      if (points.length > 0) connections.push({ partId, points })
+      occupancy.push({ partId, bounds, occupancy: buildOccupancy(triangles, bounds, points) })
+    } catch {
+      failures.push(partId)
+    }
+    if ((index + 1) % 250 === 0) {
+      const elapsed = (Date.now() - started) / 1000
+      console.log(`  ${index + 1}/${partIds.length} parts  ${elapsed.toFixed(0)}s`)
+    }
+  }
+
+  return { connections, occupancy, failures, seconds: (Date.now() - started) / 1000 }
 }
 
 // ---------------------------------------------------------------------------
@@ -182,6 +241,8 @@ interface BakeOptions {
   out: string
   chest: readonly string[]
   pretty: boolean
+  /** Caps the corpus, for a fast bake while working on the pipeline itself. */
+  limit?: number
   help?: boolean
 }
 
@@ -216,10 +277,14 @@ async function bake(options: BakeOptions): Promise<void> {
     throw new Error(`not in the mirror: ${missing.join(', ')}`)
   }
 
-  const connections = await resolveConnections(
-    catalog.map((entry) => entry.partId),
-    { readLibrary, readShadow },
-  )
+  // Connections cover the annotated corpus; occupancy covers that set plus anything in the
+  // chest the shadow library does not annotate, since a part with no connection points
+  // still has a body that collides.
+  const annotated = await annotatedParts(options.mirror)
+  const corpus = [...new Set([...annotated, ...options.chest])].sort()
+  const wanted = options.limit === undefined ? corpus : corpus.slice(0, options.limit)
+  console.log(`Resolving ${wanted.length.toLocaleString()} parts from the mirror`)
+  const resolved = await resolveCorpus(wanted, { readLibrary, readShadow })
 
   await fsp.mkdir(options.out, { recursive: true })
   const writer = new Writer(options.out, options.pretty)
@@ -230,6 +295,8 @@ async function bake(options: BakeOptions): Promise<void> {
     colors: [...colors.values()].sort((a, b) => a.code - b.code),
   })
   await writer.writeJson('catalog.json', catalog)
+  await writer.write('connections.bin', Buffer.from(packConnections(resolved.connections)))
+  await writer.write('occupancy.bin', Buffer.from(packOccupancy(resolved.occupancy)))
   await writer.write('LICENSE.txt', LICENSE_TEXT)
 
   /**
@@ -240,6 +307,8 @@ async function bake(options: BakeOptions): Promise<void> {
   const manifest = {
     libraryVersion: version ?? partsMeta?.etag ?? 'unknown',
     shadowVersion: shadowMeta?.etag?.replace(/^W\/|"/g, '') ?? 'unknown',
+    /** Shipped masks pin the voxel size and fill semantics; see `docs/PREBAKE.md`. */
+    occupancyFormat: BAKED_FORMAT_VERSION,
     outputs: writer.outputs,
   }
   await writer.writeJson('manifest.json', manifest)
@@ -249,11 +318,10 @@ async function bake(options: BakeOptions): Promise<void> {
   console.log(`shadow revision   ${manifest.shadowVersion}`)
   console.log(`colors           ${colors.size}`)
   console.log(`catalog entries   ${catalog.length}`)
-  console.log(
-    `connections       ${
-      connections.implemented ? `${connections.covered} parts` : 'not resolved (seam unimplemented)'
-    }`,
-  )
+  console.log(`connections       ${resolved.connections.length.toLocaleString()} parts`)
+  console.log(`occupancy         ${resolved.occupancy.length.toLocaleString()} parts`)
+  console.log(`unreadable        ${resolved.failures.length.toLocaleString()} parts`)
+  console.log(`resolve time      ${resolved.seconds.toFixed(0)}s`)
 }
 
 const USAGE = `Usage: node tools/prebake.ts [options]
@@ -261,6 +329,7 @@ const USAGE = `Usage: node tools/prebake.ts [options]
   --mirror <dir>  local mirror (default ${DEFAULT_MIRROR_ROOT})
   --out <dir>     output directory (default public/baked)
   --chest <ids>   comma-separated part ids to bake into the chest
+  --limit <n>     cap the resolved corpus, for a fast bake while iterating
   --pretty        indent the JSON output
   --help          show this message
 
@@ -279,6 +348,7 @@ function parseArgs(argv: string[]): BakeOptions {
     if (arg === '--mirror') options.mirror = argv[++i]
     else if (arg === '--out') options.out = argv[++i]
     else if (arg === '--chest') options.chest = argv[++i].split(',').map((id) => id.trim())
+    else if (arg === '--limit') options.limit = Number(argv[++i])
     else if (arg === '--pretty') options.pretty = true
     else if (arg === '--help' || arg === '-h') options.help = true
     else throw new Error(`unknown argument ${arg}`)
