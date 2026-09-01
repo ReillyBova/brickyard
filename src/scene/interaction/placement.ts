@@ -13,6 +13,7 @@
 import { IDENTITY } from '../../math';
 import type { BrickId, Mat4, Vec3 } from '../../types';
 import { boundsFromTriangles, partTriangles } from '../../ldraw/bounds';
+import { loadBakedParts, type BakedParts } from '../bakedParts.ts';
 import { buildOccupancy, collides } from '../../snap/collision';
 import { resolvePart } from '../../snap/resolvePart';
 import { groundPlacement, resolveSnap } from '../../snap/resolve';
@@ -23,13 +24,20 @@ const LDRAW_BASE = 'https://raw.githubusercontent.com/gkjohnson/ldraw-parts-libr
 const SHADOW_BASE = 'https://raw.githubusercontent.com/RolandMelkert/LDCadShadowLibrary/main/';
 
 /**
- * Runtime connectivity, fetched per part and cached for the session.
+ * Runtime connectivity, from the bake where possible and from source otherwise, cached
+ * for the session either way.
  *
- * Cold-resolving a part is roughly twenty requests, which is exactly why the baked
- * catalog exists in `docs/PREBAKE.md`. Until that pipeline is wired up this fetches
- * directly, which is fine for a handful of part types and unacceptable for a model.
+ * The baked sets (`docs/PREBAKE.md`) cover every part the shadow library annotates, so a
+ * covered part costs a map lookup: no fetch, no tree walk, no voxelisation. A part
+ * outside them — the long tail, or any part at all when `public/baked/` has not been
+ * generated — falls back to cold-resolving from upstream, roughly twenty requests per
+ * part, which is fine for a handful of part types and unacceptable for a model.
+ *
+ * `baked` is injectable so tests can supply their own sets, or none.
  */
-export function createPartCatalog(): (partId: string) => Promise<PartDef> {
+export function createPartCatalog(
+  baked: Promise<BakedParts> = loadBakedParts(),
+): (partId: string) => Promise<PartDef> {
   const files = new Map<string, Promise<string | null>>();
   const parts = new Map<string, Promise<PartDef>>();
 
@@ -51,25 +59,41 @@ export function createPartCatalog(): (partId: string) => Promise<PartDef> {
     return pending;
   };
 
+  /**
+   * Collision needs real bounds and a real occupancy mask: given a zero box and an empty
+   * mask it finds no occupied voxels and reports no collision, ever — which looks exactly
+   * like working collision detection until you try to overlap something. So a part is
+   * only served from the bake when its mask is there; connections alone are not enough.
+   */
+  const fromSource = async (partId: string): Promise<PartDef> => {
+    // Connections and geometry are resolved from the same files, so they are fetched
+    // together.
+    const [connections, triangles] = await Promise.all([
+      resolvePart(partId, read),
+      partTriangles(partId, read),
+    ]);
+    const bounds = boundsFromTriangles(triangles);
+    return {
+      id: partId,
+      title: partId,
+      connections,
+      bounds,
+      occupancy: buildOccupancy(triangles, bounds, connections),
+    };
+  };
+
   return (partId: string): Promise<PartDef> => {
     const cached = parts.get(partId);
     if (cached) return cached;
-    // Connections and geometry are resolved from the same files, so they are fetched
-    // together. Collision needs real bounds and a real occupancy mask: given a zero box
-    // and an empty mask it finds no occupied voxels and reports no collision, ever —
-    // which looks exactly like working collision detection until you try to overlap
-    // something.
-    const pending = Promise.all([
-      resolvePart(partId, read),
-      partTriangles(partId, read),
-    ]).then(([connections, triangles]) => {
-      const bounds = boundsFromTriangles(triangles);
+    const pending = baked.then((sets) => {
+      const collision = sets.occupancy.get(partId);
+      if (collision === undefined) return fromSource(partId);
       return {
         id: partId,
         title: partId,
-        connections,
-        bounds,
-        occupancy: buildOccupancy(triangles, bounds, connections),
+        connections: sets.connections.get(partId) ?? [],
+        bounds: collision.bounds,
+        occupancy: collision.occupancy,
       };
     });
     parts.set(partId, pending);
