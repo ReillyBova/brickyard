@@ -17,7 +17,7 @@
  * can't fetch a model file directly from it at runtime — every `.mpd` here was mirrored
  * once at curation time (see `tools/modelCatalog.ts`) rather than proxied live.
  */
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
 import { Link } from './Link';
 import './ModelPicker.css';
@@ -25,7 +25,7 @@ import './ModelPicker.css';
 import { useRoute } from './route-context';
 import { useModelIndex } from '../features/omr/modelIndex';
 import type { BundledModelEntry } from '../features/omr/types';
-import { CategoryMenu } from '../ui/PartsChest/CategoryMenu';
+import { FilterMenu, type FilterMenuSection } from '../ui/PartsChest/FilterMenu';
 import { SearchIcon } from '../ui/icons';
 
 function formatBytes(bytes: number): string {
@@ -57,12 +57,7 @@ interface ModelCardProps {
 
 function ModelCard({ entry, onOpen }: ModelCardProps) {
   return (
-    <button
-      type="button"
-      className="by-model-card"
-      onClick={() => onOpen(entry)}
-      title={`Open ${entry.name} — ${entry.theme}, ${entry.year}`}
-    >
+    <button type="button" className="by-model-card" onClick={() => onOpen(entry)}>
       <span className="by-model-card__name">{entry.name}</span>
       <span className="by-model-card__meta">
         <span className="by-tag by-tag--neutral">{entry.theme}</span>
@@ -99,27 +94,59 @@ export function ModelPicker({ onOpenModel }: ModelPickerProps) {
   const { navigate } = useRoute();
   const state = useModelIndex();
   const [query, setQuery] = useState('');
-  const [theme, setTheme] = useState<string | undefined>(undefined);
-  const [size, setSize] = useState<string | undefined>(undefined);
+  const [themes, setThemes] = useState<ReadonlySet<string>>(() => new Set());
+  const [sizes, setSizes] = useState<ReadonlySet<string>>(() => new Set());
 
   const models = useMemo(() => (state.status === 'ready' ? state.models : []), [state]);
 
-  const themes = useMemo(
+  const allThemes = useMemo(
     () => Array.from(new Set(models.map((m) => m.theme))).sort((a, b) => a.localeCompare(b)),
     [models],
   );
 
-  const filtering = query.trim().length > 0 || theme !== undefined || size !== undefined;
+  const toggleTheme = useCallback((value: string) => {
+    setThemes((prev) => {
+      const next = new Set(prev);
+      if (next.has(value)) next.delete(value);
+      else next.add(value);
+      return next;
+    });
+  }, []);
+
+  const toggleSize = useCallback((value: string) => {
+    setSizes((prev) => {
+      const next = new Set(prev);
+      if (next.has(value)) next.delete(value);
+      else next.add(value);
+      return next;
+    });
+  }, []);
+
+  const clearFilters = useCallback(() => {
+    setThemes(new Set());
+    setSizes(new Set());
+  }, []);
+
+  const activeFilterCount = themes.size + sizes.size;
+  const filtering = query.trim().length > 0 || activeFilterCount > 0;
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return models.filter((m) => {
       if (q.length > 0 && !`${m.name} ${m.setNumber}`.toLowerCase().includes(q)) return false;
-      if (theme !== undefined && m.theme !== theme) return false;
-      if (size !== undefined && sizeBucket(m.officialPieceCount) !== size) return false;
+      if (themes.size > 0 && !themes.has(m.theme)) return false;
+      if (sizes.size > 0 && !sizes.has(sizeBucket(m.officialPieceCount))) return false;
       return true;
     });
-  }, [models, query, theme, size]);
+  }, [models, query, themes, sizes]);
+
+  const filterSections: FilterMenuSection[] = useMemo(
+    () => [
+      { key: 'theme', label: 'Theme', options: allThemes, selected: themes, onToggle: toggleTheme },
+      { key: 'size', label: 'Size', options: SIZE_BUCKETS, selected: sizes, onToggle: toggleSize },
+    ],
+    [allThemes, themes, toggleTheme, sizes, toggleSize],
+  );
 
   const popular = useMemo(() => models.filter((m) => m.curated === 'popular'), [models]);
 
@@ -192,9 +219,18 @@ export function ModelPicker({ onOpenModel }: ModelPickerProps) {
             onChange={(e) => setQuery(e.target.value)}
           />
         </div>
-        <CategoryMenu categories={themes} value={theme} onChange={setTheme} allLabel="All themes" />
-        <CategoryMenu categories={SIZE_BUCKETS} value={size} onChange={setSize} allLabel="Any size" />
+        <FilterMenu
+          sections={filterSections}
+          activeCount={activeFilterCount}
+          onClearAll={clearFilters}
+          subject="models"
+        />
       </div>
+
+      <p className="by-model-picker__count by-faint by-mono">
+        {filtering ? `${filtered.length.toLocaleString()} of ${models.length.toLocaleString()}` : models.length.toLocaleString()}{' '}
+        {models.length === 1 ? 'model' : 'models'}
+      </p>
 
       {!filtering && popular.length > 0 && (
         <div className="by-model-picker__section">
@@ -220,6 +256,11 @@ export function ModelPicker({ onOpenModel }: ModelPickerProps) {
             <p className="by-empty__body">
               Try a different set name, number, theme or size — or clear the filters.
             </p>
+            {activeFilterCount > 0 && (
+              <button type="button" className="by-btn by-btn--secondary" onClick={clearFilters}>
+                Clear filters
+              </button>
+            )}
           </div>
         ) : (
           <ul className="by-model-picker__list">

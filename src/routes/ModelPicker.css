@@ -49,6 +49,13 @@
   min-width: 220px;
 }
 
+.by-model-picker__count {
+  width: 100%;
+  max-width: 900px;
+  margin: calc(-1 * var(--by-space-4)) 0 0;
+  font-size: var(--by-text-sm);
+}
+
 .by-model-picker__section {
   width: 100%;
   max-width: 900px;
