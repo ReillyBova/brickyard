@@ -24,7 +24,6 @@ import {
 import { buildOccupancy, OCC_CELL } from './collision.ts';
 import { resolvePart } from './resolvePart.ts';
 import type { ConnectionPoint } from './types.ts';
-import type { Vec3 } from '../types.ts';
 
 const PARTS = ['3001', '4070', '3700', '3818', '2335', '3937', '3947'] as const;
 
@@ -86,7 +85,8 @@ describe('connections.bin', () => {
     // A basis symmetric about its diagonal survives a transposed convention unnoticed.
     // This one — 40 degrees about a tilted axis — does not.
     const angle = (40 * Math.PI) / 180;
-    const [ax, ay, az] = [0.3, 0.8, 0.5].map((v, _i, all) => v / Math.hypot(...all)) as Vec3;
+    const length = Math.hypot(0.3, 0.8, 0.5);
+    const [ax, ay, az] = [0.3 / length, 0.8 / length, 0.5 / length];
     const c = Math.cos(angle);
     const s2 = Math.sin(angle);
     const t = 1 - c;
