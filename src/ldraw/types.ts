@@ -61,6 +61,25 @@ export interface BakedManifest {
    * extra upstream request purely to learn a commit SHA.
    */
   shadowVersion: string;
+  /** `BAKED_FORMAT_VERSION` (`src/snap/baked.ts`) — the byte layout of connections.bin and
+   *  occupancy.bin at bake time. */
+  bakedFormatVersion: number;
+  /** `SEMANTICS_VERSION` (`src/snap/baked.ts`) — what the packed fields in connections.bin
+   *  and occupancy.bin meant at bake time. */
+  semanticsVersion: number;
+  /** `GEOMETRY_FORMAT_VERSION` (`src/ldraw/geometryBaked.ts`) — the byte layout of
+   *  geometry.bin at bake time. */
+  geometryFormatVersion: number;
+  /** `GEOMETRY_SEMANTICS_VERSION` (`src/ldraw/geometryBaked.ts`) — what geometry.bin's
+   *  attributes meant at bake time. */
+  geometrySemanticsVersion: number;
+  /**
+   * sha256 over the packed fixture corpus at bake time — see `src/snap/fixtureDigest.ts`.
+   * `src/snap/manifestVersions.test.ts` recomputes it from the current code and fails if it
+   * disagrees with this committed value, so a semantics bump that never got re-baked fails
+   * the build instead of shipping.
+   */
+  fixtureDigest: string;
   /** Content hash per output file, so a stale or partial bake is detectable. */
   outputs: Readonly<Record<string, string>>;
 }

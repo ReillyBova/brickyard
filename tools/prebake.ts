@@ -21,8 +21,9 @@ import type { BakeResult } from './bakeWorker.ts'
 import { bakeChestGeometry } from './bakeGeometry.ts'
 
 import { boundsFromTriangles, partTriangles } from '../src/ldraw/bounds.ts'
+import { GEOMETRY_FORMAT_VERSION, GEOMETRY_SEMANTICS_VERSION } from '../src/ldraw/geometryBaked.ts'
 import { packGeometry } from '../src/ldraw/geometryBaked.ts'
-import type { CatalogEntry } from '../src/ldraw/types.ts'
+import type { BakedManifest, CatalogEntry } from '../src/ldraw/types.ts'
 import {
   DEFAULT_MIRROR_ROOT,
   createLibraryReader,
@@ -35,12 +36,14 @@ import {
 } from '../src/ldraw/mirror.ts'
 import {
   BAKED_FORMAT_VERSION,
+  SEMANTICS_VERSION,
   packConnections,
   packOccupancy,
   type BakedConnections,
   type BakedOccupancy,
 } from '../src/snap/baked.ts'
 import { buildOccupancy } from '../src/snap/collision.ts'
+import { computeFixtureDigest } from '../src/snap/fixtureDigest.ts'
 import { resolvePart, type ReadFile } from '../src/snap/resolvePart.ts'
 
 /**
@@ -101,6 +104,28 @@ function readPartHeader(text: string): { title: string; category: string } {
     category = first === undefined || first === '' ? 'Unsorted' : first
   }
   return { title, category }
+}
+
+// ---------------------------------------------------------------------------
+// Fixture digest — the semantics staleness guard's other half
+// ---------------------------------------------------------------------------
+
+/**
+ * Reads the committed fixture corpus (`src/snap/__fixtures__/`) straight off disk.
+ *
+ * `computeFixtureDigest` is deliberately reader-agnostic (`src/snap/fixtureDigest.ts`), and
+ * `src/snap/__fixtures__/reader.ts`'s own reader is built on `import.meta.glob`, a Vite
+ * transform this plain-Node script never runs through — so the bake needs its own reader
+ * over the same directory to record the same digest `manifest.json` will be checked against.
+ */
+const FIXTURES_ROOT = fileURLToPath(new URL('../src/snap/__fixtures__', import.meta.url))
+
+const readFixture: ReadFile = async (relativePath) => {
+  try {
+    return await fsp.readFile(path.join(FIXTURES_ROOT, relativePath), 'utf8')
+  } catch {
+    return null
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -435,11 +460,16 @@ async function bake(options: BakeOptions): Promise<void> {
    * revision is the archive's `ETag` digest — opaque, but it changes exactly when the contents do,
    * which is what staleness detection needs.
    */
-  const manifest = {
+  const fixtureDigest = await computeFixtureDigest(readFixture)
+  const manifest: BakedManifest = {
     libraryVersion: version ?? partsMeta?.etag ?? 'unknown',
     shadowVersion: shadowMeta?.etag?.replace(/^W\/|"/g, '') ?? 'unknown',
-    /** Shipped masks pin the voxel size and fill semantics; see `docs/PREBAKE.md`. */
-    occupancyFormat: BAKED_FORMAT_VERSION,
+    /** Shipped bytes pin their layout and the meaning of their fields; see `docs/PREBAKE.md`. */
+    bakedFormatVersion: BAKED_FORMAT_VERSION,
+    semanticsVersion: SEMANTICS_VERSION,
+    geometryFormatVersion: GEOMETRY_FORMAT_VERSION,
+    geometrySemanticsVersion: GEOMETRY_SEMANTICS_VERSION,
+    fixtureDigest,
     outputs: writer.outputs,
   }
   await writer.writeJson('manifest.json', manifest)
@@ -447,6 +477,11 @@ async function bake(options: BakeOptions): Promise<void> {
   console.log('')
   console.log(`library version   ${manifest.libraryVersion}`)
   console.log(`shadow revision   ${manifest.shadowVersion}`)
+  console.log(`baked format      ${manifest.bakedFormatVersion}`)
+  console.log(`semantics         ${manifest.semanticsVersion}`)
+  console.log(`geometry format   ${manifest.geometryFormatVersion}`)
+  console.log(`geometry semantics ${manifest.geometrySemanticsVersion}`)
+  console.log(`fixture digest    ${manifest.fixtureDigest}`)
   console.log(`colors           ${colors.size}`)
   console.log(`catalog entries   ${catalog.length}`)
   console.log(`connections       ${resolved.connections.length.toLocaleString()} parts`)
