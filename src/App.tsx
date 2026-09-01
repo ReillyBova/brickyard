@@ -15,6 +15,7 @@ import { RuntimeThumbnailRenderer } from './scene/thumbnail.ts';
 import { AppShell } from './ui/AppShell/AppShell';
 import { ColorPicker } from './ui/ColorPicker/ColorPicker';
 import { LDRAW_PALETTE } from './ui/ColorPicker/palette';
+import { ApertureIcon, EditorIcon, GraphModeIcon } from './ui/icons';
 import { PartsChest } from './ui/PartsChest/PartsChest';
 import { PART_CATALOG } from './ui/PartsChest/catalog';
 // GRAPH FEATURE MOUNT POINT — src/features/graph/ owns everything the entry control
@@ -112,9 +113,9 @@ function BuilderToolbar() {
           modeSwitch: {
             id: 'app-mode',
             options: [
-              { id: 'editor', label: 'Editor' },
-              { id: 'graph', label: 'Graph' },
-              { id: 'render', label: 'Render' },
+              { id: 'editor', label: 'Editor', icon: <EditorIcon /> },
+              { id: 'graph', label: 'Graph', icon: <GraphModeIcon /> },
+              { id: 'render', label: 'Render', icon: <ApertureIcon /> },
             ],
             value: mode,
             onChange: (id) => setMode(id as typeof mode),

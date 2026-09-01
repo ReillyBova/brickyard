@@ -4,10 +4,25 @@
  * here is a token; nothing here restyles a shared class.
  */
 
+/*
+ * `flex: 1` so this fills the space between the theme toggle and the narrow-width
+ * panel switch in `.by-shell__bar` — that's what makes `.by-toolbar__mode`'s own
+ * `margin-left: auto` below land the mode switch at the bar's right corner rather than
+ * snug against the icon groups. `min-width: 0` lets it shrink below its content's
+ * natural width instead of forcing the bar to overflow at narrow widths.
+ */
 .by-toolbar {
   display: flex;
   align-items: center;
   gap: var(--by-space-2);
+  flex: 1;
+  min-width: 0;
+}
+
+/* The app's one mode switch rides the far right of the bar, distinct from the
+   command groups — see the placement note in `Toolbar.tsx`. */
+.by-toolbar__mode {
+  margin-left: auto;
 }
 
 /* Positions the hover tooltip under its button without affecting toolbar layout. */

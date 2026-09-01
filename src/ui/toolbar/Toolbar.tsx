@@ -9,14 +9,18 @@ interface ToolbarProps {
 }
 
 /**
- * Renders `ToolbarItem[]` in order — a command group as a `.by-tool-group` pill, a mode
- * switch as `.by-seg`. This is the only place that lays out toolbar controls — see
- * `types.ts` for the contract a feature builds against to contribute one.
+ * Renders `ToolbarItem[]` — command groups as `.by-tool-group` pills, left-packed in
+ * order, and the one mode switch as `.by-seg` pinned to the bar's right corner
+ * (`.by-toolbar__mode`, Toolbar.css) — the user-directed placement, distinct from the
+ * command groups it sits apart from. This is the only place that lays out toolbar
+ * controls — see `types.ts` for the contract a feature builds against to contribute
+ * one.
  *
  * Editor-only actions still to land here, each a `ToolbarAction` added to the `items`
  * array assembled by the composition root (`src/App.tsx`) — nothing here needs to change
  * to receive them:
- *   - paintbrush (restyle) — opens a panel over the editor, docs/ROADMAP.md "Restyle"
+ *   - paintbrush (restyle) — an action *within* the editor mode, not a mode of its own;
+ *     opens a panel over the editor, docs/ROADMAP.md "Restyle"
  *
  * The app's one mode switch — editor / graph / render — is a `ToolbarModeSwitch`, not a
  * group of actions; see `types.ts` for why it doesn't fit `ToolbarAction`.
@@ -27,7 +31,11 @@ export function Toolbar({ items }: ToolbarProps) {
       <div className="by-toolbar">
         {items.map((item) => {
           if (item.kind === 'modeSwitch') {
-            return <ToolbarModeSwitchView modeSwitch={item.modeSwitch} key={item.modeSwitch.id} />;
+            return (
+              <div className="by-toolbar__mode" key={item.modeSwitch.id}>
+                <ToolbarModeSwitchView modeSwitch={item.modeSwitch} />
+              </div>
+            );
           }
           const { group } = item;
           return (
