@@ -1,9 +1,6 @@
 export { useDirty } from './useDirty';
 export type { DirtyState } from './useDirty';
 export { useBeforeUnload } from './useBeforeUnload';
-export { useAutosave } from './useAutosave';
-export { useAutosaveRestore } from './useAutosaveRestore';
-export type { AutosaveRestoreState } from './useAutosaveRestore';
 export { useFileActions } from './useFileActions.tsx';
 export type { FileStatus, UseFileActionsResult } from './useFileActions.tsx';
 export { UnsavedChangesDialog } from './UnsavedChangesDialog.tsx';

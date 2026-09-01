@@ -6,8 +6,6 @@ import type { BundledModelEntry } from './features/omr/types';
 import {
   StatusToast,
   UnsavedChangesDialog,
-  useAutosave,
-  useAutosaveRestore,
   useBeforeUnload,
   useDirty,
   useFileActions,
@@ -196,23 +194,16 @@ function SandboxEditor({
   // The path tracer shares this renderer's GL context, camera and controls rather than
   // opening a second one — see SceneRenderer.getPathtraceSnapshot().
   const rendererRef = useRef<SceneRenderer | null>(null);
-  const { seed: modelSeed, state: modelLoadState, clearSeed: clearModelSeed } = useModelLoad(pendingModel);
-  // Restores a `localStorage` autosave once on mount — but only when nothing else is
-  // already claiming the first seed (a bundled model opened from `/models` wins).
-  const {
-    seed: autosaveSeed,
-    state: autosaveState,
-    clearSeed: clearAutosaveSeed,
-  } = useAutosaveRestore(pendingModel === undefined);
-  const seed = modelSeed ?? autosaveSeed;
-  const loadState = modelLoadState ?? autosaveState;
+  // There is no autosave: leaving the editor and coming back gives an empty baseplate,
+  // and opening a model replaces the document outright. Persistence is explicit —
+  // Save, Open, Export, Import — so what is on screen is always what you last chose.
+  const { seed, state: loadState, clearSeed: clearModelSeed } = useModelLoad(pendingModel);
 
   // "Dirty" tracks commits since the last save/load, per docs/ROADMAP.md's "Save and
   // load" and the wordmark's unsaved-work guard — see src/features/persist/dirty.ts for
   // why this reads only EditorSession's public surface rather than editing that file.
   const dirty = useDirty(session);
   useBeforeUnload(dirty.dirty);
-  useAutosave(session);
   const fileActions = useFileActions(session, dirty.markSaved);
   const { navigate } = useRoute();
   const [confirmLeave, setConfirmLeave] = useState(false);
@@ -261,14 +252,10 @@ function SandboxEditor({
               onHeldConsumed={() => setSelectedPartId(undefined)}
               seed={seed}
               onSeedConsumed={() => {
-                // Either source counts as "freshly loaded, nothing unsaved yet" — the
-                // same reasoning `useFileActions` applies after Open/Import.
-                if (modelSeed) {
-                  clearModelSeed();
-                  onModelConsumed();
-                } else {
-                  clearAutosaveSeed();
-                }
+                // Freshly loaded counts as "nothing unsaved yet" — the same reasoning
+                // `useFileActions` applies after Open/Import.
+                clearModelSeed();
+                onModelConsumed();
                 dirty.markSaved();
               }}
               onSessionReady={setSession}
