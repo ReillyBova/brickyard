@@ -57,6 +57,7 @@ import { LDrawConditionalLineMaterial } from 'three/examples/jsm/materials/LDraw
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 
 import { boundsFromPositions } from '../src/ldraw/bounds.ts'
+import { applyKnownCorrections } from '../src/ldraw/corrections.ts'
 import type { PartGeometry } from '../src/ldraw/types.ts'
 import type { MirrorReader } from '../src/ldraw/mirror.ts'
 
@@ -107,8 +108,14 @@ async function collectPartFiles(partId: string, readLibrary: MirrorReader): Prom
     for (const candidate of referenceCandidates(ref)) {
       const cached = files.get(candidate)
       if (cached !== undefined) return { path: candidate, text: cached }
-      const text = await readLibrary(candidate)
-      if (text !== null) {
+      const raw = await readLibrary(candidate)
+      if (raw !== null) {
+        // See `src/ldraw/corrections.ts`: patches specific upstream files the mirror
+        // this reads from hasn't caught up on, e.g. `973p1u.dat`'s inward-wound back
+        // panel. Applied here, at the point every file this walk touches is first read,
+        // so both the bake and the runtime loader (`src/scene/partSource.ts`) end up
+        // with the same corrected geometry regardless of which tier serves a part.
+        const text = applyKnownCorrections(candidate, raw)
         files.set(candidate, text)
         return { path: candidate, text }
       }
