@@ -359,7 +359,11 @@ function SandboxEditor({
           />
         }
         chestPanel={
-          mode === 'render' ? (
+          mode === 'graph' ? (
+            // Nothing to place or color while reading the graph — the rail's space is
+            // better given back to the view.
+            null
+          ) : mode === 'render' ? (
             <EnvironmentPanel
               environment={environment}
               onEnvironmentChange={setEnvironment}
