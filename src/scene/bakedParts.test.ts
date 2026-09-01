@@ -62,6 +62,26 @@ describe('loadBakedParts', () => {
     expect(baked.geometry.size).toBe(0);
   });
 
+  it('degrades to empty maps when a served file is truncated', async () => {
+    // A half-written file is the realistic corruption: the header reads fine and the body
+    // stops early. If a reader throws on that, it rejects the promise every caller shares,
+    // so one truncated file fails every part in the session — including the parts that
+    // file never covered, which would otherwise have resolved from source.
+    const whole = new Uint8Array(bytesOf(packGeometry([GEOMETRY])));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) =>
+        url.endsWith('geometry.bin')
+          ? { ok: true, arrayBuffer: async () => bytesOf(whole.slice(0, 24)) }
+          : { ok: false, arrayBuffer: async () => new ArrayBuffer(0) },
+      ),
+    );
+    const baked = await loadBakedParts('/base/');
+    expect(baked.geometry.size).toBe(0);
+    expect(baked.connections.size).toBe(0);
+    expect(baked.occupancy.size).toBe(0);
+  });
+
   it('caches the result across calls until reset', async () => {
     mockFetch(new Set(['geometry']));
     const first = await loadBakedParts('/base/');

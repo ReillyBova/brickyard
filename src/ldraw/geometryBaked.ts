@@ -160,7 +160,7 @@ export function packGeometry(parts: readonly PartGeometry[]): Uint8Array {
 }
 
 /** Reads `geometry.bin`. Returns null when the bytes are not a readable version. */
-export function unpackGeometry(buffer: ArrayBuffer): Map<string, PartGeometry> | null {
+function readGeometry(buffer: ArrayBuffer): Map<string, PartGeometry> | null {
   if (buffer.byteLength < 16) return null;
   const view = new DataView(buffer);
   if (view.getUint32(0, true) !== GEOMETRY_MAGIC) return null;
@@ -204,4 +204,22 @@ export function unpackGeometry(buffer: ArrayBuffer): Map<string, PartGeometry> |
     byId.set(partId, { partId, positions, normals, indices, bounds: { min, max }, ...(colorCodes ? { colorCodes } : {}) });
   }
   return byId;
+}
+
+/**
+ * Reads `geometry.bin`, or null when the bytes are not a readable version.
+ *
+ * A header can be valid while the body is short — a truncated download, a proxy that cut
+ * the response, a deploy that copied half a file. The reader walks offsets the header
+ * declares, so short bytes surface as a `RangeError` from `DataView` rather than as a
+ * clean null. Callers treat null as "no bake, resolve from source"; an exception instead
+ * rejects the shared load promise and takes every part down with it, including the parts
+ * this file never covered. Turning the throw into null is what makes the fallback real.
+ */
+export function unpackGeometry(buffer: ArrayBuffer): Map<string, PartGeometry> | null {
+  try {
+    return readGeometry(buffer);
+  } catch {
+    return null;
+  }
 }

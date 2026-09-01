@@ -141,6 +141,14 @@ describe('connections.bin', () => {
     }
   });
 
+  it('returns null for a valid header over a short body', () => {
+    // Truncation, not corruption: the magic and version read fine and the offsets the
+    // header declares run off the end. A reader that throws here takes down every part
+    // in the session, not just the ones this file covered.
+    const packed = packConnections([{ partId: '3001', points: [] }]);
+    expect(unpackConnections(bytesOf(packed.slice(0, 20)))).toBeNull();
+  });
+
   it('rejects bytes it cannot read', () => {
     const packed = packConnections([]);
     expect(unpackConnections(bytesOf(packed.slice(0, 8)))).toBeNull();
@@ -173,6 +181,11 @@ describe('occupancy.bin', () => {
     const packed = packOccupancy(await occupancyAll());
     new DataView(packed.buffer).setUint16(6, OCC_CELL * 2, true);
     expect(unpackOccupancy(bytesOf(packed))).toBeNull();
+  });
+
+  it('returns null for a valid header over a short body', async () => {
+    const packed = packOccupancy(await occupancyAll());
+    expect(unpackOccupancy(bytesOf(packed.slice(0, 40)))).toBeNull();
   });
 
   it('does not pin the source buffer', async () => {

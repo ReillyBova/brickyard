@@ -45,6 +45,14 @@ const COLORED_QUAD: PartGeometry = {
 };
 
 describe('geometry.bin', () => {
+  it('returns null for a valid header over a short body', () => {
+    // The header reads clean and the declared offsets run past the end — a truncated
+    // download, or a deploy that copied half the file. Null means "no bake, resolve from
+    // source"; a throw would reject the load promise every part in the session shares.
+    const packed = packGeometry([TRIANGLE, COLORED_QUAD]);
+    expect(unpackGeometry(bytesOf(packed.slice(0, 24)))).toBeNull();
+  });
+
   it('round-trips positions, normals, indices and bounds', () => {
     const packed = packGeometry([TRIANGLE]);
     const read = unpackGeometry(bytesOf(packed));

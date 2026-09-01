@@ -281,7 +281,7 @@ export function packConnections(parts: readonly BakedConnections[]): Uint8Array 
 }
 
 /** Reads `connections.bin`. Returns null when the bytes are not a readable version. */
-export function unpackConnections(buffer: ArrayBuffer): Map<string, ConnectionPoint[]> | null {
+function readConnections(buffer: ArrayBuffer): Map<string, ConnectionPoint[]> | null {
   if (buffer.byteLength < 16) return null;
   const view = new DataView(buffer);
   if (view.getUint32(0, true) !== CONNECTIONS_MAGIC) return null;
@@ -402,7 +402,7 @@ export function packOccupancy(parts: readonly BakedOccupancy[]): Uint8Array {
  * Reads `occupancy.bin`. Returns null when the bytes are not a readable version, or were
  * baked at a different cell size than this build voxelises at.
  */
-export function unpackOccupancy(
+function readOccupancy(
   buffer: ArrayBuffer,
 ): Map<string, { bounds: Bounds; occupancy: OccupancyMask }> | null {
   if (buffer.byteLength < 16) return null;
@@ -441,4 +441,37 @@ export function unpackOccupancy(
     at += 40 + align4(maskBytes);
   }
   return byId;
+}
+
+// ---------------------------------------------------------------------------
+// Reading bytes that may not be whole
+// ---------------------------------------------------------------------------
+
+/**
+ * A header can be valid while the body is short — a truncated download, a proxy that cut
+ * the response, a deploy that copied half a file. Both readers walk offsets the header
+ * declares, so short bytes surface as a `RangeError` from `DataView` or a typed array
+ * constructor rather than as a clean null.
+ *
+ * Callers read null as "no bake, resolve from source", which is slower and correct. An
+ * exception is neither: it rejects the shared load promise in `src/scene/bakedParts.ts`,
+ * so one truncated file fails every part in the session rather than the parts that file
+ * covered. These wrappers are what make the documented fallback true.
+ */
+export function unpackConnections(buffer: ArrayBuffer): Map<string, ConnectionPoint[]> | null {
+  try {
+    return readConnections(buffer);
+  } catch {
+    return null;
+  }
+}
+
+export function unpackOccupancy(
+  buffer: ArrayBuffer,
+): Map<string, { bounds: Bounds; occupancy: OccupancyMask }> | null {
+  try {
+    return readOccupancy(buffer);
+  } catch {
+    return null;
+  }
 }
