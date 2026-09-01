@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { createPortal } from 'react-dom';
 
 import { FilterIcon } from '../icons';
+import { useTooltip } from '../tooltip';
 
 interface CategoryMenuProps {
   categories: readonly string[];
@@ -144,18 +145,29 @@ export function CategoryMenu({ categories, value, onChange, allLabel }: Category
 
   const current = value ?? allLabel;
   const options = [allLabel, ...categories];
+  const tip = useTooltip({
+    id: 'category-menu',
+    label: value === undefined ? 'Filter by category' : `Filter by category: ${current}`,
+  });
 
   return (
     <div className="by-menu">
       <button
         type="button"
-        ref={triggerRef}
+        ref={(node) => {
+          triggerRef.current = node;
+          tip.ref(node);
+        }}
         className={`by-icon-btn${value !== undefined ? ' is-active' : ''}`}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={`Filter by category: ${current}`}
-        title="Filter by category"
         onClick={() => (open ? close() : setOpen(true))}
+        onMouseEnter={tip.onMouseEnter}
+        onMouseLeave={tip.onMouseLeave}
+        onFocus={tip.onFocus}
+        onBlur={tip.onBlur}
+        aria-describedby={tip['aria-describedby']}
       >
         <FilterIcon />
       </button>

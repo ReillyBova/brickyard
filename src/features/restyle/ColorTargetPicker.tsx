@@ -8,11 +8,12 @@
  * can't clip it, `position: fixed` with JS-measured coordinates, flipped above the
  * trigger when it would overflow the bottom of the viewport.
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { ColorPicker } from '../../ui/ColorPicker/ColorPicker';
 import type { Swatch } from '../../ui/ColorPicker/types';
+import { useTooltip } from '../../ui/tooltip';
 import './Restyle.css';
 
 interface ColorTargetPickerProps {
@@ -33,6 +34,11 @@ export function ColorTargetPicker({ palette, value, onSelect, label }: ColorTarg
   const panelRef = useRef<HTMLDivElement | null>(null);
 
   const current = palette.find((c) => c.code === value) ?? palette[0];
+  const tooltipId = useId();
+  const tip = useTooltip({
+    id: tooltipId,
+    label: current === undefined ? label : `${label}: ${current.name} · ${current.code}`,
+  });
 
   const close = useCallback(() => {
     setOpen(false);
@@ -105,14 +111,21 @@ export function ColorTargetPicker({ palette, value, onSelect, label }: ColorTarg
     <div className="by-restyle-target">
       <button
         type="button"
-        ref={triggerRef}
+        ref={(node) => {
+          triggerRef.current = node;
+          tip.ref(node);
+        }}
         className="by-swatch by-restyle-target__trigger"
         style={{ backgroundColor: current.hex, borderColor: current.edgeHex }}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={`${label}: currently ${current.name}, LDraw color ${current.code}`}
-        title={`${label}: ${current.name} · ${current.code}`}
         onClick={() => (open ? close() : setOpen(true))}
+        onMouseEnter={tip.onMouseEnter}
+        onMouseLeave={tip.onMouseLeave}
+        onFocus={tip.onFocus}
+        onBlur={tip.onBlur}
+        aria-describedby={tip['aria-describedby']}
       />
       {open &&
         createPortal(
