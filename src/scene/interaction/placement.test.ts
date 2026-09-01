@@ -404,6 +404,7 @@ describe('the part catalog', () => {
     return {
       connections: new Map([[partId, points]]),
       occupancy: new Map([[partId, { bounds, occupancy: buildOccupancy(triangles, bounds, points) }]]),
+      geometry: new Map(),
     };
   }
 
@@ -436,7 +437,7 @@ describe('the part catalog', () => {
     // connections alone, or it would place with an empty mask and never collide.
     const baked = await bakedFor('3001');
     const catalog = createPartCatalog(
-      Promise.resolve({ connections: baked.connections, occupancy: new Map() }),
+      Promise.resolve({ connections: baked.connections, occupancy: new Map(), geometry: new Map() }),
     );
     const reads: string[] = [];
     const originalFetch = globalThis.fetch;

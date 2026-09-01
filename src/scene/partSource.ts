@@ -7,9 +7,10 @@
  * normal, no per-instance colour baked in — so it can be reused across an `InstancedMesh`
  * for every colour that part appears in via LDraw's colour-16 passthrough.
  *
- * Fetching is behind `PartGeometrySource` on purpose: today it hits the raw upstream
- * mirror directly because the baked catalog pipeline isn't wired up. Swapping in the
- * baked catalog later means implementing this interface once, not touching callers.
+ * Fetching is behind `PartGeometrySource` on purpose: `BakedPartSource` answers chest
+ * parts from the bundled bake with no request at all, and falls through to
+ * `LDrawPartSource` — the upstream mirror, fetched live — for everything else. Callers
+ * hold only the interface, so which tier actually served a part is invisible to them.
  */
 
 import * as THREE from 'three';
@@ -19,6 +20,8 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 
 import type { Bounds } from '../types';
 import { boundsFromPositions } from '../ldraw/bounds';
+import type { PartGeometry } from '../ldraw/types';
+import { loadBakedParts, type BakedParts } from './bakedParts.ts';
 import { ConcurrencyPool } from './concurrencyPool.ts';
 import { withRetry } from './retry.ts';
 
@@ -164,5 +167,46 @@ export class LDrawPartSource implements PartGeometrySource {
     const group = await this.loader.loadAsync(`${this.baseUrl}parts/${partId}.dat`);
     const geometry = mergeMeshGeometry(group);
     return { partId, geometry, bounds: boundsOf(geometry) };
+  }
+}
+
+/**
+ * Rehydrates one baked `PartGeometry` — plain typed arrays, transferable across a worker
+ * boundary — into the `THREE.BufferGeometry` `LoadedPart` carries. No copy of the
+ * underlying buffers: the attributes view the same `Float32Array`/`Uint32Array` the bake
+ * reader produced.
+ */
+function toLoadedPart(part: PartGeometry): LoadedPart {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(part.positions, 3));
+  geometry.setAttribute('normal', new THREE.BufferAttribute(part.normals, 3));
+  geometry.setIndex(new THREE.BufferAttribute(part.indices, 1));
+  return { partId: part.partId, geometry, bounds: part.bounds };
+}
+
+/**
+ * Prefers bundled chest geometry over `fallback`. The chest (`DEFAULT_CHEST` in
+ * `tools/prebake.ts`, see docs/PREBAKE.md) is a couple dozen popular parts baked into
+ * `geometry.bin` and shipped to every visitor; a chest part resolves from an
+ * already-downloaded typed array with no network request and no subfile tree walk. Any
+ * part outside the chest — the overwhelming majority of the library — falls straight
+ * through to `fallback` unchanged, exactly as if this wrapper weren't there.
+ *
+ * `loadBakedParts` itself never rejects and never blocks on a missing or unreadable
+ * bake — see its own doc — so this adds no new failure mode over `fallback` alone.
+ */
+export class BakedPartSource implements PartGeometrySource {
+  private readonly fallback: PartGeometrySource;
+  private readonly baked: Promise<BakedParts>;
+
+  constructor(fallback: PartGeometrySource, baked: Promise<BakedParts> = loadBakedParts()) {
+    this.fallback = fallback;
+    this.baked = baked;
+  }
+
+  async load(partId: string): Promise<LoadedPart> {
+    const { geometry } = await this.baked;
+    const baked = geometry.get(partId);
+    return baked !== undefined ? toLoadedPart(baked) : this.fallback.load(partId);
   }
 }
