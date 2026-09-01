@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { importModel, RESOLVE_SHARE } from './features/omr/importModel';
 import { createNetworkReader } from './features/omr/network';
@@ -18,11 +18,15 @@ import { LDRAW_PALETTE } from './ui/ColorPicker/palette';
 import { ApertureIcon, EditorIcon, GraphModeIcon } from './ui/icons';
 import { PartsChest } from './ui/PartsChest/PartsChest';
 import { PART_CATALOG } from './ui/PartsChest/catalog';
-// GRAPH FEATURE MOUNT POINT — src/features/graph/ owns everything the entry control
-// opens. A toolbar with a reserved slot for this button is being built in parallel;
-// this floating control is the placeholder until the two are wired together at merge.
-import { GraphEntry } from './features/graph';
+import { GraphModeMount } from './features/graph';
+import { PathtraceToggle } from './features/pathtrace/PathtraceToggle';
+import { RestyleContainer } from './features/restyle';
+import type { SceneRenderer } from './scene/SceneRenderer.ts';
+import { PaintbrushIcon } from './ui/icons';
 import { Toolbar, useGrouping, useUndoRedo } from './ui/toolbar';
+
+/** The app's three modes. Editor is where everything is built; the other two are views over it. */
+export type AppMode = 'editor' | 'graph' | 'render';
 
 /** LDraw 4 — classic brick red — so the chest always has a real active color to preview. */
 const DEFAULT_COLOR_CODE = 4;
@@ -86,7 +90,17 @@ function useModelLoad(
  * `onSessionReady`). `useUndoRedo`/`useGrouping` both accept `null` and degrade to
  * disabled actions for exactly that first frame.
  */
-function BuilderToolbar() {
+function BuilderToolbar({
+  mode,
+  onModeChange,
+  onToggleRestyle,
+  restyleOpen,
+}: {
+  mode: AppMode;
+  onModeChange: (mode: AppMode) => void;
+  onToggleRestyle: () => void;
+  restyleOpen: boolean;
+}) {
   const session = useEditorSessionOrNull();
   const [, forceRender] = useState(0);
   useEffect(() => {
@@ -97,17 +111,23 @@ function BuilderToolbar() {
   const [undoAction, redoAction] = useUndoRedo(session);
   const [groupAction, ungroupAction] = useGrouping(session);
 
-  // The app's one persistent mode — editor, graph, or render — per the architecture
-  // note this toolbar's contract was built against. Only "editor" actually renders
-  // anything today; graph and render are the other two slices' routes, not this one's,
-  // so switching here doesn't yet change the view.
-  const [mode, setMode] = useState<'editor' | 'graph' | 'render'>('editor');
+  // Restyle is an action *within* the editor, not a mode — it recolors whatever is
+  // loaded, so it only makes sense while the editor owns the view.
+  const restyleAction = {
+    id: 'restyle',
+    label: 'Restyle',
+    icon: <PaintbrushIcon />,
+    active: restyleOpen,
+    disabled: session === null || mode !== 'editor',
+    onClick: onToggleRestyle,
+  };
 
   return (
     <Toolbar
       items={[
         { kind: 'group', group: { id: 'history', actions: [undoAction, redoAction] } },
         { kind: 'group', group: { id: 'grouping', actions: [groupAction, ungroupAction] } },
+        { kind: 'group', group: { id: 'style', actions: [restyleAction] } },
         {
           kind: 'modeSwitch',
           modeSwitch: {
@@ -118,7 +138,7 @@ function BuilderToolbar() {
               { id: 'render', label: 'Render', icon: <ApertureIcon /> },
             ],
             value: mode,
-            onChange: (id) => setMode(id as typeof mode),
+            onChange: (id) => onModeChange(id as AppMode),
           },
         },
       ]}
@@ -146,6 +166,11 @@ function SandboxEditor({
   const [selectedPartId, setSelectedPartId] = useState<string | undefined>(undefined);
   const [selectedColorCode, setSelectedColorCode] = useState<number>(DEFAULT_COLOR_CODE);
   const [session, setSession] = useState<EditorSession | null>(null);
+  const [mode, setMode] = useState<AppMode>('editor');
+  const [restyleOpen, setRestyleOpen] = useState(false);
+  // The path tracer shares this renderer's GL context, camera and controls rather than
+  // opening a second one — see SceneRenderer.getPathtraceSnapshot().
+  const rendererRef = useRef<SceneRenderer | null>(null);
   const { seed, state: loadState, clearSeed } = useModelLoad(pendingModel);
 
   // One offscreen renderer for the whole session — see src/scene/thumbnail.ts. Built once
@@ -162,7 +187,16 @@ function SandboxEditor({
       <AppShell
         viewport={
           <>
+            {/* The canvas is never unmounted when the mode changes: BuilderCanvas reports
+                null through onSessionReady on unmount, which would destroy the
+                EditorSession the other two modes read from. Graph hides it; render
+                borrows its GL context. */}
+            <div style={{ visibility: mode === 'graph' ? 'hidden' : 'visible', position: 'absolute', inset: 0 }}>
             <BuilderCanvas
+              suspended={mode !== 'editor'}
+              onRendererReady={(renderer) => {
+                rendererRef.current = renderer;
+              }}
               heldPartId={selectedPartId}
               heldColorCode={selectedColorCode}
               onHeldConsumed={() => setSelectedPartId(undefined)}
@@ -173,6 +207,17 @@ function SandboxEditor({
               }}
               onSessionReady={setSession}
             />
+            </div>
+            {mode === 'graph' && <GraphModeMount />}
+            <PathtraceToggle
+              chromeless
+              rendererRef={rendererRef}
+              active={mode === 'render'}
+              onActiveChange={(active) => setMode(active ? 'render' : 'editor')}
+            />
+            {restyleOpen && session !== null && (
+              <RestyleContainer session={session} onClose={() => setRestyleOpen(false)} />
+            )}
             {loadState && (
               <div className="by-model-load-overlay">
                 {'error' in loadState ? (
@@ -198,7 +243,17 @@ function SandboxEditor({
             )}
           </>
         }
-        toolbar={<BuilderToolbar />}
+        toolbar={
+          <BuilderToolbar
+            mode={mode}
+            onModeChange={(next) => {
+              setMode(next);
+              if (next !== 'editor') setRestyleOpen(false);
+            }}
+            onToggleRestyle={() => setRestyleOpen((open) => !open)}
+            restyleOpen={restyleOpen}
+          />
+        }
         chestPanel={
           <PartsChest
             parts={PART_CATALOG}
@@ -235,9 +290,6 @@ function App() {
         sandbox={<SandboxEditor pendingModel={pendingModel} onModelConsumed={() => setPendingModel(undefined)} />}
         onOpenModel={setPendingModel}
       />
-      {/* GRAPH FEATURE MOUNT POINT — see src/features/graph/. Floats over every route
-          until the toolbar's reserved slot is wired up. */}
-      <GraphEntry />
     </RouteProvider>
   );
 }

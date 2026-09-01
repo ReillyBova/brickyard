@@ -88,8 +88,8 @@ export class GraphExplodeScene {
   private readonly sceneCamera: SceneCamera;
 
   private readonly partSource: LDrawPartSource;
-  /** Resolved from the bundled LDraw palette — see `scene/colorLibrary.ts`. */
-  private readonly materials = new MaterialCache();
+  private materials: MaterialCache | null = null;
+  private readonly materialsReady: Promise<MaterialCache>;
   private readonly geometryCache = new Map<string, Promise<THREE.BufferGeometry>>();
   private stopThemeWatch: (() => void) | null = null;
 
@@ -122,6 +122,7 @@ export class GraphExplodeScene {
   private readonly scratchFrom = new THREE.Vector3();
   private readonly scratchTo = new THREE.Vector3();
   private readonly scratchDir = new THREE.Vector3();
+  private readonly scratchPoint = new THREE.Vector3();
   private readonly scratchQuat = new THREE.Quaternion();
   private readonly upVector = new THREE.Vector3(0, 1, 0);
   private readonly unitScale = new THREE.Vector3(1, 1, 1);
@@ -156,6 +157,10 @@ export class GraphExplodeScene {
 
     const baseUrl = options.partsBaseUrl ?? DEFAULT_PARTS_BASE_URL;
     this.partSource = new LDrawPartSource(baseUrl);
+    // The palette is bundled, so materials resolve synchronously — the promise is
+    // kept only because callers already await it.
+    this.materials = new MaterialCache();
+    this.materialsReady = Promise.resolve(this.materials);
   }
 
   // ---- geometry -------------------------------------------------------------------
@@ -206,6 +211,7 @@ export class GraphExplodeScene {
   async setDocument(doc: SceneDocument): Promise<SetDocumentResult> {
     this.teardownDocument();
 
+    const materials = await this.materialsReady;
     const uniquePartIds = [...new Set([...doc.bricks.values()].map((b) => b.partId))];
     const geometries = new Map<string, THREE.BufferGeometry>();
     const skippedPartIds: string[] = [];
@@ -227,7 +233,7 @@ export class GraphExplodeScene {
       const geometry = geometries.get(instance.partId);
       if (geometry === undefined) continue;
 
-      const material = this.materials.get(instance.colorCode);
+      const material = materials.get(instance.colorCode);
       const batch = this.batches.getOrCreate(instance.partId, instance.colorCode, geometry, material);
       const baseMatrix = new THREE.Matrix4().fromArray(instance.transform as unknown as number[]);
       batch.add(id, baseMatrix);
@@ -329,7 +335,11 @@ export class GraphExplodeScene {
       positions[o + 5] = to[2];
     }
     attr.needsUpdate = true;
-    line.geometry.computeBoundingSphere();
+    // No computeBoundingSphere: both lines set `frustumCulled = false` in buildEdges,
+    // its only consumer, so recomputing it every animation frame (an O(edges) scan
+    // it would otherwise cost, on top of the write loop above) buys nothing — worth
+    // saying explicitly, since a model ten times the size of anything tested here
+    // would make that scan the expensive line in this method.
   }
 
   private updateEdgeGeometry(): void {
@@ -352,8 +362,8 @@ export class GraphExplodeScene {
         } else {
           this.scratchDir.multiplyScalar(1 / len);
           this.scratchQuat.setFromUnitVectors(this.upVector, this.scratchDir);
-          const point = this.scratchFrom.clone().addScaledVector(this.scratchDir, len * ARROW_POSITION_T);
-          this.scratchMatrix.compose(point, this.scratchQuat, this.unitScale);
+          this.scratchPoint.copy(this.scratchFrom).addScaledVector(this.scratchDir, len * ARROW_POSITION_T);
+          this.scratchMatrix.compose(this.scratchPoint, this.scratchQuat, this.unitScale);
         }
         this.arrowMesh.setMatrixAt(i, this.scratchMatrix);
       }
@@ -385,7 +395,13 @@ export class GraphExplodeScene {
     const staggerStep = this.maxHop > 0 ? Math.min(staggerStepMs, totalSpreadCapMs / this.maxHop) : 0;
 
     for (const b of this.bricks.values()) {
-      b.animFromPos = b.currentPos;
+      // A copy, not an alias: `tick` mutates `currentPos` in place each frame
+      // (see below), so capturing it by reference here would let this brick's
+      // "from" silently drift as it re-animates — a snapshot is the whole point
+      // of an interrupt.
+      b.animFromPos[0] = b.currentPos[0];
+      b.animFromPos[1] = b.currentPos[1];
+      b.animFromPos[2] = b.currentPos[2];
       b.animToPos = newTarget === 1 ? [...b.layout.target] : [...b.layout.origin];
       b.animStart = now;
       b.animDelay = newTarget === 1 ? b.layout.hop * staggerStep : (this.maxHop - b.layout.hop) * staggerStep;
@@ -406,12 +422,16 @@ export class GraphExplodeScene {
       if (t < 1) stillAnimating = true;
 
       const eased = t <= 0 ? 0 : t >= 1 ? 1 : this.currentEase(t);
-      const pos: [number, number, number] = [
-        b.animFromPos[0] + (b.animToPos[0] - b.animFromPos[0]) * eased,
-        b.animFromPos[1] + (b.animToPos[1] - b.animFromPos[1]) * eased,
-        b.animFromPos[2] + (b.animToPos[2] - b.animFromPos[2]) * eased,
-      ];
-      b.currentPos = pos;
+      // Mutated in place, not reassigned: a 10x-scale model (thousands of bricks, a
+      // multi-second staggered bloom) would otherwise allocate a fresh array per
+      // brick per frame for the whole animation. `currentPos`'s identity must stay
+      // stable across frames for exactly that reason — `toggleExplode` above copies
+      // its values out before an interrupt, rather than aliasing it, so this mutation
+      // never corrupts a snapshot someone else is holding.
+      const pos = b.currentPos;
+      pos[0] = b.animFromPos[0] + (b.animToPos[0] - b.animFromPos[0]) * eased;
+      pos[1] = b.animFromPos[1] + (b.animToPos[1] - b.animFromPos[1]) * eased;
+      pos[2] = b.animFromPos[2] + (b.animToPos[2] - b.animFromPos[2]) * eased;
 
       this.scratchMatrix.copy(b.baseMatrix);
       this.scratchMatrix.elements[12] = pos[0];
@@ -495,7 +515,7 @@ export class GraphExplodeScene {
     this.stop();
     this.stopThemeWatch?.();
     this.teardownDocument();
-    this.materials.dispose();
+    this.materials?.dispose();
     this.sceneCamera.dispose();
     this.renderer.dispose();
   }

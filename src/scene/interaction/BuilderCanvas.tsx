@@ -74,6 +74,14 @@ export interface DocumentSeed {
 }
 
 interface BuilderCanvasProps {
+  /**
+   * Hands out the live SceneRenderer so `src/features/pathtrace/` can share this
+   * WebGLRenderer, camera and controls rather than opening a second GL context.
+   * Called with null on unmount.
+   */
+  onRendererReady?: (renderer: SceneRenderer | null) => void;
+  /** True while another mode owns the canvas — pauses this raster loop. */
+  suspended?: boolean;
   /** The part id on the cursor, from the parts chest. `undefined` is selection mode. */
   heldPartId?: string;
   /** The active palette color — applied to a newly held piece, and to one already held. */
@@ -102,6 +110,8 @@ interface BuilderCanvasProps {
 }
 
 export function BuilderCanvas({
+  onRendererReady,
+  suspended = false,
   heldPartId,
   heldColorCode,
   onHeldConsumed,
@@ -122,6 +132,12 @@ export function BuilderCanvas({
   // Reached into from the props-driven effects below, which run outside the mount
   // effect's own closure.
   const rendererRef = useRef<SceneRenderer | null>(null);
+  // Callback ref, so passing an inline onRendererReady never re-runs the mount effect
+  // and tears down the GL context.
+  const onRendererReadyRef = useRef(onRendererReady);
+  onRendererReadyRef.current = onRendererReady;
+  const suspendedRef = useRef(suspended);
+  suspendedRef.current = suspended;
   const placementRef = useRef<PlacementController | null>(null);
   const sessionRef = useRef<EditorSession | null>(null);
   const catalogRef = useRef<ReturnType<typeof createPartCatalog> | null>(null);
@@ -175,6 +191,7 @@ export function BuilderCanvas({
     const placement = new PlacementController(renderer);
 
     rendererRef.current = renderer;
+    onRendererReadyRef.current?.(renderer);
     placementRef.current = placement;
     sessionRef.current = session;
     catalogRef.current = catalog;
@@ -209,6 +226,7 @@ export function BuilderCanvas({
     const unsubscribe = session.subscribe(syncSelection);
 
     renderer.start();
+    if (suspendedRef.current) renderer.stop();
     renderer.frameAll();
 
     let dragging = false;
@@ -482,6 +500,7 @@ export function BuilderCanvas({
       sound.dispose();
       renderer.dispose();
       rendererRef.current = null;
+      onRendererReadyRef.current?.(null);
       placementRef.current = null;
       sessionRef.current = null;
       catalogRef.current = null;
@@ -623,3 +642,4 @@ export function BuilderCanvas({
     </>
   );
 }
+
