@@ -11,6 +11,10 @@ import type { SceneRenderer } from '../../scene/SceneRenderer.ts';
 
 import { PathTracerController } from './PathTracerController.ts';
 import type { PathtraceStats } from './PathTracerController.ts';
+import { DEFAULT_ENVIRONMENT } from './environments.ts';
+import type { PathtraceEnvironment } from './environments.ts';
+import { DEFAULT_LIGHTING } from './lighting.ts';
+import type { LightingPreset } from './lighting.ts';
 import './pathtrace.css';
 
 /** Lucide "aperture", inlined per docs/DESIGN.md (stroke-width 2.75, `data-lucide` for review). */
@@ -47,11 +51,37 @@ interface PathtraceToggleProps {
   rendererRef: RefObject<SceneRenderer | null>;
   active: boolean;
   onActiveChange: (active: boolean) => void;
+  /** The chosen environment and lighting preset — see `App.tsx`'s render-mode panel, which
+   *  replaces the parts chest. Changing either rebuilds the traced scene (a full, but rare
+   *  and user-initiated, BVH rebake — see `PathTracerController.build`). */
+  environment?: PathtraceEnvironment;
+  lighting?: LightingPreset;
+  /**
+   * Reports the live stats object on every frame (and `null` when inactive), so a caller
+   * can surface it somewhere other than this component's own floating readout — see
+   * `App.tsx`, which feeds it into `BuilderCanvas`'s bottom status bar via `statusExtra`.
+   */
+  onStats?: (stats: PathtraceStats | null) => void;
 }
 
-export function PathtraceToggle({ rendererRef, active, onActiveChange, chromeless = false }: PathtraceToggleProps) {
+export function PathtraceToggle({
+  rendererRef,
+  active,
+  onActiveChange,
+  chromeless = false,
+  environment = DEFAULT_ENVIRONMENT,
+  lighting = DEFAULT_LIGHTING,
+  onStats,
+}: PathtraceToggleProps) {
   const controllerRef = useRef<PathTracerController | null>(null);
   const [stats, setStats] = useState<PathtraceStats | null>(null);
+
+  useEffect(() => {
+    onStats?.(stats);
+    // onStats is a fresh inline callback from the caller most renders; reporting on its
+    // identity change too would be harmless but noisy, so only `stats` drives this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stats]);
 
   useEffect(() => {
     if (!active) {
@@ -74,10 +104,19 @@ export function PathtraceToggle({ rendererRef, active, onActiveChange, chromeles
       controls: snapshot.controls,
     });
     controllerRef.current = controller;
-    setStats({ status: 'building', samples: 0, renderScale: 0, spp: 0, frameMs: 0, triangleCount: 0 });
+    setStats({
+      status: 'building',
+      samples: 0,
+      renderScale: 0,
+      spp: 0,
+      frameMs: 0,
+      fps: 0,
+      triangleCount: 0,
+      raysCast: 0,
+    });
 
     controller
-      .build(snapshot)
+      .build(snapshot, { environment, lighting })
       .then(() => {
         if (cancelled) return;
         controller.start(setStats);
@@ -96,7 +135,7 @@ export function PathtraceToggle({ rendererRef, active, onActiveChange, chromeles
       sceneRenderer.start();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active]);
+  }, [active, environment, lighting]);
 
   const label = active ? 'Exit path-traced render' : 'Path-traced render';
 
@@ -116,11 +155,13 @@ export function PathtraceToggle({ rendererRef, active, onActiveChange, chromeles
         </button>
       </div>
       )}
-      {active && stats !== null && (
+      {/* The numeric readout (fps, rays cast, resolution, samples, triangles) lives in
+          BuilderCanvas's bottom status bar via `onStats` — see App.tsx. This transient
+          readout is only for the one state that bar has no room to explain: build in
+          progress, before there's a frame to show. */}
+      {active && stats?.status === 'building' && (
         <div className="by-pathtrace-stats" role="status">
-          {stats.status === 'building'
-            ? 'Building scene…'
-            : `${stats.triangleCount.toLocaleString()} tris · ${Math.round(stats.renderScale * 100)}% res · ${stats.spp} spp · ${stats.frameMs.toFixed(1)} ms`}
+          Building scene…
         </div>
       )}
     </div>

@@ -19,7 +19,13 @@ import { ApertureIcon, EditorIcon, GraphModeIcon } from './ui/icons';
 import { PartsChest } from './ui/PartsChest/PartsChest';
 import { PART_CATALOG } from './ui/PartsChest/catalog';
 import { GraphModeMount } from './features/graph';
+import { EnvironmentPanel } from './features/pathtrace/EnvironmentPanel';
+import { DEFAULT_ENVIRONMENT } from './features/pathtrace/environments';
+import type { PathtraceEnvironment } from './features/pathtrace/environments';
+import { DEFAULT_LIGHTING } from './features/pathtrace/lighting';
+import type { LightingPreset } from './features/pathtrace/lighting';
 import { PathtraceToggle } from './features/pathtrace/PathtraceToggle';
+import type { PathtraceStats } from './features/pathtrace/PathTracerController';
 import { RestyleContainer } from './features/restyle';
 import type { SceneRenderer } from './scene/SceneRenderer.ts';
 import { PaintbrushIcon } from './ui/icons';
@@ -168,6 +174,9 @@ function SandboxEditor({
   const [session, setSession] = useState<EditorSession | null>(null);
   const [mode, setMode] = useState<AppMode>('editor');
   const [restyleOpen, setRestyleOpen] = useState(false);
+  const [environment, setEnvironment] = useState<PathtraceEnvironment>(DEFAULT_ENVIRONMENT);
+  const [lighting, setLighting] = useState<LightingPreset>(DEFAULT_LIGHTING);
+  const [pathtraceStats, setPathtraceStats] = useState<PathtraceStats | null>(null);
   // The path tracer shares this renderer's GL context, camera and controls rather than
   // opening a second one — see SceneRenderer.getPathtraceSnapshot().
   const rendererRef = useRef<SceneRenderer | null>(null);
@@ -181,6 +190,17 @@ function SandboxEditor({
     () => LDRAW_PALETTE.find((color) => color.code === selectedColorCode) ?? LDRAW_PALETTE[0],
     [selectedColorCode],
   );
+
+  // fps / rays cast / resolution, appended to the bottom status bar in render mode —
+  // BuilderCanvas owns the bar's layout, this only supplies its content (see
+  // `statusExtra` on BuilderCanvas and `onStats` on PathtraceToggle).
+  const pathtraceStatusExtra =
+    mode === 'render' && pathtraceStats?.status === 'rendering' ? (
+      <span className="by-mono">
+        {Math.round(pathtraceStats.fps)} fps · {pathtraceStats.raysCast.toLocaleString()} rays ·{' '}
+        {Math.round(pathtraceStats.renderScale * 100)}% res
+      </span>
+    ) : null;
 
   return (
     <EditorSessionProvider session={session}>
@@ -206,6 +226,7 @@ function SandboxEditor({
                 onModelConsumed();
               }}
               onSessionReady={setSession}
+              statusExtra={pathtraceStatusExtra}
             />
             </div>
             {mode === 'graph' && <GraphModeMount />}
@@ -214,6 +235,9 @@ function SandboxEditor({
               rendererRef={rendererRef}
               active={mode === 'render'}
               onActiveChange={(active) => setMode(active ? 'render' : 'editor')}
+              environment={environment}
+              lighting={lighting}
+              onStats={setPathtraceStats}
             />
             {restyleOpen && session !== null && (
               <RestyleContainer session={session} onClose={() => setRestyleOpen(false)} />
@@ -255,13 +279,22 @@ function SandboxEditor({
           />
         }
         chestPanel={
-          <PartsChest
-            parts={PART_CATALOG}
-            selectedId={selectedPartId}
-            onSelect={setSelectedPartId}
-            activeColorHex={activeColor.hex}
-            thumbnailSource={thumbnailSource}
-          />
+          mode === 'render' ? (
+            <EnvironmentPanel
+              environment={environment}
+              onEnvironmentChange={setEnvironment}
+              lighting={lighting}
+              onLightingChange={setLighting}
+            />
+          ) : (
+            <PartsChest
+              parts={PART_CATALOG}
+              selectedId={selectedPartId}
+              onSelect={setSelectedPartId}
+              activeColorHex={activeColor.hex}
+              thumbnailSource={thumbnailSource}
+            />
+          )
         }
         colorPanel={
           <ColorPicker colors={LDRAW_PALETTE} selectedCode={selectedColorCode} onSelect={setSelectedColorCode} />

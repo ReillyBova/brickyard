@@ -104,18 +104,22 @@ uniform float uHistScale;
 
 uniform vec3 uSunDirection;
 uniform vec3 uSunColor;
-uniform vec3 uAmbientColor;
+uniform float uSunRadius;
+uniform vec3 uSkyZenith;
+uniform vec3 uSkyHorizon;
 
 varying vec2 vUv;
 
 // ndcToCameraRay comes from three-mesh-bvh's common_functions chunk, concatenated in above
 // via shaderIntersectFunction — do not redefine it here.
 
-// A small cone around the sun direction, jittered per sample for soft shadows.
+// A small cone around the sun direction, jittered per sample for soft shadows. uSunRadius
+// is the cone's angular size — the key light's "area-ness": wide for a softbox-like studio
+// key, narrow for a hard, clinical point-light-like rim.
 vec3 jitteredSunDirection() {
   float a1 = rand();
   float a2 = rand();
-  float radius = 0.045 * sqrt( a1 );
+  float radius = uSunRadius * sqrt( a1 );
   float theta = 6.28318530718 * a2;
   vec3 up = abs( uSunDirection.y ) < 0.99 ? vec3( 0.0, 1.0, 0.0 ) : vec3( 1.0, 0.0, 0.0 );
   vec3 tangent = normalize( cross( up, uSunDirection ) );
@@ -157,7 +161,11 @@ void sampleOnePath( vec3 origin, vec3 direction, out vec3 radiance, out vec3 pri
     bool hit = traceScene( origin, direction, faceIndices, barycoord, dist );
 
     if ( ! hit ) {
-      radiance += throughput * uAmbientColor;
+      // Horizon-to-zenith sky gradient rather than a flat ambient colour — the grounding
+      // floor (baked into the same BVH, see sceneBake.ts) is what actually reads as an
+      // "environment"; this gradient just keeps a miss from looking like a flat void.
+      vec3 sky = mix( uSkyHorizon, uSkyZenith, clamp( direction.y * 0.5 + 0.5, 0.0, 1.0 ) );
+      radiance += throughput * sky;
       break;
     }
 

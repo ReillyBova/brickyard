@@ -107,6 +107,13 @@ interface BuilderCanvasProps {
    * restyle, graph view) needs this same instance; without it, each invents its own.
    */
   onSessionReady?: (session: EditorSession | null) => void;
+  /**
+   * Extra content appended to the status bar's row of spans, after the built-in brick
+   * count / selection / mode hint. Render mode uses this to surface path-tracer stats
+   * (fps, rays cast, resolution — see `PathtraceToggle`'s `onStats`) without this
+   * component needing to know anything about the path tracer.
+   */
+  statusExtra?: React.ReactNode;
 }
 
 export function BuilderCanvas({
@@ -118,6 +125,7 @@ export function BuilderCanvas({
   seed,
   onSeedConsumed,
   onSessionReady,
+  statusExtra,
 }: BuilderCanvasProps): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [status, setStatus] = useState('');
@@ -638,6 +646,7 @@ export function BuilderCanvas({
                 : 'Ready'}
         </span>
         <span>{status}</span>
+        {statusExtra}
       </div>
     </>
   );
