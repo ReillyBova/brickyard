@@ -108,6 +108,16 @@ export function Undo2Icon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+/** Toolbar: undo. */
+export function UndoIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon data-lucide="undo-2" {...props}>
+      <path d="M9 14 4 9l5-5" />
+      <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5 5.5 5.5 0 0 1-5.5 5.5H11" />
+    </Icon>
+  );
+}
+
 /** Redoes a restyle after an undo. */
 export function Redo2Icon(props: SVGProps<SVGSVGElement>) {
   return (
@@ -118,12 +128,41 @@ export function Redo2Icon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+/** Toolbar: redo. */
+export function RedoIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon data-lucide="redo-2" {...props}>
+      <path d="m15 14 5-5-5-5" />
+      <path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5 5.5 5.5 0 0 0 9.5 20H13" />
+    </Icon>
+  );
+}
+
 /** Closes a popover or panel. */
 export function XIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <Icon data-lucide="x" {...props}>
       <path d="M18 6 6 18" />
       <path d="m6 6 12 12" />
+    </Icon>
+  );
+}
+
+/**
+ * Toolbar: group and ungroup both. `design-language.html`'s reference render reuses
+ * this same glyph for its "Ungroup" example rather than introducing a second one —
+ * followed here for consistency; the two actions are told apart by label and state,
+ * not by icon.
+ */
+export function GroupIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon data-lucide="group" {...props}>
+      <path d="M3 7V5a2 2 0 0 1 2-2h2" />
+      <path d="M17 3h2a2 2 0 0 1 2 2v2" />
+      <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
+      <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
+      <rect width="7" height="5" x="7" y="7" rx="1" />
+      <rect width="7" height="5" x="10" y="12" rx="1" />
     </Icon>
   );
 }

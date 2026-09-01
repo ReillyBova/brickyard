@@ -1,0 +1,36 @@
+/*
+ * Layout glue for the toolbar only — the pressable surfaces themselves are
+ * `.by-tool-group` / `.by-icon-btn` / `.by-tooltip` from components.css. Every value
+ * here is a token; nothing here restyles a shared class.
+ */
+
+.by-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--by-space-2);
+}
+
+/* Positions the hover tooltip under its button without affecting toolbar layout. */
+.by-toolbar__item {
+  position: relative;
+  display: inline-flex;
+}
+
+.by-toolbar__tip {
+  position: absolute;
+  top: calc(100% + var(--by-space-2));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--by-z-popover);
+  pointer-events: none;
+  animation: by-toolbar-tip-in var(--by-dur-fast) var(--by-ease-out);
+}
+
+@keyframes by-toolbar-tip-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .by-toolbar__tip { animation: none; }
+}
