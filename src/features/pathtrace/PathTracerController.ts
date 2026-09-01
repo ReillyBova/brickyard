@@ -1,23 +1,29 @@
 /**
- * Owns three-gpu-pathtracer's `WebGLPathTracer` and the per-frame loop: camera-motion
- * detection, and the two draw states that follow from it. Shares the caller's `WebGLRenderer`
- * and canvas — no second GL context.
+ * Owns three-gpu-pathtracer's `WebGLPathTracer` and the per-frame loop. Shares the caller's
+ * `WebGLRenderer` and canvas — no second GL context.
  *
- * While the camera is moving, this loop does not trace at all — it calls back into
- * `renderRaster` (a thin wrapper around `SceneRenderer.renderOnce()`) so the canvas shows an
- * ordinary rasterized frame: clean, instant, and free, since that rasterizer already exists and
- * shares this same renderer/scene/camera. Tracing only resumes once the camera comes to rest,
- * at which point `pathTracer.updateCamera()` resets accumulation and `renderSample()` starts
- * climbing samples again. `WebGLPathTracer` owns its own resolution/sample-count ramp
- * internally (`dynamicLowRes`, `renderDelay`, `fadeDuration`) — there is no separate ladder to
- * maintain here the way a hand-rolled tracer would need.
+ * The moving/still split — camera renders the ordinary raster scene while it's in motion, and
+ * only traces once it comes to rest — is the library's own built-in behaviour, the same one
+ * three.js's `webgl_renderer_pathtracer` example relies on: `WebGLPathTracer.renderSample()` is
+ * called unconditionally every frame, and internally decides whether to draw a raster fallback
+ * or an accumulated trace sample, driven by `updateCamera()` calls and its own
+ * `renderDelay`/`fadeDuration` timers. The only thing this class changes about that behaviour is
+ * *what* the fallback draws: `rasterizeSceneCallback` is pointed at `renderRaster` — a thin
+ * wrapper around `SceneRenderer.renderOnce()` — instead of the library's default `renderer.render()`
+ * of the (merged, non-instanced) baked scene, so the fallback frame is the same instanced,
+ * grid-and-ghost-aware raster the rest of the app already draws, not a second, cheaper copy of
+ * the model. `OrbitControls`'s own `change` event (fired continuously during damped motion, once
+ * per settle) is what tells the tracer the camera moved — there is no independent
+ * matrix-diffing here; that duplicated the library's own state machine and is why samples never
+ * used to advance (`dynamicLowRes` combined with `rasterizeScene = false` disabled the library's
+ * fallback path on every frame, not just moving ones).
  *
  * `build()` does the expensive part — flattening the live scene into real meshes and calling
  * `pathTracer.setScene()`, which builds the BVH — and only runs when the model on the
  * baseplate changes (entering render mode) or the environment preset changes (its floor colour
- * is baked into a real material). Everything a lighting dial touches (`updateLighting`) or an
- * environment swap that doesn't touch geometry (`updateEnvironment`) goes through the library's
- * cheap `update*()` calls instead, so dragging a slider never re-triggers a BVH build.
+ * is baked into a real material). Everything a lighting dial touches (`updateLighting`) goes
+ * through the library's cheap `update*()` calls instead, so dragging a slider never re-triggers
+ * a BVH build.
  */
 
 import * as THREE from 'three';
@@ -29,7 +35,7 @@ import { BUNDLED_COLOR_LIBRARY } from '../../ldraw/bundledLibrary.ts';
 import type { PathtraceSnapshot } from '../../scene/SceneRenderer.ts';
 
 import { bakePathtraceScene } from './sceneBake.ts';
-import { DEFAULT_ENVIRONMENT, buildEnvironmentTexture } from './environments.ts';
+import { DEFAULT_ENVIRONMENT, loadEnvironmentTexture } from './environments.ts';
 import type { PathtraceEnvironment } from './environments.ts';
 import { DEFAULT_LIGHTING, kelvinToRGB, sunDirectionFor } from './lighting.ts';
 import type { LightingSettings } from './lighting.ts';
@@ -46,9 +52,9 @@ export const DEFAULT_RENDER_SETTINGS: PathtraceRenderSettings = {
 };
 
 export interface PathtraceStats {
-  /** 'moving': the camera is in motion, so this frame was an ordinary rasterized draw —
-   *  no trace, no accumulation. 'rendering': the camera is still and this frame came from
-   *  the accumulating path trace. */
+  /** 'moving': the camera moved recently enough that the library is still showing (or fading
+   *  from) the raster fallback — no accumulated trace to show yet. 'rendering': the trace has
+   *  fully faded in. */
   readonly status: 'building' | 'moving' | 'rendering';
   readonly samples: number;
   readonly frameMs: number;
@@ -69,22 +75,13 @@ const MAX_SOFTNESS_FRACTION = 0.55;
  *  single light source next to the environment's own contribution, not a blowout or a no-op. */
 const BASE_LIGHT_POWER = 6;
 
-/** Max-abs-difference matrix comparison — exact `.equals()` almost never fires under damping. */
-function cameraMoved(a: THREE.Matrix4, b: THREE.Matrix4, eps = 1e-4): boolean {
-  const ae = a.elements;
-  const be = b.elements;
-  for (let i = 0; i < 16; i++) {
-    if (Math.abs(ae[i] - be[i]) > eps) return true;
-  }
-  return false;
-}
-
 export class PathTracerController {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly camera: THREE.PerspectiveCamera;
   private readonly controls: OrbitControls;
   /** Draws one ordinary rasterized frame to the shared canvas — `SceneRenderer.renderOnce()`.
-   *  Called instead of tracing whenever the camera is in motion. */
+   *  Installed as the path tracer's own `rasterizeSceneCallback`, so the library calls it
+   *  exactly when (and only when) it needs a fallback frame. */
   private readonly renderRaster: () => void;
   private readonly previousToneMapping: THREE.ToneMapping;
 
@@ -99,10 +96,15 @@ export class PathTracerController {
    *  rather than a hole through to black. */
   private canvasBackground: THREE.Color | null = null;
 
-  private readonly prevCameraMatrix = new THREE.Matrix4();
-  /** True while the camera is moving or has just stopped — the next still frame after this is
-   *  true resets the tracer's accumulation once, rather than every still frame. */
-  private wasMoving = true;
+  /** Timestamp of the last `updateCamera()` call — from user motion or from a settings change
+   *  that resets accumulation. Used only to derive the `moving` stat; the tracer itself tracks
+   *  its own elapsed time internally. */
+  private lastCameraUpdateAt = 0;
+  private readonly onControlsChange = (): void => {
+    this.pathTracer?.updateCamera();
+    this.lastCameraUpdateAt = performance.now();
+  };
+
   private rafHandle: number | null = null;
   private lastFrameMs = 0;
 
@@ -123,7 +125,7 @@ export class PathTracerController {
 
   /**
    * Fetches the LDraw palette, flattens+bakes the live scene (plus a grounding floor sized to
-   * it) into real meshes, builds the environment texture, and hands both to
+   * it) into real meshes, loads the environment HDRI, and hands both to
    * `WebGLPathTracer.setScene()` — a full BVH build, but only run when the model changes or the
    * environment preset (and its baked-in floor colour) changes. See the class doc for why
    * lighting dials don't come through here.
@@ -145,8 +147,7 @@ export class PathTracerController {
     const scene = new THREE.Scene();
     scene.add(baked.group);
 
-    this.envTexture?.dispose();
-    const envTexture = buildEnvironmentTexture(environment);
+    const envTexture = await loadEnvironmentTexture(environment);
     this.envTexture = envTexture;
     scene.environment = envTexture;
     scene.background = lighting.showBackground ? envTexture : this.canvasBackground;
@@ -170,15 +171,15 @@ export class PathTracerController {
       pathTracer.renderScale = 1;
       pathTracer.minSamples = 1;
       pathTracer.renderToCanvas = true;
-      // We already draw the raster fallback ourselves while the camera moves (see the class
-      // doc), so the library doesn't need to cross-fade its own raster preview underneath.
-      pathTracer.rasterizeScene = false;
-      pathTracer.dynamicLowRes = true;
-      pathTracer.lowResScale = 0.25;
+      // Library defaults: raster fallback on, no low-res ramp. `rasterizeSceneCallback` below
+      // is the only override — see the class doc for why.
+      pathTracer.rasterizeSceneCallback = () => this.renderRaster();
       this.pathTracer = pathTracer;
+      this.controls.addEventListener('change', this.onControlsChange);
     }
     this.pathTracer.setScene(scene, this.camera);
-    this.wasMoving = true;
+    this.pathTracer.updateCamera();
+    this.lastCameraUpdateAt = performance.now();
   }
 
   start(onStats: (stats: PathtraceStats) => void): void {
@@ -208,15 +209,15 @@ export class PathTracerController {
 
     this.renderer.toneMappingExposure = lighting.exposure;
     this.pathTracer.reset();
+    this.lastCameraUpdateAt = performance.now();
   }
 
   /** Swaps the environment map and the floor's material properties without rebuilding the
    *  BVH — the floor's own colour/roughness change but its geometry does not. */
-  updateEnvironment(environment: PathtraceEnvironment, lighting: LightingSettings): void {
+  async updateEnvironment(environment: PathtraceEnvironment, lighting: LightingSettings): Promise<void> {
     if (this.pathTracer === null || this.scene === null || this.baked === null) return;
 
-    this.envTexture?.dispose();
-    const envTexture = buildEnvironmentTexture(environment);
+    const envTexture = await loadEnvironmentTexture(environment);
     this.envTexture = envTexture;
     this.scene.environment = envTexture;
     this.scene.background = lighting.showBackground ? envTexture : this.canvasBackground;
@@ -234,6 +235,7 @@ export class PathTracerController {
     }
     this.pathTracer.updateMaterials();
     this.pathTracer.reset();
+    this.lastCameraUpdateAt = performance.now();
   }
 
   private applyLighting(light: ShapedAreaLight, lighting: LightingSettings): void {
@@ -263,33 +265,17 @@ export class PathTracerController {
     const frameStart = performance.now();
 
     this.controls.update();
-    this.camera.updateMatrixWorld();
-    const moved = cameraMoved(this.camera.matrixWorld, this.prevCameraMatrix);
-    this.prevCameraMatrix.copy(this.camera.matrixWorld);
-
-    if (moved) {
-      this.wasMoving = true;
-      this.renderRaster();
-      this.lastFrameMs = performance.now() - frameStart;
-      this.onStats?.({
-        status: 'moving',
-        samples: 0,
-        frameMs: this.lastFrameMs,
-        fps: this.lastFrameMs > 0 ? 1000 / this.lastFrameMs : 0,
-        triangleCount: this.baked?.triangleCount ?? 0,
-      });
-      return;
-    }
-
-    if (this.wasMoving) {
-      this.pathTracer.updateCamera();
-      this.wasMoving = false;
-    }
     this.pathTracer.renderSample();
+
+    // Mirrors the library's own settle timing (`renderDelay` before it starts accumulating,
+    // `fadeDuration` to cross-fade the trace in) so the UI's "moving" label tracks exactly the
+    // window in which `renderSample()` is actually drawing the raster fallback.
+    const settleMs = this.pathTracer.renderDelay + this.pathTracer.fadeDuration;
+    const moving = performance.now() - this.lastCameraUpdateAt < settleMs;
 
     this.lastFrameMs = performance.now() - frameStart;
     this.onStats?.({
-      status: 'rendering',
+      status: moving ? 'moving' : 'rendering',
       samples: this.pathTracer.samples,
       frameMs: this.lastFrameMs,
       fps: this.lastFrameMs > 0 ? 1000 / this.lastFrameMs : 0,
@@ -299,11 +285,12 @@ export class PathTracerController {
 
   dispose(): void {
     this.stop();
+    this.controls.removeEventListener('change', this.onControlsChange);
     this.pathTracer?.dispose();
     this.pathTracer = null;
     this.baked?.dispose();
     this.baked = null;
-    this.envTexture?.dispose();
+    // `envTexture` is shared/cached in `environments.ts` — never disposed here.
     this.envTexture = null;
     this.scene = null;
     this.keyLight = null;
