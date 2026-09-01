@@ -9,6 +9,10 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { collides } from '../../snap/collision';
+import { HashSpatialIndex } from '../../snap/spatialIndex';
+import { fromTranslation, IDENTITY, multiply } from '../../math';
+import { mintBrickId } from '../../model/ids';
 import { fixtureReader } from '../../snap/__fixtures__/reader';
 import { importModel } from './importModel';
 
@@ -79,5 +83,66 @@ describe('importModel', () => {
       expect(mate.bPoint).toMatch(/#\d+$/);
       expect(mate.kind).toBe('cyl');
     }
+  });
+});
+
+describe('a loaded model participates in collision', () => {
+  // Regression coverage for the bug the user reported: importModel used to hand every
+  // brick a degenerate 1-voxel PLACEHOLDER_OCCUPANCY mask on the reasoning that the
+  // (then read-only) model viewer never queried collision. It does now — loading a model
+  // drops you into the editor with it — so every model brick was silently uncollidable.
+  // `resolveFullPart` must now produce a real mask, the same baked-first route
+  // `createPartCatalog` gives the chest.
+
+  /** Builds a `HashSpatialIndex` over every brick an import produced. */
+  function indexOf(result: Awaited<ReturnType<typeof importModel>>): HashSpatialIndex {
+    const index = new HashSpatialIndex();
+    for (const brick of result.document.bricks.values()) {
+      const part = result.partDefs.get(brick.partId);
+      if (part) index.insert(brick.id, part, brick.transform);
+    }
+    return index;
+  }
+
+  it('the imported bricks carry real occupancy, not an empty placeholder', async () => {
+    const result = await importModel(STACKED_BRICKS, 'stack', { read: fixtureReader });
+    const part = result.partDefs.get('3001');
+    expect(part).toBeDefined();
+    // A 2x4 brick voxelised at 4 LDU is nowhere near 1x1x1 — dims well above the
+    // degenerate placeholder, and a meaningful fraction of bits actually set.
+    const { dims, bits } = part!.occupancy;
+    expect(dims[0] * dims[1] * dims[2]).toBeGreaterThan(100);
+    let setBits = 0;
+    for (const byte of bits) {
+      for (let b = 0; b < 8; b++) if ((byte >> b) & 1) setBits++;
+    }
+    expect(setBits).toBeGreaterThan(50);
+  });
+
+  it('placing a brick into a loaded model brick is refused', async () => {
+    const result = await importModel(STACKED_BRICKS, 'stack', { read: fixtureReader });
+    const index = indexOf(result);
+    const part = result.partDefs.get('3001')!;
+
+    // The lower brick of STACKED_BRICKS sits at the origin. Dropping a fresh 3001 half
+    // a brick height into it — not stud-mated, not aligned with any connection — is a
+    // genuine collision and must be refused.
+    const intruding = multiply(IDENTITY, fromTranslation([0, -12, 0]));
+    const newBrick = mintBrickId();
+    expect(collides(part, intruding, index, new Set([newBrick]))).toBe(true);
+  });
+
+  it('placing a brick onto a loaded model stud is still accepted (mated connectors exempt)', async () => {
+    const result = await importModel(STACKED_BRICKS, 'stack', { read: fixtureReader });
+    const index = indexOf(result);
+    const part = result.partDefs.get('3001')!;
+
+    // STACKED_BRICKS already has a brick at y=-24 (LDraw Y-down: one brick height above
+    // the origin brick, mated on its studs). A third 3001 squarely stacked on top of
+    // that one, another brick height up, is the same legitimate mating relationship and
+    // must not be refused.
+    const stackedOnTop = multiply(IDENTITY, fromTranslation([0, -48, 0]));
+    const newBrick = mintBrickId();
+    expect(collides(part, stackedOnTop, index, new Set([newBrick]))).toBe(false);
   });
 });
