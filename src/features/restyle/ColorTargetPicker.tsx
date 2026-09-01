@@ -58,9 +58,14 @@ export function ColorTargetPicker({ palette, value, onSelect, label }: ColorTarg
     const top = openUpward
       ? triggerRect.top - GAP - panelRect.height
       : triggerRect.bottom + GAP;
+    // Open rightward from the trigger, then clamp into the viewport. Right-aligning to
+    // the trigger instead put the panel off the left edge whenever the trigger sat near
+    // it — which is exactly where the restyle rail is.
     const maxLeft = window.innerWidth - panelRect.width - VIEWPORT_MARGIN;
-    const left = Math.min(triggerRect.right - panelRect.width, Math.max(VIEWPORT_MARGIN, maxLeft));
-    setPosition({ top, left });
+    const left = Math.max(VIEWPORT_MARGIN, Math.min(triggerRect.left, maxLeft));
+    // The upward flip above can still overshoot the top on a short window.
+    const maxTop = window.innerHeight - panelRect.height - VIEWPORT_MARGIN;
+    setPosition({ top: Math.max(VIEWPORT_MARGIN, Math.min(top, maxTop)), left });
   }, []);
 
   useLayoutEffect(() => {
