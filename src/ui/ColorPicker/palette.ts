@@ -1,12 +1,13 @@
 /**
- * The real LDraw palette (322 colours), built at bundle time from the same
- * `LDConfig.ldr` fixture the ldraw slice tests against — imported as raw text, never
- * fetched. `src/ldraw/colors.ts` does the parsing; this module only shapes the result
- * into the local `Swatch` type the picker renders.
+ * The real LDraw palette (322 colours), shaped for the picker from
+ * `src/ldraw/bundledLibrary.ts` — the app's single bundled copy of `LDConfig.ldr`,
+ * shared with `src/scene/colorLibrary.ts` so the picker and the renderer can never
+ * disagree about what a color code means. This module only shapes the result into
+ * the local `Swatch` type the picker renders.
  */
-import { isSentinelCode, parseColorLibrary } from '../../ldraw/colors';
+import { isSentinelCode } from '../../ldraw/colors';
+import { BUNDLED_COLOR_LIBRARY } from '../../ldraw/bundledLibrary';
 import type { LDrawColor } from '../../ldraw/types';
-import ldConfigText from '../../ldraw/__fixtures__/mirror/library/LDConfig.ldr?raw';
 import { sortColorsByHue } from './hueSort';
 import type { Swatch } from './types';
 
@@ -31,8 +32,6 @@ function toSwatch(color: LDrawColor): Swatch {
   return swatch;
 }
 
-const library = parseColorLibrary(ldConfigText);
-
 /**
  * Every real LDraw colour, sentinels (16 "inherit", 24 "edge") excluded because they
  * resolve against a referencing line rather than naming a colour a user can pick.
@@ -42,5 +41,5 @@ const library = parseColorLibrary(ldConfigText);
  * within each of those groups.
  */
 export const LDRAW_PALETTE: readonly Swatch[] = sortColorsByHue(
-  Array.from(library.values()).filter((color) => !isSentinelCode(color.code)),
+  Array.from(BUNDLED_COLOR_LIBRARY.values()).filter((color) => !isSentinelCode(color.code)),
 ).map(toSwatch);
