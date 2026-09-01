@@ -24,8 +24,10 @@ const OUT = resolve(dirname(fileURLToPath(import.meta.url)), '../src/snap/__fixt
  *   3700  a stepped profile, and one primitive emitting both genders
  *   3818  a non-axis-aligned, fractional connection
  *   3070b a part with no shadow coverage anywhere in its tree
+ *   3947  a 32x32 baseplate: 39,304 triangles over a 160x15x160 grid, which is what the
+ *         collision performance budgets are measured against
  */
-const DEFAULT_PARTS = ['3001', '4070', '3700', '3818', '3070b'];
+const DEFAULT_PARTS = ['3001', '4070', '3700', '3818', '3070b', '3947'];
 
 const MAX_DEPTH = 16;
 
