@@ -6,16 +6,13 @@
  */
 import { createContext, useContext } from 'react';
 
-export type RouteName = 'landing' | 'sandbox' | 'models' | 'restyle';
+export type RouteName = 'landing' | 'sandbox' | 'models';
 
 const BASE = import.meta.env.BASE_URL.endsWith('/') ? import.meta.env.BASE_URL : `${import.meta.env.BASE_URL}/`;
 
 const ROUTE_SEGMENT: Record<Exclude<RouteName, 'landing'>, string> = {
   sandbox: 'sandbox',
   models: 'models',
-  // Demo mount point for src/features/restyle/ until the toolbar's paintbrush slot
-  // opens the panel over the real editor instead — see docs/ROADMAP.md's Restyle entry.
-  restyle: 'restyle',
 };
 
 export function pathToRoute(pathname: string): RouteName {
@@ -23,7 +20,6 @@ export function pathToRoute(pathname: string): RouteName {
   const segment = rest.split('/')[0];
   if (segment === ROUTE_SEGMENT.sandbox) return 'sandbox';
   if (segment === ROUTE_SEGMENT.models) return 'models';
-  if (segment === ROUTE_SEGMENT.restyle) return 'restyle';
   return 'landing';
 }
 

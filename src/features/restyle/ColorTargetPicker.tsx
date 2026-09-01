@@ -75,12 +75,24 @@ export function ColorTargetPicker({ palette, value, onSelect, label }: ColorTarg
         close();
       }
     }
-    document.addEventListener('scroll', close, true);
+    // `capture: true` sees scroll from any scrollable ancestor of the *trigger*, which
+    // is what should close this — the anchor point moved. But it equally sees the
+    // popover's own `.by-panel__body` (unlike CategoryMenu.tsx's flat list, `ColorPicker`
+    // wraps an already-scrollable body), and scroll on that is the palette being used,
+    // not the trigger moving out from under it — closing there made the palette
+    // un-scrollable, since the very first wheel tick closed it before the browser had
+    // moved `scrollTop`. Ignore scroll events that originate inside the panel itself.
+    function onScroll(event: Event) {
+      const node = event.target as Node;
+      if (panelRef.current?.contains(node)) return;
+      close();
+    }
+    document.addEventListener('scroll', onScroll, true);
     document.addEventListener('pointerdown', onPointerDown);
     document.addEventListener('keydown', onKeyDown);
     window.addEventListener('resize', reposition);
     return () => {
-      document.removeEventListener('scroll', close, true);
+      document.removeEventListener('scroll', onScroll, true);
       document.removeEventListener('pointerdown', onPointerDown);
       document.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('resize', reposition);

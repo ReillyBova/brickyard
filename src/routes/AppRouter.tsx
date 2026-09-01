@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react';
 
-import { RestyleStudio } from '../features/restyle';
 import { Landing } from '../ui/Landing/Landing';
 import { ModelPicker } from './ModelPicker';
 import { useRoute } from './route-context';
@@ -17,7 +16,5 @@ export function AppRouter({ sandbox }: AppRouterProps) {
 
   if (route === 'sandbox') return <>{sandbox}</>;
   if (route === 'models') return <ModelPicker />;
-  // Demo mount point for the restyle feature — see src/features/restyle/RestyleStudio.tsx.
-  if (route === 'restyle') return <RestyleStudio />;
   return <Landing />;
 }
