@@ -255,10 +255,16 @@ export class PathTracerController {
     u.uMoving.value = moved;
     u.uHistScale.value = this.resolution.justStepped ? 0.35 : 1;
 
+    // `setViewport` multiplies whatever it's given by the renderer's pixelRatio, but
+    // `fullSize`/`rw`/`rh` are already physical (drawing-buffer) pixels — the render
+    // targets are deliberately allocated at that resolution for quality. Divide back out
+    // so the viewport rect lands on the intended texels rather than pixelRatio² of them.
+    const pixelRatio = this.renderer.getPixelRatio();
+
     const previousAutoClear = this.renderer.autoClear;
     this.renderer.autoClear = false;
     this.renderer.setRenderTarget(dstTarget);
-    this.renderer.setViewport(0, 0, rw, rh);
+    this.renderer.setViewport(0, 0, rw / pixelRatio, rh / pixelRatio);
     this.traceQuad?.render(this.renderer);
     this.renderer.autoClear = previousAutoClear;
 
@@ -268,7 +274,7 @@ export class PathTracerController {
       pu.uRegion.value.set(rw, rh);
       pu.uFull.value.copy(this.fullSize);
       this.renderer.setRenderTarget(null);
-      this.renderer.setViewport(0, 0, this.fullSize.x, this.fullSize.y);
+      this.renderer.setViewport(0, 0, this.fullSize.x / pixelRatio, this.fullSize.y / pixelRatio);
       this.presentQuad?.render(this.renderer);
     }
 

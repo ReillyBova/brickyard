@@ -108,21 +108,8 @@ uniform vec3 uAmbientColor;
 
 varying vec2 vUv;
 
-void ndcToCameraRay(
-  vec2 coord, mat4 cameraWorld, mat4 invProjectionMatrix,
-  out vec3 rayOrigin, out vec3 rayDirection
-) {
-  vec4 lookDirection = cameraWorld * vec4( 0.0, 0.0, - 1.0, 0.0 );
-  vec4 nearVector = invProjectionMatrix * vec4( 0.0, 0.0, - 1.0, 1.0 );
-  float near = abs( nearVector.z / nearVector.w );
-  vec4 origin = cameraWorld * vec4( 0.0, 0.0, 0.0, 1.0 );
-  vec4 direction = invProjectionMatrix * vec4( coord, 0.5, 1.0 );
-  direction /= direction.w;
-  direction = cameraWorld * direction - origin;
-  origin.xyz += direction.xyz * near / dot( direction, lookDirection );
-  rayOrigin = origin.xyz;
-  rayDirection = normalize( direction.xyz );
-}
+// ndcToCameraRay comes from three-mesh-bvh's common_functions chunk, concatenated in above
+// via shaderIntersectFunction — do not redefine it here.
 
 // A small cone around the sun direction, jittered per sample for soft shadows.
 vec3 jitteredSunDirection() {
@@ -235,6 +222,7 @@ void main() {
   vec2 ndc = vUv * 2.0 - 1.0;
   vec3 rayOrigin, rayDirection;
   ndcToCameraRay( ndc, uCameraWorld, uInvProjection, rayOrigin, rayDirection );
+  rayDirection = normalize( rayDirection );
 
   vec3 accumulated = vec3( 0.0 );
   vec3 primaryWorldPos = rayOrigin + rayDirection * 100000.0;
@@ -249,6 +237,7 @@ void main() {
     vec2 jitter = ( vec2( rand(), rand() ) - 0.5 ) / uRegion;
     vec3 jitteredOrigin, jitteredDirection;
     ndcToCameraRay( ndc + jitter * 2.0, uCameraWorld, uInvProjection, jitteredOrigin, jitteredDirection );
+    jitteredDirection = normalize( jitteredDirection );
     sampleOnePath( jitteredOrigin, jitteredDirection, sampleRadiance, sampleWorldPos, sampleHit );
     accumulated += sampleRadiance;
     if ( s == 0 ) {
