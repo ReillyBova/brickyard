@@ -10,7 +10,7 @@
  * reasoned about from a diagram.
  */
 
-import { IDENTITY } from '../../math';
+import { IDENTITY, multiply } from '../../math';
 import type { BrickId, Mat4, Vec3 } from '../../types';
 import { boundsFromTriangles, partTriangles } from '../../ldraw/bounds';
 import { loadBakedParts, type BakedParts } from '../bakedParts.ts';
@@ -315,6 +315,30 @@ export class PlacementController {
     if (ndc) this.move(ndc[0], ndc[1]);
   }
 
+  /**
+   * Nudge or rotate the piece on the cursor by a rigid world-space `delta`, bypassing
+   * candidate resolution — the same keyboard vocabulary a placed selection uses
+   * (`EditorSession.transformSelection`), applied to the ghost instead of a document
+   * brick. Every key operation available on a placed selection works identically while
+   * a piece is held, rather than holding being a poorer, more limited mode.
+   *
+   * `previous` is updated the same way `move`, `cycle` and `rotate` already anchor
+   * it, so continuity is *biased* toward this position — not pinned to it, since a
+   * genuine cursor move still wins over a stale bias (see `resolve.ts` and the
+   * "continuity is bounded" tests in `placement.test.ts`). In practice this is exactly
+   * right: a keyboard nudge and a mouse hover aren't happening in the same instant, so
+   * the ghost simply stays where the keys put it until the pointer genuinely moves.
+   */
+  nudge(delta: Mat4): void {
+    const part = this.held;
+    const current = this.state.transform;
+    if (part === null || current === null) return;
+    const next = multiply(delta, current);
+    this.state = { ...this.state, transform: next, valid: !collides(part, next, this.index) };
+    this.previous = next;
+    void this.paint();
+  }
+
   private async paint(): Promise<void> {
     const { transform } = this.state;
     if (this.held === null || transform === null) {
@@ -341,9 +365,14 @@ export class PlacementController {
     };
     this.add(brick);
 
-    // Clear the committed placement. Without this every pointerup re-places the same
-    // transform, so a stationary double-click stacks bricks inside each other — and
-    // `previous` would anchor continuity to a position the ghost has already left.
+    // Clear the committed placement AND release the hold: "place" commits and
+    // releases in one step, per the interaction model — a piece never stays on the
+    // cursor after landing. This used to leave `held` set, relying on the caller to
+    // separately call `hold(null)` afterward; that worked for a fresh chest choice
+    // only because committing there happens to trigger a prop round-trip that calls
+    // it, and did nothing for a picked-up piece, which has no such round-trip — so a
+    // placed-and-released pickup stayed stuck on the cursor until Escape.
+    this.held = null;
     this.state = {
       candidates: [],
       index: 0,
