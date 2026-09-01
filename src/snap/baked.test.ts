@@ -81,6 +81,46 @@ describe('connections.bin', () => {
     }
   });
 
+  it('round-trips an asymmetric rotation without transposing it', () => {
+    // A basis symmetric about its diagonal survives a transposed convention unnoticed.
+    // This one — 40 degrees about a tilted axis — does not.
+    const angle = (40 * Math.PI) / 180;
+    const length = Math.hypot(0.3, 0.8, 0.5);
+    const [ax, ay, az] = [0.3 / length, 0.8 / length, 0.5 / length];
+    const c = Math.cos(angle);
+    const s2 = Math.sin(angle);
+    const t = 1 - c;
+    // Column-major, matching `ConnectionPoint.orientation`.
+    const basis = [
+      t * ax * ax + c,
+      t * ax * ay + s2 * az,
+      t * ax * az - s2 * ay,
+      t * ax * ay - s2 * az,
+      t * ay * ay + c,
+      t * ay * az + s2 * ax,
+      t * ax * az + s2 * ay,
+      t * ay * az - s2 * ax,
+      t * az * az + c,
+    ] as ConnectionPoint['orientation'];
+
+    const point: ConnectionPoint = {
+      id: 'tilted#0',
+      kind: 'cyl',
+      gender: 'M',
+      sections: [{ variant: 'R', radius: 6, length: 4 }],
+      position: [0, 0, 0],
+      orientation: basis,
+      slide: false,
+      key: 7,
+      source: 'p/stud.dat',
+    };
+    const read = unpackConnections(bytesOf(packConnections([{ partId: 'x', points: [point] }])));
+    const decoded = read?.get('x')?.[0];
+    for (let a = 0; a < 9; a++) {
+      expect(decoded?.orientation[a], `basis[${a}]`).toBeCloseTo(basis[a], 4);
+    }
+  });
+
   it('preserves handedness on a mirrored basis', () => {
     // A basis with one axis flipped: determinant -1, which no quaternion can carry.
     const mirrored: ConnectionPoint = {
