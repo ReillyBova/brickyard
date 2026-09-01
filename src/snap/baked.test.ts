@@ -24,6 +24,7 @@ import {
 import { buildOccupancy, OCC_CELL } from './collision.ts';
 import { resolvePart } from './resolvePart.ts';
 import type { ConnectionPoint } from './types.ts';
+import type { Vec3 } from '../types.ts';
 
 const PARTS = ['3001', '4070', '3700', '3818', '2335', '3937', '3947'] as const;
 
@@ -78,6 +79,45 @@ describe('connections.bin', () => {
           );
         }
       }
+    }
+  });
+
+  it('round-trips an asymmetric rotation without transposing it', () => {
+    // A basis symmetric about its diagonal survives a transposed convention unnoticed.
+    // This one — 40 degrees about a tilted axis — does not.
+    const angle = (40 * Math.PI) / 180;
+    const [ax, ay, az] = [0.3, 0.8, 0.5].map((v, _i, all) => v / Math.hypot(...all)) as Vec3;
+    const c = Math.cos(angle);
+    const s2 = Math.sin(angle);
+    const t = 1 - c;
+    // Column-major, matching `ConnectionPoint.orientation`.
+    const basis = [
+      t * ax * ax + c,
+      t * ax * ay + s2 * az,
+      t * ax * az - s2 * ay,
+      t * ax * ay - s2 * az,
+      t * ay * ay + c,
+      t * ay * az + s2 * ax,
+      t * ax * az + s2 * ay,
+      t * ay * az - s2 * ax,
+      t * az * az + c,
+    ] as ConnectionPoint['orientation'];
+
+    const point: ConnectionPoint = {
+      id: 'tilted#0',
+      kind: 'cyl',
+      gender: 'M',
+      sections: [{ variant: 'R', radius: 6, length: 4 }],
+      position: [0, 0, 0],
+      orientation: basis,
+      slide: false,
+      key: 7,
+      source: 'p/stud.dat',
+    };
+    const read = unpackConnections(bytesOf(packConnections([{ partId: 'x', points: [point] }])));
+    const decoded = read?.get('x')?.[0];
+    for (let a = 0; a < 9; a++) {
+      expect(decoded?.orientation[a], `basis[${a}]`).toBeCloseTo(basis[a], 4);
     }
   });
 
