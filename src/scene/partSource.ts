@@ -38,6 +38,18 @@ export interface PartGeometrySource {
 }
 
 /**
+ * LDraw's reference search order (`docs/LDRAW-PRIMER.md`): `parts/`, then `p/`, then
+ * `models/`. A model can reference a primitive directly rather than through a proper
+ * part — botanical and technic sets do this for greebling (leaves, axle holes, box
+ * fillers: `1-8cylo`, `box3u10p`, `axl3hol8`) — and a primitive lives under `p/`, not
+ * `parts/`. Trying only `parts/<id>.dat` 404s on every such reference. Measured against
+ * the bundled Colosseum model, this single fix accounts for the model's entire 57%
+ * geometry-load failure rate (11,725 of 20,725 bricks): every one of the 45 unique ids
+ * that miss under `parts/` resolves cleanly under `p/`, and none are missing under both.
+ */
+const PART_SEARCH_PREFIXES = ['parts/', 'p/', 'models/'] as const;
+
+/**
  * How many distinct parts may be resolving over the network at once. Each part load
  * fans out into its own subfile tree (`docs/ARCHITECTURE.md`: "~20 network fetches" per
  * part cold), so this is not "how many HTTP requests" — it's closer to
@@ -60,6 +72,8 @@ export interface PartSourceStats {
   loaded: number;
   /** Distinct parts that failed after every retry — see `SceneRenderer`'s handling. */
   failed: number;
+  /** Ids of the parts counted in `failed`, for surfacing which pieces are missing. */
+  failedPartIds: readonly string[];
 }
 
 /**
@@ -122,6 +136,7 @@ export class LDrawPartSource implements PartGeometrySource {
   private readonly pool = new ConcurrencyPool(PART_LOAD_CONCURRENCY);
   private loaded = 0;
   private failed = 0;
+  private readonly failedPartIds = new Set<string>();
 
   constructor(baseUrl: string = DEFAULT_PARTS_BASE_URL) {
     this.baseUrl = baseUrl;
@@ -133,7 +148,7 @@ export class LDrawPartSource implements PartGeometrySource {
 
   /** Distinct parts loaded vs. failed after retry, for `SceneRenderer` to surface. */
   stats(): PartSourceStats {
-    return { loaded: this.loaded, failed: this.failed };
+    return { loaded: this.loaded, failed: this.failed, failedPartIds: [...this.failedPartIds] };
   }
 
   private ensureMaterials(): Promise<void> {
@@ -153,16 +168,32 @@ export class LDrawPartSource implements PartGeometrySource {
     const promise = this.pool.run(() => withRetry(() => this.loadUncached(partId), PART_LOAD_ATTEMPTS, PART_LOAD_RETRY_DELAY_MS));
     promise.then(
       () => this.loaded++,
-      () => this.failed++,
+      () => {
+        this.failed++;
+        this.failedPartIds.add(partId);
+      },
     );
     this.cache.set(partId, promise);
     return promise;
   }
 
+  /**
+   * Tries every search prefix in turn, first success wins. `LDrawLoader.loadAsync`
+   * rejects on a non-OK fetch, so a miss on `parts/` just falls through to `p/` — see
+   * `PART_SEARCH_PREFIXES` above for why this matters.
+   */
   private async loadUncached(partId: string): Promise<LoadedPart> {
     await this.ensureMaterials();
-    const group = await this.loader.loadAsync(`${this.baseUrl}parts/${partId}.dat`);
-    const geometry = mergeMeshGeometry(group);
-    return { partId, geometry, bounds: boundsOf(geometry) };
+    let lastError: unknown;
+    for (const prefix of PART_SEARCH_PREFIXES) {
+      try {
+        const group = await this.loader.loadAsync(`${this.baseUrl}${prefix}${partId}.dat`);
+        const geometry = mergeMeshGeometry(group);
+        return { partId, geometry, bounds: boundsOf(geometry) };
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError;
   }
 }
