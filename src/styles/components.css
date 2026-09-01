@@ -582,11 +582,25 @@ a:hover { color: var(--by-accent-hover); }
    ever changes, and the height (320px) is this shape's own literal value, not read from
    a token, because nothing in tokens.css names it. If `--by-panel-w` changes, this path
    needs updating with it; there is no automatic way to keep them in sync.
+
+   `clip-path` clips everything painted on the element it's set on, including its
+   own `box-shadow` — a shadow drawn on a clipped box is cut away at the clip
+   boundary along with the rest of the overflow, so `.by-panel`'s inherited
+   box-shadow would otherwise vanish here. `.by-palette-wrap` carries the
+   elevation instead, as `filter: drop-shadow()` on the *unclipped* wrapper:
+   drop-shadow is computed from the element's actual painted (clipped) alpha
+   shape rather than its bounding box, so the shadow traces the Utah silhouette
+   itself, notch included, instead of a rectangle around it.
    ------------------------------------------------------------------------- */
-.by-palette {
+.by-palette-wrap {
   width: 268px; /* keep equal to --by-panel-w */
   height: 320px;
   flex: none;
+  filter: drop-shadow(var(--by-shadow-drop-md));
+}
+.by-palette {
+  width: 100%;
+  height: 100%;
   border-radius: var(--by-radius-lg);
   clip-path: path(
     'M 28 0 L 210 0 A 14 14 0 0 1 224 14 L 224 30 A 14 14 0 0 0 238 44 L 254 44 A 14 14 0 0 1 268 58 L 268 292 A 28 28 0 0 1 240 320 L 28 320 A 28 28 0 0 1 0 292 L 0 28 A 28 28 0 0 1 28 0 Z'

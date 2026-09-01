@@ -75,7 +75,7 @@
   /* Surfaces, coolest-to-warmest by depth. The viewport is the floor; panels
      float above it; popovers and dialogs float above those. */
   --by-canvas:        var(--color-neutral-200);  /* the 3D viewport ground   */
-  --by-canvas-grid:   var(--color-neutral-400);  /* baseplate / axis lines   */
+  --by-canvas-grid:   var(--color-neutral-600);  /* baseplate / axis lines; 3.49:1 against --by-canvas */
   --by-chrome:        var(--color-bg);           /* app frame, toolbar       */
   --by-panel:         var(--color-bg);           /* chest, inspector         */
   --by-panel-sunken:  var(--color-surface);      /* wells, part tiles, input */
@@ -121,6 +121,16 @@
   --by-shadow-sm: 0 1px 2px color-mix(in srgb, var(--color-neutral-900) 14%, transparent);
   --by-shadow-md: 0 3px 10px color-mix(in srgb, var(--color-neutral-900) 16%, transparent);
   --by-shadow-lg: 0 12px 32px color-mix(in srgb, var(--color-neutral-900) 22%, transparent);
+
+  /* Single-layer, inset-free restatement of the shadows above, for elements that
+     clip their own box (e.g. `.by-palette`'s Utah silhouette) and so must cast
+     elevation with `filter: drop-shadow()` instead of `box-shadow` — drop-shadow
+     follows the clipped silhouette rather than the bounding box, but only accepts
+     one offset/blur/color triple and no `inset`. Keep these equal to the ambient
+     (non-inset) layer of the box-shadow token of the same size. */
+  --by-shadow-drop-sm: 0 1px 2px color-mix(in srgb, var(--color-neutral-900) 14%, transparent);
+  --by-shadow-drop-md: 0 3px 10px color-mix(in srgb, var(--color-neutral-900) 16%, transparent);
+  --by-shadow-drop-lg: 0 12px 32px color-mix(in srgb, var(--color-neutral-900) 22%, transparent);
 }
 
 /* ── Dark viewport — the default ────────────────────────────────────────────
@@ -132,7 +142,7 @@
   color-scheme: dark;
 
   --by-canvas:        #1b1915;                   /* one step past neutral-900 */
-  --by-canvas-grid:   var(--color-neutral-700);
+  --by-canvas-grid:   var(--color-neutral-600);  /* 4.09:1 against --by-canvas */
   --by-chrome:        var(--color-neutral-900);
   --by-panel:         var(--color-neutral-900);
   --by-panel-sunken:  #262319;
@@ -177,6 +187,14 @@
                   0 4px 14px rgb(0 0 0 / 0.45);
   --by-shadow-lg: 0 1px 0 color-mix(in srgb, var(--color-neutral-100) 8%, transparent) inset,
                   0 16px 40px rgb(0 0 0 / 0.55);
+
+  /* Ambient (non-inset) layer of the shadows above, restated as a single
+     offset/blur/color triple so it can drive `filter: drop-shadow()` on an
+     element that clips its own box. See the light-theme block for why this
+     pair of tokens exists. */
+  --by-shadow-drop-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --by-shadow-drop-md: 0 4px 14px rgb(0 0 0 / 0.45);
+  --by-shadow-drop-lg: 0 16px 40px rgb(0 0 0 / 0.55);
 }
 
 /* ── 3. Type ────────────────────────────────────────────────────────────────
