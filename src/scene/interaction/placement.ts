@@ -10,7 +10,7 @@
  * reasoned about from a diagram.
  */
 
-import { IDENTITY, fromYRotation, multiply } from '../../math';
+import { IDENTITY, basisOf, fromBasis, fromYRotation, invert, multiply } from '../../math';
 import type { BrickId, Mat4, Vec3 } from '../../types';
 import { boundsFromTriangles, partTriangles } from '../../ldraw/bounds';
 import { loadBakedParts, type BakedParts } from '../bakedParts.ts';
@@ -176,6 +176,14 @@ export class PlacementController {
    * `state.roll` already was — a fresh piece never inherits the last one's spin.
    */
   private manualRotation: Mat4 = IDENTITY;
+  /**
+   * Set by `pickUp`, consumed by the first `move()` that resolves a real base — a
+   * picked-up piece's own orientation, waiting to be folded into `manualRotation` as
+   * soon as there is a base to fold it onto. A fresh chest hold never sets this, since
+   * there is no prior orientation to preserve; `manualRotation` starting at `IDENTITY`
+   * already covers that case.
+   */
+  private pendingRotationSeed: Mat4 | null = null;
 
   private readonly scene: PlacementScene;
 
@@ -201,6 +209,7 @@ export class PlacementController {
     this.previous = undefined;
     this.baseTransform = null;
     this.manualRotation = IDENTITY;
+    this.pendingRotationSeed = null;
     this.state = { candidates: [], index: 0, roll: 0, transform: null, valid: false };
     if (part === null) this.scene.hideGhost();
   }
@@ -214,7 +223,12 @@ export class PlacementController {
    *
    * `previousTransform` seeds continuity with where the piece actually was, so the
    * first hover after picking it up favours landing back near its own former spot
-   * over some other candidate the cursor happens to be closer to.
+   * over some other candidate the cursor happens to be closer to. It also seeds
+   * `pendingRotationSeed`, so the piece keeps the orientation it was actually sitting
+   * in rather than resetting to whatever bare orientation the next resolved base
+   * happens to have — the piece hasn't changed, only what's holding it has. See the
+   * comment on `move()` for how the seed is folded into `manualRotation` once a real
+   * base exists to fold it onto.
    */
   pickUp(part: PartDef, colorCode: number, previousTransform: Mat4): void {
     this.held = part;
@@ -223,6 +237,7 @@ export class PlacementController {
     this.previous = previousTransform;
     this.baseTransform = null;
     this.manualRotation = IDENTITY;
+    this.pendingRotationSeed = previousTransform;
     this.state = { candidates: [], index: 0, roll: 0, transform: null, valid: false };
   }
 
@@ -319,6 +334,25 @@ export class PlacementController {
     }
 
     this.state = { ...this.state, candidates, index: 0 };
+
+    // Fold a pending pick-up orientation into manualRotation as soon as there's a real
+    // base to fold it onto — deferred rather than done in pickUp() itself, since the
+    // base (and its own rotation) isn't known until resolveSnap/groundPlacement runs
+    // here. manualRotation is applied *before* base's own rotation (see composed()),
+    // so solving for it as base's rotation inverse times the piece's actual previous
+    // rotation is exactly what makes composed's rotation equal the piece's previous
+    // rotation the instant base's translation also matches — which it does the moment
+    // the cursor is still where the double-click that picked it up left it, landing
+    // the piece back exactly as it was. Once folded in, this behaves exactly like any
+    // other manualRotation: it persists through every later move()/cycle() the same
+    // way a fresh hold's rotation would.
+    if (base !== null && this.pendingRotationSeed !== null) {
+      const baseRotation = fromBasis(basisOf(base), [0, 0, 0]);
+      const previousRotation = fromBasis(basisOf(this.pendingRotationSeed), [0, 0, 0]);
+      this.manualRotation = multiply(invert(baseRotation), previousRotation);
+      this.pendingRotationSeed = null;
+    }
+
     return this.applyBase(base);
   }
 
@@ -357,9 +391,17 @@ export class PlacementController {
    * too). Storing it separately from `baseTransform` means every future `move()` or
    * `cycle()` call still composes it back in, because they only ever replace
    * `baseTransform`, never this.
+   *
+   * Never gated on `baseTransform` being set, `state.valid`, or there being any
+   * candidates at all: rotating is how a user *searches* for a valid placement, so
+   * refusing the input exactly when the current position doesn't work yet would
+   * refuse it exactly when it's needed most. A piece floating over empty space with no
+   * candidate still records the spin here — `composed()` simply has no base to apply
+   * it to until one exists, at which point this same persisted value takes effect, the
+   * same as it does for every other base change.
    */
   rotateManually(angleRadians: number): Mat4 | null {
-    if (this.held === null || this.baseTransform === null) return null;
+    if (this.held === null) return null;
     this.manualRotation = multiply(fromYRotation(angleRadians), this.manualRotation);
     const transform = this.composed();
     this.state = {
@@ -436,6 +478,7 @@ export class PlacementController {
     this.wasPickedUp = false;
     this.baseTransform = null;
     this.manualRotation = IDENTITY;
+    this.pendingRotationSeed = null;
     this.scene.hideGhost();
     return brick;
   }
