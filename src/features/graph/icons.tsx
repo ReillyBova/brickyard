@@ -23,9 +23,9 @@ function Icon({ children, ...props }: SVGProps<SVGSVGElement> & { children: Reac
 }
 
 /**
- * Three connected nodes reads literally as "the connection graph" — for the toolbar's
- * `graph` mode option once the mode switch is wired (see `index.ts`); not used
- * standalone any more now that the floating entry button is gone.
+ * Three connected nodes reads literally as "the connection graph" — exported (see
+ * `index.ts`) for the toolbar's `graph` mode option icon. Not used inside this slice's
+ * own components any more now that the floating entry button is gone.
  */
 export function GraphIcon(props: SVGProps<SVGSVGElement>) {
   return (

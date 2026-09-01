@@ -16,10 +16,6 @@ import { ColorPicker } from './ui/ColorPicker/ColorPicker';
 import { LDRAW_PALETTE } from './ui/ColorPicker/palette';
 import { PartsChest } from './ui/PartsChest/PartsChest';
 import { PART_CATALOG } from './ui/PartsChest/catalog';
-// GRAPH FEATURE MOUNT POINT — src/features/graph/ owns everything the entry control
-// opens. A toolbar with a reserved slot for this button is being built in parallel;
-// this floating control is the placeholder until the two are wired together at merge.
-import { GraphEntry } from './features/graph';
 
 /** LDraw 4 — classic brick red — so the chest always has a real active color to preview. */
 const DEFAULT_COLOR_CODE = 4;
@@ -183,9 +179,6 @@ function App() {
         }
         onOpenModel={setPendingModel}
       />
-      {/* GRAPH FEATURE MOUNT POINT — see src/features/graph/. Floats over every route
-          until the toolbar's reserved slot is wired up. */}
-      <GraphEntry />
     </RouteProvider>
   );
 }

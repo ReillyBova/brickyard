@@ -6,10 +6,10 @@
  *
  * Deliberately document-driven rather than session-driven: this component takes a
  * `SceneDocument` prop instead of calling a session hook itself, so it has no
- * compile-time dependency on `src/scene/interaction/`'s session context. The mode
- * switch that decides *when* this renders, and the call that reads the live document
- * out of `useEditorSession()` to pass in here, belong to the composition root — see
- * the note in `index.ts` for why that wiring isn't in this commit yet.
+ * compile-time dependency on `src/scene/interaction/`'s session context and is easy to
+ * mount directly against a hand-built document, in a test or otherwise. `GraphModeMount`
+ * (`./GraphModeMount.tsx`) is the zero-prop wrapper that reads `useEditorSession()` and
+ * passes its document in here — that's what the toolbar's mode switch should render.
  */
 import { useEffect, useRef, useState } from 'react';
 
