@@ -31,7 +31,9 @@
 
 .by-graph-toolbar {
   position: absolute;
-  bottom: var(--by-space-3);
+  /* Sits above this mode's own status bar, which shares the bottom-centre anchor —
+     without the offset the two stack on top of each other. */
+  bottom: calc(var(--by-space-3) + var(--by-statusbar-h) + var(--by-space-2));
   left: 50%;
   transform: translateX(-50%);
   z-index: var(--by-z-chrome);
