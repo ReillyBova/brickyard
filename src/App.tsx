@@ -28,11 +28,11 @@ import { ApertureIcon, EditorIcon, GraphModeIcon, PackageIcon, PaintbrushIcon } 
 import { PartsChest } from './ui/PartsChest/PartsChest';
 import { PART_CATALOG } from './ui/PartsChest/catalog';
 import { GraphModeMount } from './features/graph';
-import { EnvironmentPanel } from './features/pathtrace/EnvironmentPanel';
+import { RenderPanel } from './features/pathtrace/RenderPanel';
 import { DEFAULT_ENVIRONMENT } from './features/pathtrace/environments';
 import type { PathtraceEnvironment } from './features/pathtrace/environments';
 import { DEFAULT_LIGHTING } from './features/pathtrace/lighting';
-import type { LightingPreset } from './features/pathtrace/lighting';
+import type { LightingSettings } from './features/pathtrace/lighting';
 import { PathtraceToggle } from './features/pathtrace/PathtraceToggle';
 import type { PathtraceStats } from './features/pathtrace/PathTracerController';
 import { RestyleContainer } from './features/restyle';
@@ -208,7 +208,7 @@ function SandboxEditor({
   const [restyleOpen, setRestyleOpen] = useState(false);
   const [loadModelOpen, setLoadModelOpen] = useState(false);
   const [environment, setEnvironment] = useState<PathtraceEnvironment>(DEFAULT_ENVIRONMENT);
-  const [lighting, setLighting] = useState<LightingPreset>(DEFAULT_LIGHTING);
+  const [lighting, setLighting] = useState<LightingSettings>(DEFAULT_LIGHTING);
   const [pathtraceStats, setPathtraceStats] = useState<PathtraceStats | null>(null);
   // The path tracer shares this renderer's GL context, camera and controls rather than
   // opening a second one — see SceneRenderer.getPathtraceSnapshot().
@@ -236,18 +236,18 @@ function SandboxEditor({
     [selectedColorCode],
   );
 
-  // fps / rays cast / resolution, appended to the bottom status bar in render mode —
-  // BuilderCanvas owns the bar's layout, this only supplies its content (see
-  // `statusExtra` on BuilderCanvas and `onStats` on PathtraceToggle).
+  // fps / sample count, appended to the bottom status bar in render mode — BuilderCanvas owns
+  // the bar's layout, this only supplies its content (see `statusExtra` on BuilderCanvas and
+  // `onStats` on PathtraceToggle).
   const pathtraceStatusExtra =
     mode === 'render' && pathtraceStats?.status === 'rendering' ? (
       <span className="by-mono">
-        {Math.round(pathtraceStats.fps)} fps · {pathtraceStats.raysCast.toLocaleString()} rays ·{' '}
-        {Math.round(pathtraceStats.renderScale * 100)}% res
+        {Math.round(pathtraceStats.fps)} fps · {pathtraceStats.samples.toLocaleString()}{' '}
+        {pathtraceStats.samples === 1 ? 'sample' : 'samples'}
       </span>
     ) : mode === 'render' && pathtraceStats?.status === 'moving' ? (
-      // No trace runs while the camera moves — see PathTracerController — so there are no
-      // rays or resolution to report, only the live rasterized frame rate.
+      // No trace runs while the camera moves — see PathTracerController — so there's no
+      // sample count to report, only the live rasterized frame rate.
       <span className="by-mono">{Math.round(pathtraceStats.fps)} fps · live</span>
     ) : null;
 
@@ -364,7 +364,7 @@ function SandboxEditor({
             // better given back to the view.
             null
           ) : mode === 'render' ? (
-            <EnvironmentPanel
+            <RenderPanel
               environment={environment}
               onEnvironmentChange={setEnvironment}
               lighting={lighting}

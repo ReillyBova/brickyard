@@ -289,6 +289,54 @@ a:hover:not(.by-btn) { color: var(--by-accent-hover); }
 .by-switch.is-on { background: var(--by-accent); }
 .by-switch.is-on::after { transform: translateX(16px); }
 
+/* Slider — continuous values (angles, warmth, intensity). A native <input type="range">
+   skinned to the token set rather than a bespoke drag control. */
+.by-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: var(--by-control-h-sm);
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.by-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: var(--by-radius-pill);
+  background: var(--by-panel-sunken);
+}
+.by-slider::-moz-range-track {
+  height: 4px;
+  border-radius: var(--by-radius-pill);
+  background: var(--by-panel-sunken);
+}
+.by-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 15px;
+  height: 15px;
+  margin-top: -5.5px;
+  border-radius: var(--by-radius-pill);
+  background: var(--by-accent);
+  box-shadow: var(--by-shadow-sm);
+  transition: background var(--by-dur-instant) var(--by-ease-out);
+}
+.by-slider::-moz-range-thumb {
+  width: 15px;
+  height: 15px;
+  border: 0;
+  border-radius: var(--by-radius-pill);
+  background: var(--by-accent);
+  box-shadow: var(--by-shadow-sm);
+  transition: background var(--by-dur-instant) var(--by-ease-out);
+}
+.by-slider:hover::-webkit-slider-thumb,
+.by-slider:hover::-moz-range-thumb { background: var(--by-accent-hover); }
+.by-slider:active::-webkit-slider-thumb,
+.by-slider:active::-moz-range-thumb { background: var(--by-accent-press); }
+.by-slider:focus-visible { outline: none; }
+.by-slider:focus-visible::-webkit-slider-thumb { outline: 2px solid var(--by-accent); outline-offset: 2px; }
+.by-slider:focus-visible::-moz-range-thumb { outline: 2px solid var(--by-accent); outline-offset: 2px; }
+
 /* ── Tags ───────────────────────────────────────────────────────────────── */
 .by-tag {
   display: inline-flex;

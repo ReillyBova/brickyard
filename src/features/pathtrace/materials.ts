@@ -11,9 +11,9 @@
  * is just the default point in the same parameter space the other finishes occupy.
  *
  * `transparent` parts are solid tinted volumes, not thin dyed shells: `attenuationColor` and
- * `attenuationDistance` here are Beer-Lambert absorption parameters the trace shader
- * (`shaders.ts`) integrates over the ray's actual path length inside the part, not a flat
- * per-surface tint.
+ * `attenuationDistance` here are the same Beer-Lambert absorption parameters
+ * `MeshPhysicalMaterial`/three-gpu-pathtracer integrate over the ray's actual path length
+ * inside the part, not a flat per-surface tint.
  */
 
 import type { LDrawColor, MaterialClass } from '../../ldraw/types.ts';
