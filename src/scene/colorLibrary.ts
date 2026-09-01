@@ -1,28 +1,29 @@
 /**
- * Colour materials for rendering. Fetches and parses `LDConfig.ldr` once, then hands
- * out a cached three.js material per LDraw colour code.
+ * Colour materials for rendering: one cached three.js material per LDraw colour code,
+ * resolved from `src/ldraw/bundledLibrary.ts` — the same bundled `LDConfig.ldr` the
+ * color picker (`src/ui/ColorPicker/palette.ts`) builds its swatches from.
  *
- * This intentionally reuses `src/ldraw/colors.ts` — the same palette parser the rest of
- * the app uses — rather than re-parsing colour lines here.
+ * This used to fetch its own copy of `LDConfig.ldr` from the upstream mirror at
+ * runtime. That bought nothing — the data was already sitting in the bundle — and
+ * cost a real bug: the mirror's copy and the bundled fixture disagree on which codes
+ * exist, so a color the picker offered (bundled) could come back unresolved here
+ * (fetched) and silently render as `FALLBACK_COLOR`'s grey. One bundled copy, shared
+ * by both, makes that divergence structurally impossible rather than something a test
+ * has to keep catching after the fact.
  */
 
 import * as THREE from 'three';
 
-import { parseColorLibrary } from '../ldraw/colors.ts';
+import { BUNDLED_COLOR_LIBRARY } from '../ldraw/bundledLibrary.ts';
 import type { ColorLibrary, LDrawColor } from '../ldraw/types.ts';
 
 export type { ColorLibrary, LDrawColor };
 
-/** Fetches and parses the official colour palette from `baseUrl + 'LDConfig.ldr'`. */
-export async function fetchColorLibrary(baseUrl: string): Promise<ColorLibrary> {
-  const response = await fetch(`${baseUrl}LDConfig.ldr`);
-  if (!response.ok) {
-    throw new Error(`colorLibrary: failed to fetch LDConfig.ldr (${response.status})`);
-  }
-  const text = await response.text();
-  return parseColorLibrary(text);
-}
-
+/**
+ * Only reachable for a color code truly absent from the bundled library — malformed
+ * or hand-authored input, not anything the picker can offer, since the picker is
+ * built from this same library.
+ */
 const FALLBACK_COLOR: LDrawColor = {
   code: 16,
   name: 'Main_Colour',
@@ -39,7 +40,7 @@ export class MaterialCache {
   private readonly library: ColorLibrary;
   private readonly cache = new Map<number, THREE.MeshStandardMaterial>();
 
-  constructor(library: ColorLibrary) {
+  constructor(library: ColorLibrary = BUNDLED_COLOR_LIBRARY) {
     this.library = library;
   }
 

@@ -17,7 +17,7 @@ import type { BrickInstance } from '../model/types';
 import type { RaycastHit } from '../snap/types';
 
 import { ROOT_ROTATION_X, flipYZ } from './coords.ts';
-import { MaterialCache, fetchColorLibrary } from './colorLibrary.ts';
+import { MaterialCache } from './colorLibrary.ts';
 import { DEFAULT_PARTS_BASE_URL, LDrawPartSource } from './partSource.ts';
 import type { PartGeometrySource } from './partSource.ts';
 import { InstancedBatchManager, batchKey } from './instancedBatches.ts';
@@ -60,8 +60,9 @@ export class SceneRenderer {
   private readonly raycaster = new THREE.Raycaster();
 
   private readonly partSource: PartGeometrySource;
-  private materials: MaterialCache | null = null;
-  private readonly materialsReady: Promise<MaterialCache>;
+  /** Resolved from the bundled LDraw palette — see `colorLibrary.ts`. Synchronous
+   * (no fetch, no promise), unlike part geometry below. */
+  private readonly materials = new MaterialCache();
   private readonly geometryCache = new Map<string, Promise<THREE.BufferGeometry>>();
   private readonly brickMeta = new Map<BrickId, BrickMeta>();
 
@@ -108,11 +109,6 @@ export class SceneRenderer {
 
     const baseUrl = options.partsBaseUrl ?? DEFAULT_PARTS_BASE_URL;
     this.partSource = options.partSource ?? new LDrawPartSource(baseUrl);
-    this.materialsReady = fetchColorLibrary(baseUrl).then((library) => {
-      const cache = new MaterialCache(library);
-      this.materials = cache;
-      return cache;
-    });
   }
 
   // ---- geometry / material resolution -------------------------------------------
@@ -127,13 +123,10 @@ export class SceneRenderer {
 
   // ---- document sync --------------------------------------------------------------
 
-  /** Loads geometry/material if needed and adds (or updates) one brick's instance. */
+  /** Loads geometry if needed and adds (or updates) one brick's instance. */
   async addBrick(brick: BrickInstance): Promise<void> {
-    const [geometry, materials] = await Promise.all([
-      this.loadGeometry(brick.partId),
-      this.materialsReady,
-    ]);
-    const material = materials.get(brick.colorCode);
+    const geometry = await this.loadGeometry(brick.partId);
+    const material = this.materials.get(brick.colorCode);
     const batch = this.batches.getOrCreate(brick.partId, brick.colorCode, geometry, material);
 
     const matrix = new THREE.Matrix4().fromArray(brick.transform as unknown as number[]);
@@ -316,7 +309,7 @@ export class SceneRenderer {
     this.grid.dispose();
     this.sceneCamera.dispose();
     this.renderer.dispose();
-    this.materials?.dispose();
+    this.materials.dispose();
 
     for (const pending of this.geometryCache.values()) {
       pending.then((geometry) => geometry.dispose()).catch(() => {});

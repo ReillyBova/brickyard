@@ -21,7 +21,7 @@ import type { BrickId } from '../../types';
 import type { SceneDocument } from '../../model/types';
 
 import { DEFAULT_PARTS_BASE_URL, LDrawPartSource } from '../../scene/partSource.ts';
-import { MaterialCache, fetchColorLibrary } from '../../scene/colorLibrary.ts';
+import { MaterialCache } from '../../scene/colorLibrary.ts';
 import { InstancedBatchManager, batchKey, type InstancedBatch } from '../../scene/instancedBatches.ts';
 import { SceneCamera } from '../../scene/camera.ts';
 import { ROOT_ROTATION_X } from '../../scene/coords.ts';
@@ -88,8 +88,8 @@ export class GraphExplodeScene {
   private readonly sceneCamera: SceneCamera;
 
   private readonly partSource: LDrawPartSource;
-  private materials: MaterialCache | null = null;
-  private readonly materialsReady: Promise<MaterialCache>;
+  /** Resolved from the bundled LDraw palette — see `scene/colorLibrary.ts`. */
+  private readonly materials = new MaterialCache();
   private readonly geometryCache = new Map<string, Promise<THREE.BufferGeometry>>();
   private stopThemeWatch: (() => void) | null = null;
 
@@ -156,11 +156,6 @@ export class GraphExplodeScene {
 
     const baseUrl = options.partsBaseUrl ?? DEFAULT_PARTS_BASE_URL;
     this.partSource = new LDrawPartSource(baseUrl);
-    this.materialsReady = fetchColorLibrary(baseUrl).then((library) => {
-      const cache = new MaterialCache(library);
-      this.materials = cache;
-      return cache;
-    });
   }
 
   // ---- geometry -------------------------------------------------------------------
@@ -211,7 +206,6 @@ export class GraphExplodeScene {
   async setDocument(doc: SceneDocument): Promise<SetDocumentResult> {
     this.teardownDocument();
 
-    const materials = await this.materialsReady;
     const uniquePartIds = [...new Set([...doc.bricks.values()].map((b) => b.partId))];
     const geometries = new Map<string, THREE.BufferGeometry>();
     const skippedPartIds: string[] = [];
@@ -233,7 +227,7 @@ export class GraphExplodeScene {
       const geometry = geometries.get(instance.partId);
       if (geometry === undefined) continue;
 
-      const material = materials.get(instance.colorCode);
+      const material = this.materials.get(instance.colorCode);
       const batch = this.batches.getOrCreate(instance.partId, instance.colorCode, geometry, material);
       const baseMatrix = new THREE.Matrix4().fromArray(instance.transform as unknown as number[]);
       batch.add(id, baseMatrix);
@@ -501,7 +495,7 @@ export class GraphExplodeScene {
     this.stop();
     this.stopThemeWatch?.();
     this.teardownDocument();
-    this.materials?.dispose();
+    this.materials.dispose();
     this.sceneCamera.dispose();
     this.renderer.dispose();
   }
