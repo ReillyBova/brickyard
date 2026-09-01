@@ -10,7 +10,13 @@ const port = Number(process.env.PORT) || 5173
 export default defineConfig({
   base,
   plugins: [react()],
-  server: { port, strictPort: true },
+  // Agent worktrees live under .claude/worktrees/, inside the repo. Without this, every
+  // dev server watches every sibling worktree and force-reloads on their edits.
+  server: {
+    port,
+    strictPort: true,
+    watch: { ignored: ['**/.claude/worktrees/**'] },
+  },
   preview: { port: port + 1000, strictPort: true },
   test: {
     environment: 'node',
