@@ -46,13 +46,12 @@ export interface SceneStats {
 }
 
 /**
- * How many bricks may be mid-flight (animating in) at once. Independent of model size on
- * purpose: a burst of a few thousand bricks sharing one newly-resolved part all become
- * ready in the same tick, and animating all of them at once is both unreadable (nobody
- * can track that many moving pieces) and a frame-budget cliff on a 20k-brick model.
- * Anything over the cap queues (`pendingArrivals`) rather than landing instantly — a
- * model of any size still assembles visibly, just at a bounded, steady pace, without
- * needing to know the total brick count up front. See `updateArrivals`.
+ * Absolute ceiling on how many bricks may be mid-flight at once — a safety backstop, not
+ * the pacing mechanism. Pacing is `arrivalPacing()`'s job (below): admission is
+ * cadence-gated one brick at a time, so this cap is only ever approached by a batch
+ * large enough to push the cadence down near `ARRIVAL_MIN_CADENCE_MS` (tens of thousands
+ * of bricks). It exists so a pathological cadence/duration pairing still can't animate
+ * an unbounded number of instances at once and blow the frame budget.
  */
 const MAX_CONCURRENT_ARRIVALS = 48;
 
@@ -61,14 +60,65 @@ const MAX_CONCURRENT_ARRIVALS = 48;
 const ARRIVAL_CLICK_MIN_INTERVAL_MS = 220;
 
 /**
- * How many queued arrivals may start flying in the same `updateArrivals` tick. Geometry
- * for a part that's cached (or fast over the network) resolves for every brick that
- * shares it in the same microtask, so without this a whole waiting batch would be
- * admitted into the concurrency cap in one frame and settle in lockstep 480ms later — a
- * visible "clump" rather than a trickle. Spreading admission over a handful of frames is
- * enough to break that lockstep; it costs nothing once the queue is short.
+ * Target wall-clock time for an entire load's arrival stream, once the batch is big
+ * enough that `arrivalPacing()` isn't clamping toward `ARRIVAL_MAX_CADENCE_MS` instead
+ * (see there). This is what keeps a 1,845-brick model — or a 9,000-brick one — landing
+ * in "tens of seconds," not minutes, without the code needing a brick-count-specific
+ * special case: the cadence is just `ARRIVAL_STREAM_TOTAL_MS / batchSize`.
  */
-const ARRIVAL_ADMIT_PER_TICK = 4;
+const ARRIVAL_STREAM_TOTAL_MS = 18_000;
+
+/**
+ * Slowest allowed gap between one brick starting its flight and the next — the floor
+ * that keeps a small model's stream from crawling (`ARRIVAL_STREAM_TOTAL_MS / batchSize`
+ * would otherwise stretch a 5-brick load over 4 seconds *per brick*) and, not
+ * incidentally, comfortably above `ARRIVAL_CLICK_MIN_INTERVAL_MS` — a small model's
+ * clicks land far enough apart that the limiter has nothing to do.
+ */
+const ARRIVAL_MAX_CADENCE_MS = 240;
+
+/**
+ * Fastest allowed gap between admissions — the floor on the other end, so an
+ * extraordinarily large batch (tens of thousands of bricks) can't push the cadence to
+ * zero chasing `ARRIVAL_STREAM_TOTAL_MS`. Below this the stream is simply over budget
+ * rather than instantaneous; still bounded, just not exactly `ARRIVAL_STREAM_TOTAL_MS`.
+ */
+const ARRIVAL_MIN_CADENCE_MS = 4;
+
+/**
+ * How many bricks the stream aims to keep airborne at once, expressed as a multiple of
+ * the cadence: flight duration is `cadence * ARRIVAL_TARGET_CONCURRENCY`, clamped to
+ * `[ARRIVAL_MIN_FLIGHT_MS, --by-dur-arrival]`. Tie the flight duration to a fixed value
+ * instead and a fast cadence (a big model) leaves dozens airborne simultaneously — a
+ * swarm again, just delayed. Tie it to the cadence and the number in flight stays low
+ * and roughly constant regardless of model size, until the duration floor below takes
+ * over for very fast streams.
+ */
+const ARRIVAL_TARGET_CONCURRENCY = 4;
+
+/** Shortest flight `arrivalPacing()` will produce, however fast the cadence — under this
+ *  the fly-in-and-settle motion stops being readable as motion at all. A very large
+ *  model trades a low, roughly-constant concurrency for a higher one once the cadence
+ *  is fast enough to hit this floor; see `ARRIVAL_TARGET_CONCURRENCY`. */
+const ARRIVAL_MIN_FLIGHT_MS = 140;
+
+function clamp(value: number, lo: number, hi: number): number {
+  return Math.min(Math.max(value, lo), hi);
+}
+
+/**
+ * The cadence (gap between one brick's flight starting and the next's) and flight
+ * duration for a load of `batchSize` bricks, so the stream — whatever the model's size —
+ * reads as individual pieces arriving in sequence rather than either a crawl or a burst.
+ * `maxFlightMs` is `--by-dur-arrival` as authored (also how reduced-motion reaches this:
+ * `addBrick` never calls in with it at 0, since that path skips animation entirely, but
+ * the clamp handles it correctly regardless — `flightMs` comes out 0 too).
+ */
+function arrivalPacing(batchSize: number, maxFlightMs: number): { cadenceMs: number; flightMs: number } {
+  const cadenceMs = clamp(ARRIVAL_STREAM_TOTAL_MS / Math.max(batchSize, 1), ARRIVAL_MIN_CADENCE_MS, ARRIVAL_MAX_CADENCE_MS);
+  const flightMs = clamp(cadenceMs * ARRIVAL_TARGET_CONCURRENCY, ARRIVAL_MIN_FLIGHT_MS, maxFlightMs);
+  return { cadenceMs, flightMs };
+}
 
 /** One in-flight "fly in and settle" animation. Position-only: rotation is set to its
  *  final value immediately, which is enough to read as a piece arriving without the
@@ -83,9 +133,12 @@ interface Arrival {
 }
 
 /**
- * An arrival waiting for a free concurrency slot. Its brick is already placed in the
- * batch (at `from`, off-screen) so it exists for picking/removal purposes the instant
- * `addBrick` resolves — only the flight itself is deferred.
+ * An arrival waiting to be admitted, one at a time, at the cadence `arrivalPacing()`
+ * computed for it. Its brick is already placed in the batch (at `from`, off-screen) so
+ * it exists for picking/removal purposes the instant `addBrick` resolves — only the
+ * flight itself is deferred. Carries its own `cadenceMs`/`flightMs` rather than reading
+ * shared instance fields so two loads that happen to overlap (a merge fired mid-load,
+ * say) each keep the pacing they were computed for.
  */
 interface PendingArrival {
   id: BrickId;
@@ -93,6 +146,8 @@ interface PendingArrival {
   from: THREE.Vector3;
   to: THREE.Matrix4;
   toPosition: THREE.Vector3;
+  cadenceMs: number;
+  flightMs: number;
 }
 
 interface BrickMeta {
@@ -184,8 +239,14 @@ export class SceneRenderer {
 
   // ---- arrival animation (progressive load: fly in, settle) ---------------------------
   private readonly arrivals = new Map<BrickId, Arrival>();
-  /** Overflow past `MAX_CONCURRENT_ARRIVALS`, FIFO — see `PendingArrival`. */
+  /** Every arrival waits its turn here, admitted one at a time by `updateArrivals` — see
+   *  `PendingArrival`. `MAX_CONCURRENT_ARRIVALS` is a backstop, not why bricks queue. */
   private readonly pendingArrivals: PendingArrival[] = [];
+  /** `performance.now()` timestamp of the next admission — real wall-clock time, not a
+   *  frame count, so a throttled/backgrounded tab still paces at the same rate once it
+   *  wakes up (catching up in one tick rather than drifting slower forever) instead of
+   *  the stream's speed depending on the display's refresh rate. */
+  private nextAdmitAt = 0;
   private readonly arrivalSound = new SnapSound();
   private lastArrivalClickTime = -Infinity;
   private missingGeometryCount = 0;
@@ -282,15 +343,17 @@ export class SceneRenderer {
    * caller needing to coordinate that explicitly.
    *
    * A brick that resolves as part of a model load (`options.animate === true`, set only
-   * by `EditorSession.loadDocument` — see `AddBrickOptions` in `editor.ts`) becomes
-   * visible by flying in from off-screen and settling with `--by-ease-snap`'s overshoot
-   * (see `updateArrivals`, driven from the frame loop in `start()`) rather than popping
-   * in — that flight *is* the load's progress indicator, per the roadmap: "make the wait
-   * the product" rather than a numeric bar. Past `MAX_CONCURRENT_ARRIVALS` a brick queues
-   * (`pendingArrivals`, `PendingArrival`) rather than popping in instantly, so a burst of
-   * many bricks sharing one just-resolved part trickles in at a steady pace regardless of
-   * model size, instead of animating the first 48 and snapping the rest into place. It
-   * skips entirely when `--by-dur-arrival` reads 0 (`prefers-reduced-motion`).
+   * by `EditorSession.loadDocument`/`mergeDocument` — see `AddBrickOptions` in
+   * `editor.ts`) becomes visible by flying in from off-screen and settling with
+   * `--by-ease-snap`'s overshoot (see `updateArrivals`, driven from the frame loop in
+   * `start()`) rather than popping in — that flight *is* the load's progress indicator,
+   * per the roadmap: "make the wait the product" rather than a numeric bar. Every such
+   * brick queues (`pendingArrivals`, `PendingArrival`) and is admitted one at a time, on
+   * a cadence `arrivalPacing()` derives from `options.batchSize` — the whole point being
+   * a *stream* of individually-arriving pieces, at whatever pace keeps a batch of any
+   * size landing in roughly `ARRIVAL_STREAM_TOTAL_MS`, rather than a burst that animates
+   * the first few dozen at once and snaps the rest into place. It skips entirely when
+   * `--by-dur-arrival` reads 0 (`prefers-reduced-motion`).
    *
    * Every other caller — hand placement, undo/redo, restyle's recolor-as-remove-plus-
    * re-add — omits `animate` (or passes `false`), and lands instantly. Placement already
@@ -298,7 +361,7 @@ export class SceneRenderer {
    * they don't re-enact its arrival; and a restyle across a loaded model would otherwise
    * launch every recoloured brick off-screen and back.
    */
-  async addBrick(brick: BrickInstance, options?: { animate?: boolean }): Promise<void> {
+  async addBrick(brick: BrickInstance, options?: { animate?: boolean; batchSize?: number }): Promise<void> {
     let geometry: THREE.BufferGeometry;
     try {
       geometry = await this.loadGeometry(brick.partId);
@@ -346,24 +409,16 @@ export class SceneRenderer {
     const startMatrix = new THREE.Matrix4().compose(from, quaternion, scale);
     batch.add(brick.id, startMatrix);
 
-    if (this.arrivals.size >= MAX_CONCURRENT_ARRIVALS) {
-      // Every concurrency slot is taken: park this one off-screen, already placed in
-      // the batch, until `updateArrivals` admits it — see `PendingArrival`. This is
-      // what keeps a burst of many bricks sharing one just-resolved part from popping
-      // in instantly once the cap is hit; it trickles in instead, at whatever pace
-      // slots free up (and, at the front of a big queue, at `ARRIVAL_ADMIT_PER_TICK`).
-      this.pendingArrivals.push({ id: brick.id, batchKey: key, from, to: finalMatrix, toPosition: position });
-      return;
+    // Every animated brick queues, even the very first of a load — admission (not the
+    // concurrency cap) is what paces the stream now, so the first brick gets exactly the
+    // same one-at-a-time treatment as the four-thousandth. See `updateArrivals`.
+    if (this.pendingArrivals.length === 0 && this.arrivals.size === 0) {
+      // Starting a fresh stream: let the first brick fly on the very next tick rather
+      // than waiting out a full cadence gap it never had a reason to wait for.
+      this.nextAdmitAt = performance.now();
     }
-
-    this.arrivals.set(brick.id, {
-      batchKey: key,
-      from,
-      to: finalMatrix,
-      toPosition: position,
-      startTime: performance.now(),
-      duration: this.arrivalDurationMs,
-    });
+    const { cadenceMs, flightMs } = arrivalPacing(options?.batchSize ?? 1, this.arrivalDurationMs);
+    this.pendingArrivals.push({ id: brick.id, batchKey: key, from, to: finalMatrix, toPosition: position, cadenceMs, flightMs });
   }
 
   /**
@@ -397,8 +452,12 @@ export class SceneRenderer {
 
   /** Advances every in-flight arrival by one frame; called from the render loop. Settled
    *  arrivals snap exactly to their target transform and play a rate-limited click. Once
-   *  it's done settling this tick's arrivals, tops the concurrency slots it just freed
-   *  back up from `pendingArrivals` — see the module doc and `PendingArrival`. */
+   *  it's done settling this tick's arrivals, admits queued ones one at a time from
+   *  `pendingArrivals` at each one's own cadence — see the module doc and
+   *  `PendingArrival`. Time-based, not frame-based: a throttled or backgrounded tab
+   *  catches up to the correct cadence in one tick (the `while` below can run several
+   *  times) rather than the stream simply running slower for as long as frames are
+   *  scarce. */
   private updateArrivals(now: number): void {
     if (this.arrivals.size > 0) {
       for (const [id, arrival] of this.arrivals) {
@@ -426,11 +485,10 @@ export class SceneRenderer {
       }
     }
 
-    let admitted = 0;
     while (
-      admitted < ARRIVAL_ADMIT_PER_TICK &&
+      this.pendingArrivals.length > 0 &&
       this.arrivals.size < MAX_CONCURRENT_ARRIVALS &&
-      this.pendingArrivals.length > 0
+      now >= this.nextAdmitAt
     ) {
       const next = this.pendingArrivals.shift();
       if (next === undefined) break;
@@ -440,9 +498,9 @@ export class SceneRenderer {
         to: next.to,
         toPosition: next.toPosition,
         startTime: now,
-        duration: this.arrivalDurationMs,
+        duration: next.flightMs,
       });
-      admitted++;
+      this.nextAdmitAt += next.cadenceMs;
     }
   }
 
