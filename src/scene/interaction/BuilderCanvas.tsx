@@ -219,7 +219,7 @@ export function BuilderCanvas({
     // renderer forever, since `removeBrick` is a synchronous "remove if present" no-op
     // for a brick the renderer hasn't tracked yet. See `raceSafeSceneSync.ts`.
     const rendererSync: SceneSync = makeRaceSafeSceneSync({
-      addBrick: (brick) => renderer.addBrick(brick),
+      addBrick: (brick, options) => renderer.addBrick(brick, options),
       removeBrick: (id) => renderer.removeBrick(id),
       setBrickTransform: (id, transform) => renderer.setBrickTransform(id, transform),
     });
