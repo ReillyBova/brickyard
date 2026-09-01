@@ -66,7 +66,11 @@ const ARRIVAL_CLICK_MIN_INTERVAL_MS = 220;
  * in "tens of seconds," not minutes, without the code needing a brick-count-specific
  * special case: the cadence is just `ARRIVAL_STREAM_TOTAL_MS / batchSize`.
  */
-const ARRIVAL_STREAM_TOTAL_MS = 18_000;
+const ARRIVAL_STREAM_TOTAL_MS = 1_800;
+// Ten times faster than the original 18s target. Small and medium models keep the
+// same character — four or five pieces airborne — while very large ones ask for more
+// concurrency than MAX_CONCURRENT_ARRIVALS allows, so the backstop engages and they
+// stretch past this target rather than becoming a single burst.
 
 /**
  * Slowest allowed gap between one brick starting its flight and the next — the floor
@@ -75,7 +79,7 @@ const ARRIVAL_STREAM_TOTAL_MS = 18_000;
  * incidentally, comfortably above `ARRIVAL_CLICK_MIN_INTERVAL_MS` — a small model's
  * clicks land far enough apart that the limiter has nothing to do.
  */
-const ARRIVAL_MAX_CADENCE_MS = 240;
+const ARRIVAL_MAX_CADENCE_MS = 24;
 
 /**
  * Fastest allowed gap between admissions — the floor on the other end, so an
@@ -83,7 +87,7 @@ const ARRIVAL_MAX_CADENCE_MS = 240;
  * zero chasing `ARRIVAL_STREAM_TOTAL_MS`. Below this the stream is simply over budget
  * rather than instantaneous; still bounded, just not exactly `ARRIVAL_STREAM_TOTAL_MS`.
  */
-const ARRIVAL_MIN_CADENCE_MS = 4;
+const ARRIVAL_MIN_CADENCE_MS = 1;
 
 /**
  * How many bricks the stream aims to keep airborne at once, expressed as a multiple of
@@ -100,7 +104,7 @@ const ARRIVAL_TARGET_CONCURRENCY = 4;
  *  the fly-in-and-settle motion stops being readable as motion at all. A very large
  *  model trades a low, roughly-constant concurrency for a higher one once the cadence
  *  is fast enough to hit this floor; see `ARRIVAL_TARGET_CONCURRENCY`. */
-const ARRIVAL_MIN_FLIGHT_MS = 140;
+const ARRIVAL_MIN_FLIGHT_MS = 90;
 
 function clamp(value: number, lo: number, hi: number): number {
   return Math.min(Math.max(value, lo), hi);
