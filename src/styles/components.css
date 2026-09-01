@@ -770,6 +770,24 @@ a:hover { color: var(--by-accent-hover); }
   100% { transform: translateX(286%); }
 }
 
+/* Centered over the viewport while a bundled model imports — see routes/ModelPicker.tsx
+   and the seeding flow in App.tsx. */
+.by-model-load-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--by-space-3);
+  padding: var(--by-space-4);
+  background: color-mix(in srgb, var(--by-canvas) 70%, transparent);
+  pointer-events: none;
+}
+.by-model-load-overlay .by-progress {
+  width: min(320px, 80%);
+}
+
 /* ── Empty state ────────────────────────────────────────────────────────────
    BrickYard has three: an empty baseplate, an empty search, an empty
    selection. Each names the next action and offers it; none apologises.

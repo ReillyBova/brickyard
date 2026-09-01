@@ -13,7 +13,8 @@ import { useEffect, useRef, useState } from 'react';
 
 import { fromTranslation, fromYRotation, multiplyAll, positionOf } from '../../math';
 import { mintBrickId } from '../../model/ids.ts';
-import type { BrickInstance } from '../../model/types';
+import type { BrickInstance, SceneDocument } from '../../model/types';
+import type { PartDef } from '../../snap/types';
 import type { Mat4, Vec3 } from '../../types';
 import { SceneRenderer } from '../SceneRenderer.ts';
 import type { SelectionEntry } from '../selectionOverlay.ts';
@@ -42,6 +43,13 @@ const isUndo = (e: KeyboardEvent): boolean =>
 const isRedo = (e: KeyboardEvent): boolean =>
   (e.metaKey || e.ctrlKey) && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'));
 
+/** What a caller hands `BuilderCanvas` to replace the document — an imported model. */
+export interface DocumentSeed {
+  document: SceneDocument;
+  /** Every part id the document's bricks reference. */
+  parts: readonly PartDef[];
+}
+
 interface BuilderCanvasProps {
   /** The part id on the cursor, from the parts chest. `undefined` is selection mode. */
   heldPartId?: string;
@@ -49,9 +57,32 @@ interface BuilderCanvasProps {
   heldColorCode: number;
   /** Fired once a held piece lands, so the chest tile that put it on the cursor clears. */
   onHeldConsumed: () => void;
+  /**
+   * A whole document to load in place of whatever's on the baseplate — opening a
+   * bundled model. Import mechanics (fetch, parse, resolve parts) live above this
+   * component, in the composition root: this slice owns the one live session and what
+   * happens to it, not how a model gets turned into one.
+   */
+  seed?: DocumentSeed;
+  /** Fired once a seed has been loaded, so the caller can drop its reference to it. */
+  onSeedConsumed: () => void;
+  /**
+   * Reports the live `EditorSession` once it exists (and `null` on unmount), so the
+   * composition root can bind it into `EditorSessionProvider` — see
+   * `sessionContext.tsx`. Every other panel that reads or drives the canvas (toolbar,
+   * restyle, graph view) needs this same instance; without it, each invents its own.
+   */
+  onSessionReady?: (session: EditorSession | null) => void;
 }
 
-export function BuilderCanvas({ heldPartId, heldColorCode, onHeldConsumed }: BuilderCanvasProps): React.JSX.Element {
+export function BuilderCanvas({
+  heldPartId,
+  heldColorCode,
+  onHeldConsumed,
+  seed,
+  onSeedConsumed,
+  onSessionReady,
+}: BuilderCanvasProps): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [status, setStatus] = useState('');
   const [count, setCount] = useState(0);
@@ -60,6 +91,7 @@ export function BuilderCanvas({ heldPartId, heldColorCode, onHeldConsumed }: Bui
 
   // Reached into from the props-driven effects below, which run outside the mount
   // effect's own closure.
+  const rendererRef = useRef<SceneRenderer | null>(null);
   const placementRef = useRef<PlacementController | null>(null);
   const sessionRef = useRef<EditorSession | null>(null);
   const catalogRef = useRef<ReturnType<typeof createPartCatalog> | null>(null);
@@ -67,6 +99,10 @@ export function BuilderCanvas({ heldPartId, heldColorCode, onHeldConsumed }: Bui
   // props — kept current every render so a placement always calls the latest callback.
   const onHeldConsumedRef = useRef(onHeldConsumed);
   onHeldConsumedRef.current = onHeldConsumed;
+  const onSeedConsumedRef = useRef(onSeedConsumed);
+  onSeedConsumedRef.current = onSeedConsumed;
+  const onSessionReadyRef = useRef(onSessionReady);
+  onSessionReadyRef.current = onSessionReady;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -99,9 +135,11 @@ export function BuilderCanvas({ heldPartId, heldColorCode, onHeldConsumed }: Bui
     const session = new EditorSession(sceneSync);
     const placement = new PlacementController(renderer);
 
+    rendererRef.current = renderer;
     placementRef.current = placement;
     sessionRef.current = session;
     catalogRef.current = catalog;
+    onSessionReadyRef.current?.(session);
 
     const syncSelection = (): void => {
       const entries: SelectionEntry[] = [];
@@ -270,11 +308,23 @@ export function BuilderCanvas({ heldPartId, heldColorCode, onHeldConsumed }: Bui
       unsubscribe();
       sound.dispose();
       renderer.dispose();
+      rendererRef.current = null;
       placementRef.current = null;
       sessionRef.current = null;
       catalogRef.current = null;
+      onSessionReadyRef.current?.(null);
     };
   }, []);
+
+  // A whole document to load — opening a bundled model. The import itself already
+  // happened above this component; this just hands the result to the one session.
+  useEffect(() => {
+    const session = sessionRef.current;
+    if (!session || !seed) return;
+    session.loadDocument(seed.document, seed.parts);
+    rendererRef.current?.frameAll();
+    onSeedConsumedRef.current();
+  }, [seed]);
 
   // Clicking a part in the chest puts it on the cursor — the hold gesture — and clears
   // whatever was selected, since a placement gesture is starting, not a selection edit.

@@ -156,6 +156,21 @@ export class EditorSession {
   }
 
   /**
+   * Replace the whole document — opening a model, or returning to an empty sandbox.
+   * Fresh history: loading a model is a new starting point, not an edit to undo back
+   * past. `parts` must cover every part id the document references, or `lookup` and
+   * collision on those bricks silently no-op (see `docs/ARCHITECTURE.md`'s "fallback
+   * behaviour" — a part with no data still loads and renders, it just can't snap or
+   * collide, which is a property of the part, not of how it got here).
+   */
+  loadDocument(doc: SceneDocument, parts: Iterable<PartDef>): void {
+    for (const part of parts) this.registerPart(part);
+    const before = this.document;
+    this.history = createHistory(doc);
+    this.reconcile(before);
+  }
+
+  /**
    * Place a brick. Geometry and connectivity land in one transaction so undo restores
    * both — a `remove` alone would put the brick back with no edges. Returns the total
    * mate count, which is the only external use for a placement's engagement strength —
