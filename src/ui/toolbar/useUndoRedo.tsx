@@ -28,6 +28,13 @@ const MOD = isMac ? '⌘' : 'Ctrl';
  * mounted. `src/model/history.ts` is fully tested and has no interface of its own —
  * this hook, and `EditorSession`'s existing `undo()`/`redo()`/`canUndo`/`undoLabel`
  * wrapper around it, are that interface.
+ *
+ * `BuilderCanvas.tsx` also binds ⌘Z/⌘⇧Z/⌘Y, scoped to its own `<canvas>` element (see
+ * its "Focusable so it can receive keys without a window-level listener" comment) — a
+ * deliberate choice so the mouse hand's most common shortcut doesn't need window focus
+ * plumbing. This window-level binding covers everywhere else (the toolbar itself, the
+ * chest, the color panel) per docs/DESIGN.md's "keyboard control is a real mode, not a
+ * fallback" rule, and skips the canvas so the two don't both fire off one keystroke.
  */
 export function useUndoRedo(session: UndoRedoSession): readonly [ToolbarAction, ToolbarAction] {
   // Re-render on every history change; the labels and disabled state are read fresh
@@ -37,6 +44,7 @@ export function useUndoRedo(session: UndoRedoSession): readonly [ToolbarAction, 
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
+      if ((event.target as HTMLElement | null)?.tagName === 'CANVAS') return;
       const mod = isMac ? event.metaKey : event.ctrlKey;
       if (!mod) return;
       const key = event.key.toLowerCase();
