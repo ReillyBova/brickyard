@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { basisOf, IDENTITY, fromTranslation, positionOf } from '../../math';
+import { axisOf, basisOf, IDENTITY, fromAxisAngle, fromTranslation, multiplyAll, positionOf } from '../../math';
 import { createDocument } from '../../model';
 import { edgeIdFor, mintBrickId } from '../../model/ids';
 import type { BrickInstance } from '../../model/types';
@@ -561,5 +561,93 @@ describe('anchorFrame', () => {
   it('is null for an id with no graph node at all', async () => {
     const s = new EditorSession(recordingScene());
     expect(s.anchorFrame('nope' as BrickId)).toBeNull();
+  });
+});
+
+/**
+ * The bug this guards: BuilderCanvas's keyboard rotation (Shift+Left/Right) used to
+ * pivot on the selection's own centroid rather than the connector actually holding it
+ * in place. That is fine only when the mated connector happens to sit at the centroid —
+ * true of a piece resting squarely under another, false the moment the mate is
+ * off-centre, which single-stud and corner mates are. Pivoting on the centroid swings
+ * the seated connector off the lattice, breaking the mate and reading back as a
+ * collision. Pivoting on the connector itself (`anchorFrame`), about its own axis, is
+ * what `BuilderCanvas`'s `rotationAbout` now does; these tests build the identical
+ * delta matrix by hand — anchor position and axis, one `fromAxisAngle` about it — and
+ * drive it through `transformSelection`, the same entry point the keyboard uses, so the
+ * mate re-solve and collision check are the real ones, not a stand-in.
+ */
+describe('rotating a mated brick about its anchor (off-centre mate survives a quarter turn)', () => {
+  /** Delta for rotating `angleRadians` about `anchor`'s own position and axis — what
+   * `BuilderCanvas`'s `rotationAbout` builds for a mated selection. */
+  function anchorRotation(anchor: Mat4, angleRadians: number): Mat4 {
+    const pivot = positionOf(anchor);
+    const axis = axisOf(anchor);
+    const negPivot: [number, number, number] = [-pivot[0], -pivot[1], -pivot[2]];
+    return multiplyAll(fromTranslation(pivot), fromAxisAngle(axis, angleRadians), fromTranslation(negPivot));
+  }
+
+  it('survives a quarter turn about the anchor when the mate is off-centre', async () => {
+    const part = await brick2x4WithOccupancy();
+    const s = new EditorSession(recordingScene());
+    s.registerPart(part);
+
+    const lower = instance(part, IDENTITY);
+    s.place(lower, part);
+
+    // Offset three stud pitches in X and one in Z: the two 2x4s share exactly one
+    // stud, at a corner far from the upper brick's own origin (60, -24, 20) — an
+    // off-centre mate, not the squarely-stacked case the old centroid pivot handled
+    // fine by accident.
+    const upper = instance(part, fromTranslation([60, -BRICK_HEIGHT, 20]));
+    s.place(upper, part);
+    const edgeBefore = [...s.document.graph.edges.values()][0];
+    expect(edgeBefore).toBeDefined();
+    expect(edgeBefore.mates).toHaveLength(1);
+
+    const anchor = s.anchorFrame(upper.id);
+    expect(anchor).not.toBeNull();
+
+    const applied = s.transformSelection(
+      [upper.id],
+      anchorRotation(anchor as Mat4, Math.PI / 2),
+      'Rotate brick',
+    );
+
+    // Not read back as a collision — the whole bug.
+    expect(applied).toBe(true);
+    // The anchoring mate survives the turn (rotating about the seated stud, this
+    // corner rotation actually brings a second stud into engagement too — the point
+    // is that it is at least one, not zero).
+    expect(s.document.graph.edges.size).toBe(1);
+    expect([...s.document.graph.edges.values()][0].mates.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('the same rotation about the selection centroid instead breaks the mate — this is the bug', async () => {
+    const part = await brick2x4WithOccupancy();
+    const s = new EditorSession(recordingScene());
+    s.registerPart(part);
+
+    const lower = instance(part, IDENTITY);
+    s.place(lower, part);
+    const upper = instance(part, fromTranslation([60, -BRICK_HEIGHT, 20]));
+    s.place(upper, part);
+    expect(s.document.graph.edges.size).toBe(1);
+
+    // The pre-fix behaviour: pivot on the brick's own transform origin about world Y,
+    // exactly what BuilderCanvas's old `rotationAbout` built.
+    const centroid = positionOf(upper.transform);
+    const negCentroid: [number, number, number] = [-centroid[0], -centroid[1], -centroid[2]];
+    const oldDelta = multiplyAll(
+      fromTranslation(centroid),
+      fromAxisAngle([0, 1, 0], Math.PI / 2),
+      fromTranslation(negCentroid),
+    );
+
+    s.transformSelection([upper.id], oldDelta, 'Rotate brick');
+
+    // Swinging the seated stud off the lattice breaks the connection this instance was
+    // built to hold — confirming the diagnosis, not just the fix.
+    expect(s.document.graph.edges.size).toBe(0);
   });
 });

@@ -698,6 +698,118 @@ describe('pick up', () => {
     expect(placed).not.toBeNull();
     expect(c.holding).toBe(false);
   });
+
+  it('keeps the rotation a placed piece had when it is picked back up', async () => {
+    // The bug: pickUp reset manualRotation to IDENTITY unconditionally, so a piece
+    // placed at some rotation came back up in the bare, unrotated orientation the next
+    // resolved candidate happened to have — the piece hasn't changed, only what's
+    // holding it has, so its orientation shouldn't reset either.
+    const part = await brick2x4();
+    const studPos = await aStudOn(part, IDENTITY);
+    const scene = stubScene({ brick: 'seed' as BrickId, point: studPos, normal: [0, -1, 0] });
+
+    const c = new PlacementController(scene);
+    c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+    c.hold(part);
+    c.move(0, 0);
+    const rotated = c.rotateManually(Math.PI / 2);
+    expect(rotated).not.toBeNull();
+    const placed = c.commit('rotated' as BrickId);
+    expect(placed).not.toBeNull();
+    const placedTransform = (placed as NonNullable<typeof placed>).transform;
+
+    // Same gesture BuilderCanvas's double-click handler performs: the brick is removed
+    // from both indexes, picked up at its own last transform, and repainted at the
+    // same cursor position — a mouse that never left the piece it just picked up.
+    c.remove((placed as NonNullable<typeof placed>).id);
+    c.pickUp(part, 4, placedTransform);
+    const afterPickup = c.move(0, 0);
+
+    // Picked straight back up and put straight back down: exactly the same transform,
+    // rotation included — not just the position.
+    expect(afterPickup).toEqual(placedTransform);
+  });
+
+  it('a rotation preserved from pick-up still persists as the cursor keeps moving', async () => {
+    // The seeded rotation must behave exactly like any other manualRotation from here
+    // on — surviving a move to a different candidate, not just the first repaint.
+    const part = await brick2x4();
+    const studA = await aStudOn(part, IDENTITY);
+    const scene = stubScene({ brick: 'seed' as BrickId, point: studA, normal: [0, -1, 0] });
+
+    const c = new PlacementController(scene);
+    c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+    c.hold(part);
+    c.move(0, 0);
+    c.rotateManually(Math.PI / 2);
+    const placed = c.commit('rotated' as BrickId);
+    const placedTransform = (placed as NonNullable<typeof placed>).transform;
+
+    c.remove((placed as NonNullable<typeof placed>).id);
+    c.pickUp(part, 4, placedTransform);
+    c.move(0, 0);
+    // A cursor move onto a different candidate (Tab-equivalent) — the base changes,
+    // the seeded spin must still be layered on top of it.
+    expect(c.current.candidates.length).toBeGreaterThan(1);
+    c.cycle();
+
+    const withoutRotation = c.current.candidates[c.current.index].transform;
+    expect(c.current.transform).not.toEqual(withoutRotation);
+  });
+});
+
+describe('rotation input while holding is never gated', () => {
+  // The user's own diagnosis: rotating is how you search for a valid placement, so
+  // refusing rotation exactly when the current position doesn't work yet — no
+  // candidate, no valid base — is backwards. It's the moment rotating is needed most.
+  it('accepts a rotation with no candidate under the cursor, and applies it once one exists', async () => {
+    let hit: { brick: BrickId; point: Vec3; normal: Vec3 } | null;
+    const part = await brick2x4();
+    const studPos = await aStudOn(part, IDENTITY);
+    hit = { brick: 'seed' as BrickId, point: [1000, 1000, 1000], normal: [0, -1, 0] };
+    const scene: PlacementScene = {
+      pick: () => hit,
+      pickRay: () => ({ origin: [0, -500, 0] as Vec3, direction: [0, 1, 0] as Vec3 }),
+      showGhost: async () => {},
+      hideGhost: () => {},
+    };
+
+    const c = new PlacementController(scene);
+    c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+    c.hold(part);
+    c.move(0, 0);
+    // Nowhere to land: no candidates, and a hit exists so there is no ground fallback
+    // either — this is the exact state that used to refuse rotation.
+    expect(c.current.candidates).toHaveLength(0);
+    expect(c.current.transform).toBeNull();
+
+    const rotated = c.rotateManually(Math.PI / 2);
+    // Nothing to show yet, but the call itself must not be refused — no exception, no
+    // silent early return distinguishable from "the piece isn't held at all".
+    expect(rotated).toBeNull();
+
+    // The cursor finds a real stud. The spin dialled in while stranded must still take
+    // effect, exactly as if it had been applied here instead of moments earlier.
+    hit = { brick: 'seed' as BrickId, point: studPos, normal: [0, -1, 0] };
+    c.move(0, 0);
+
+    expect(c.current.transform).not.toBeNull();
+    expect(c.current.transform).not.toEqual(c.current.candidates[0]?.transform);
+  });
+
+  it('rotateManually only refuses when nothing is held at all', async () => {
+    const part = await brick2x4();
+    const scene = stubScene(null);
+    const c = new PlacementController(scene);
+
+    expect(c.rotateManually(Math.PI / 2)).toBeNull();
+
+    c.hold(part);
+    // Over empty space, groundPlacement supplies a base — rotation is accepted and
+    // has something to show immediately.
+    c.move(0, 0);
+    expect(c.rotateManually(Math.PI / 2)).not.toBeNull();
+  });
 });
 
 describe('keyboard nudge while holding', () => {

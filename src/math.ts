@@ -68,6 +68,12 @@ export function fromYRotation(radians: number): Mat4 {
   return glMat4.fromYRotation(out4(), radians) as number[];
 }
 
+/** Rotation about an arbitrary axis through the origin — what a keyboard rotation
+ * about a sideways-mounted connector needs, since its axis is not world Y. */
+export function fromAxisAngle(axis: Vec3, radians: number): Mat4 {
+  return glMat4.fromRotation(out4(), radians, input(axis)) as number[];
+}
+
 export function fromTranslation(position: Vec3): Mat4 {
   return glMat4.fromTranslation(out4(), input(position)) as number[];
 }
