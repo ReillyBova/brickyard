@@ -9,6 +9,7 @@
  */
 
 import * as THREE from 'three';
+import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 import { readColorToken, watchTheme } from './theme.ts';
 
@@ -27,6 +28,22 @@ import type { SelectionEntry } from './selectionOverlay.ts';
 import { createBaseplateGrid } from './grid.ts';
 import type { BaseplateGrid } from './grid.ts';
 import { SceneCamera } from './camera.ts';
+
+/** One flattened brick instance, for `getPathtraceSnapshot()` below. */
+export interface PathtraceBrickInstance {
+  readonly geometry: THREE.BufferGeometry;
+  readonly colorCode: number;
+  readonly matrix: THREE.Matrix4;
+}
+
+/** Read-only handles `src/features/pathtrace/` renders the live scene through. */
+export interface PathtraceSnapshot {
+  readonly renderer: THREE.WebGLRenderer;
+  readonly camera: THREE.PerspectiveCamera;
+  readonly controls: OrbitControls;
+  readonly instances: readonly PathtraceBrickInstance[];
+  readonly backgroundColor: THREE.Color | null;
+}
 
 export interface SceneStats {
   drawCalls: number;
@@ -263,6 +280,35 @@ export class SceneRenderer {
       box.setFromObject(this.batches.root);
     }
     this.sceneCamera.frame(box);
+  }
+
+  // ---- pathtrace mount point -----------------------------------------------------------
+  // Read-only integration seam for src/features/pathtrace/. It shares this WebGLRenderer,
+  // camera and OrbitControls rather than opening a second GL context, and flattens every
+  // InstancedMesh batch into per-brick instances because three-mesh-bvh (and every path
+  // tracer built on it) has no notion of instancing. Nothing here is written by pathtrace.
+
+  /** A snapshot of what's on the baseplate right now, for building a path-traced scene. */
+  getPathtraceSnapshot(): PathtraceSnapshot {
+    const instances: PathtraceBrickInstance[] = [];
+    for (const mesh of this.batches.meshes) {
+      const key = mesh.userData.batchKey as string | undefined;
+      if (key === undefined) continue;
+      const separator = key.lastIndexOf(' ');
+      const colorCode = Number(key.slice(separator + 1));
+      for (let i = 0; i < mesh.count; i++) {
+        const matrix = new THREE.Matrix4();
+        mesh.getMatrixAt(i, matrix);
+        instances.push({ geometry: mesh.geometry, colorCode, matrix });
+      }
+    }
+    return {
+      renderer: this.renderer,
+      camera: this.sceneCamera.camera,
+      controls: this.sceneCamera.controls,
+      instances,
+      backgroundColor: this.scene.background instanceof THREE.Color ? this.scene.background.clone() : null,
+    };
   }
 
   // ---- lifecycle ----------------------------------------------------------------------
