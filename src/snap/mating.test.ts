@@ -313,6 +313,44 @@ describe('hard connections, end to end on real parts', () => {
     index.remove(brick(1));
   });
 
+  it('a real asymmetric slide connector refuses a mate approached from the opposite end', async () => {
+    // 6141's own decorative stud is real, measured proof that `slide` alone does not mean
+    // "no true end": `R 10 3 · R 6 4`, a flared base narrowing to a tip — reads
+    // differently forwards and backwards, unlike a genuinely bidirectional Technic pin or
+    // axle. Reusing the wide, slide-reaching search for its axis check as well let a real
+    // neighbour's socket (98138, a round tile) match it 15 LDU away pointing the wrong
+    // way entirely, in Saturn V, in the corpus this project ships. That pairing must stay
+    // rejected.
+    const plate = await part('6141');
+    const tile = await part('98138');
+    const stud = plate.connections.find((c) => c.id === 'parts/6141.dat#1')!;
+    const socket = tile.connections[0];
+    expect(stud.slide).toBe(true);
+    expect(isCompatible(stud, socket)).toBe(true);
+
+    index.insert(brick(1), plate, IDENTITY);
+
+    // Seated normally (co-directional) first, as a sanity check that this pair really
+    // can mate at all before checking the direction that must be refused.
+    const seated = solveMating(tile, socket, stud, IDENTITY, 0);
+    expect(findMates(tile, seated, index)).toHaveLength(1);
+
+    // Flip 180 degrees about the socket's own local X, pivoting on its connector origin
+    // exactly as the axle case above does: same seat, axis reversed.
+    const flipAboutX: Mat4 = [1, 0, 0, 0, 0, -1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1];
+    const pm = pointMatrix(socket);
+    const flipped = multiply(seated, multiply(pm, multiply(flipAboutX, invert(pm))));
+
+    const before = worldPoint(socket, seated);
+    const after = worldPoint(socket, flipped);
+    expect(after.position).toEqual(before.position);
+    const d = after.axis[0] * before.axis[0] + after.axis[1] * before.axis[1] + after.axis[2] * before.axis[2];
+    expect(d).toBeCloseTo(-1, 6);
+
+    expect(findMates(tile, flipped, index)).toHaveLength(0);
+    index.remove(brick(1));
+  });
+
   it('a bar seats in a clip', async () => {
     const flag = await part('2335'); // Flag 2 x 2, carries two SNAP_CLP clips
     const lightsaber = await part('30374'); // Bar 4L Lightsaber Blade
