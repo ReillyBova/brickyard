@@ -21,6 +21,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import type { Bounds } from '../types';
 import { boundsFromPositions } from '../ldraw/bounds';
 import type { PartGeometry } from '../ldraw/types';
+import { unpackGeometry } from '../ldraw/geometryBaked.ts';
 import { loadBakedParts, type BakedParts } from './bakedParts.ts';
 import { ConcurrencyPool } from './concurrencyPool.ts';
 import { withRetry } from './retry.ts';
@@ -216,28 +217,71 @@ function toLoadedPart(part: PartGeometry): LoadedPart {
 }
 
 /**
- * Prefers bundled chest geometry over `fallback`. The chest (`DEFAULT_CHEST` in
- * `tools/prebake.ts`, see docs/PREBAKE.md) is a couple dozen popular parts baked into
- * `geometry.bin` and shipped to every visitor; a chest part resolves from an
- * already-downloaded typed array with no network request and no subfile tree walk. Any
- * part outside the chest — the overwhelming majority of the library — falls straight
- * through to `fallback` unchanged, exactly as if this wrapper weren't there.
+ * Resolves a part's geometry through the three delivery tiers, cheapest first — see
+ * `docs/PREBAKE.md`.
  *
- * `loadBakedParts` itself never rejects and never blocks on a missing or unreadable
- * bake — see its own doc — so this adds no new failure mode over `fallback` alone.
+ * 1. **Bundled.** The chest lives in `geometry.bin`, already downloaded, so a chest part
+ *    is a typed array away: no request, no subfile walk.
+ * 2. **Hosted.** Every part the bundled models use has its own `baked/geometry/<id>.bin`
+ *    on our own origin — one request, HTTP/2, cached independently by the browser, in
+ *    place of the roughly twenty cross-origin requests a tree walk costs.
+ * 3. **Fetched.** Anything else falls through to `fallback` and the upstream walk,
+ *    unchanged, exactly as if this wrapper weren't here.
+ *
+ * Every tier degrades into the next. A missing hosted file, a truncated one, a reader
+ * that cannot make sense of the bytes, an offline origin — each is a miss, not an error,
+ * and lands on `fallback`. `loadBakedParts` never rejects either, so this whole chain
+ * adds no failure mode over `fallback` alone; the worst case is the speed you had before
+ * any of it existed.
  */
 export class BakedPartSource implements PartGeometrySource {
   private readonly fallback: PartGeometrySource;
   private readonly baked: Promise<BakedParts>;
+  private readonly baseUrl: string;
+  /** In-flight and settled hosted lookups, so a part is fetched at most once per session. */
+  private readonly hosted = new Map<string, Promise<PartGeometry | null>>();
 
-  constructor(fallback: PartGeometrySource, baked: Promise<BakedParts> = loadBakedParts()) {
+  constructor(
+    fallback: PartGeometrySource,
+    baked: Promise<BakedParts> = loadBakedParts(),
+    baseUrl: string = import.meta.env.BASE_URL,
+  ) {
     this.fallback = fallback;
     this.baked = baked;
+    this.baseUrl = baseUrl;
   }
 
   async load(partId: string): Promise<LoadedPart> {
     const { geometry } = await this.baked;
-    const baked = geometry.get(partId);
-    return baked !== undefined ? toLoadedPart(baked) : this.fallback.load(partId);
+    const bundled = geometry.get(partId);
+    if (bundled !== undefined) return toLoadedPart(bundled);
+
+    const hosted = await this.loadHosted(partId);
+    if (hosted !== null) return toLoadedPart(hosted);
+
+    return this.fallback.load(partId);
+  }
+
+  /**
+   * One hosted file, or null when this part has none. Null covers every way the tier can
+   * come up empty — a 404 for an uncovered part, a truncated file, a network that failed
+   * — because the caller's response to all of them is the same: try the next tier.
+   */
+  private loadHosted(partId: string): Promise<PartGeometry | null> {
+    let pending = this.hosted.get(partId);
+    if (pending === undefined) {
+      pending = (async () => {
+        try {
+          const response = await fetch(`${this.baseUrl}baked/geometry/${partId}.bin`);
+          if (!response.ok) return null;
+          const parts = unpackGeometry(await response.arrayBuffer());
+          return parts?.get(partId) ?? null;
+        } catch {
+          return null;
+        }
+      })();
+      this.hosted.set(partId, pending);
+    }
+    return pending;
   }
 }
