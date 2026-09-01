@@ -57,7 +57,9 @@ export interface PathtraceStats {
    *  fully faded in. */
   readonly status: 'building' | 'moving' | 'rendering';
   readonly samples: number;
-  readonly frameMs: number;
+  /** Smoothed over a real wall-clock window — see the `fpsWindow*`/`smoothedFps` fields — not a
+   *  single frame's `1000 / frameMs`, which jitters and, under a throttled rAF, can read
+   *  absurdly high. */
   readonly fps: number;
   readonly triangleCount: number;
 }
@@ -106,7 +108,18 @@ export class PathTracerController {
   };
 
   private rafHandle: number | null = null;
-  private lastFrameMs = 0;
+
+  /** fps is a rate, not a per-call reciprocal — `1000 / frameMs` on a single `requestAnimationFrame`
+   *  callback is both jittery (frame time varies call to call even at a steady rate) and, in
+   *  environments where rAF is throttled (a backgrounded/hidden tab), wildly wrong: callbacks can
+   *  fire in a tight catch-up burst with near-zero elapsed time between them, which a per-frame
+   *  reciprocal reports as thousands of fps. Counting frames over a real wall-clock window and
+   *  smoothing across windows is robust to both. */
+  private fpsWindowStart = 0;
+  private fpsWindowFrames = 0;
+  private smoothedFps = 0;
+  private static readonly FPS_WINDOW_MS = 500;
+  private static readonly FPS_SMOOTHING = 0.3;
 
   private onStats: ((stats: PathtraceStats) => void) | null = null;
 
@@ -184,6 +197,9 @@ export class PathTracerController {
 
   start(onStats: (stats: PathtraceStats) => void): void {
     this.onStats = onStats;
+    this.fpsWindowStart = 0;
+    this.fpsWindowFrames = 0;
+    this.smoothedFps = 0;
     const tick = (): void => {
       this.renderFrame();
       this.rafHandle = requestAnimationFrame(tick);
@@ -262,7 +278,6 @@ export class PathTracerController {
 
   private renderFrame(): void {
     if (this.pathTracer === null) return;
-    const frameStart = performance.now();
 
     this.controls.update();
     this.pathTracer.renderSample();
@@ -270,17 +285,38 @@ export class PathTracerController {
     // Mirrors the library's own settle timing (`renderDelay` before it starts accumulating,
     // `fadeDuration` to cross-fade the trace in) so the UI's "moving" label tracks exactly the
     // window in which `renderSample()` is actually drawing the raster fallback.
+    const now = performance.now();
     const settleMs = this.pathTracer.renderDelay + this.pathTracer.fadeDuration;
-    const moving = performance.now() - this.lastCameraUpdateAt < settleMs;
+    const moving = now - this.lastCameraUpdateAt < settleMs;
 
-    this.lastFrameMs = performance.now() - frameStart;
     this.onStats?.({
       status: moving ? 'moving' : 'rendering',
       samples: this.pathTracer.samples,
-      frameMs: this.lastFrameMs,
-      fps: this.lastFrameMs > 0 ? 1000 / this.lastFrameMs : 0,
+      fps: this.updateFps(now),
       triangleCount: this.baked?.triangleCount ?? 0,
     });
+  }
+
+  /** Counts frames over a real elapsed wall-clock window (`FPS_WINDOW_MS`) rather than deriving
+   *  a rate from a single frame's duration, then exponentially smooths across windows so the
+   *  displayed number settles instead of jumping every window. Robust to a throttled or
+   *  backgrounded tab: a burst of rAF callbacks with near-zero gaps between them still only
+   *  counts as frames-per-real-millisecond over the window, not a per-callback reciprocal. */
+  private updateFps(now: number): number {
+    if (this.fpsWindowStart === 0) this.fpsWindowStart = now;
+    this.fpsWindowFrames += 1;
+
+    const elapsed = now - this.fpsWindowStart;
+    if (elapsed >= PathTracerController.FPS_WINDOW_MS) {
+      const windowFps = (this.fpsWindowFrames * 1000) / elapsed;
+      this.smoothedFps =
+        this.smoothedFps === 0
+          ? windowFps
+          : this.smoothedFps + PathTracerController.FPS_SMOOTHING * (windowFps - this.smoothedFps);
+      this.fpsWindowFrames = 0;
+      this.fpsWindowStart = now;
+    }
+    return this.smoothedFps;
   }
 
   dispose(): void {
