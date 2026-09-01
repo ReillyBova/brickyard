@@ -188,6 +188,34 @@ export class SceneRenderer {
     };
   }
 
+  /**
+   * The camera's current ground-plane orientation, in LDU: `forward` is the direction
+   * away from the camera along the horizontal plane (what "further away" reads as on
+   * screen), `right` is the camera's screen-right, also flattened to the ground. Both
+   * are unit length.
+   *
+   * This is what makes a keyboard nudge move a selected piece the way the arrow points
+   * *on screen* rather than along fixed world axes — orbit the camera behind the model
+   * and world-space arrows read as reversed, because "left" on screen has become
+   * world +X instead of -X. Read fresh on every keypress rather than cached, since the
+   * camera can orbit between nudges.
+   */
+  groundBasis(): { forward: Vec3; right: Vec3 } {
+    const camera = this.sceneCamera.camera;
+    const forward = new THREE.Vector3();
+    camera.getWorldDirection(forward);
+    forward.y = 0;
+    // Looking straight down or up flattens to zero; fall back to the camera's default
+    // starting orientation rather than producing a degenerate (NaN) direction.
+    if (forward.lengthSq() < 1e-8) forward.set(0, 0, -1);
+    forward.normalize();
+    const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+    return {
+      forward: flipYZ(forward.x, forward.y, forward.z),
+      right: flipYZ(right.x, right.y, right.z),
+    };
+  }
+
   /** Returns null when the ray hits nothing. */
   pick(ndcX: number, ndcY: number): RaycastHit | null {
     this.raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.sceneCamera.camera);

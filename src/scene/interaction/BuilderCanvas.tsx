@@ -270,22 +270,32 @@ export function BuilderCanvas({
       const y = fine ? FINE_Y : STEP_Y;
       const deg = fine ? FINE_ROTATE_DEG : ROTATE_DEG;
 
+      // Screen-relative, not world-relative: read fresh on every keypress, because the
+      // camera can have orbited since the last one. Without this, "left" reads as
+      // world -X regardless of where the camera is looking — correct only until
+      // someone orbits behind the model, at which point every arrow reads reversed.
+      const ground = renderer.groundBasis();
+      const along = (dir: Vec3, magnitude: number): Mat4 =>
+        fromTranslation([dir[0] * magnitude, dir[1] * magnitude, dir[2] * magnitude]);
+
       switch (event.key) {
         case 'ArrowLeft':
           if (event.shiftKey) session.transformSelection(selection, rotationDelta((-deg * Math.PI) / 180), rotateLabel);
-          else session.transformSelection(selection, fromTranslation([-xz, 0, 0]), label);
+          else session.transformSelection(selection, along(ground.right, -xz), label);
           break;
         case 'ArrowRight':
           if (event.shiftKey) session.transformSelection(selection, rotationDelta((deg * Math.PI) / 180), rotateLabel);
-          else session.transformSelection(selection, fromTranslation([xz, 0, 0]), label);
+          else session.transformSelection(selection, along(ground.right, xz), label);
           break;
         case 'ArrowUp':
-          if (!event.shiftKey) session.transformSelection(selection, fromTranslation([0, 0, -xz]), label);
+          if (!event.shiftKey) session.transformSelection(selection, along(ground.forward, xz), label);
           break;
         case 'ArrowDown':
-          if (!event.shiftKey) session.transformSelection(selection, fromTranslation([0, 0, xz]), label);
+          if (!event.shiftKey) session.transformSelection(selection, along(ground.forward, -xz), label);
           break;
         case 'PageUp':
+          // Vertical, not screen-relative: world Y stays "up" regardless of camera
+          // azimuth, so this one key needs no camera correction.
           session.transformSelection(selection, fromTranslation([0, -y, 0]), label);
           break;
         case 'PageDown':
