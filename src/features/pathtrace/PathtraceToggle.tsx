@@ -113,7 +113,7 @@ export function PathtraceToggle({
       renderRaster: () => sceneRenderer.renderOnce(),
     });
     controllerRef.current = controller;
-    setStats({ status: 'building', samples: 0, frameMs: 0, fps: 0, triangleCount: 0 });
+    setStats({ status: 'building', samples: 0, fps: 0, triangleCount: 0 });
 
     controller
       .build(snapshot, { environment, lighting })
@@ -174,10 +174,12 @@ export function PathtraceToggle({
         </button>
       </div>
       )}
-      {/* The numeric readout (fps, rays cast, resolution, samples, triangles) lives in
-          BuilderCanvas's bottom status bar via `onStats` — see App.tsx. This transient
-          readout is only for the one state that bar has no room to explain: build in
-          progress, before there's a frame to show. */}
+      {/* The numeric readout (fps, samples) lives in BuilderCanvas's bottom status bar via
+          `onStats` — see App.tsx. Resolution and rays-cast aren't shown: the library owns its
+          own internal render scale and ray budget now, and neither is exposed in a way that
+          would mean what it used to under the hand-written frame loop. This transient readout
+          is only for the one state that bar has no room to explain: build in progress, before
+          there's a frame to show. */}
       {active && stats?.status === 'building' && (
         <div className="by-pathtrace-stats" role="status">
           Building scene…
