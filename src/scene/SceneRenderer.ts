@@ -110,6 +110,7 @@ export interface PathtraceSnapshot {
 export function flattenPathtraceInstances(meshes: readonly THREE.InstancedMesh[]): PathtraceBrickInstance[] {
   const instances: PathtraceBrickInstance[] = [];
   for (const mesh of meshes) {
+    if (!isReadyInstancedMesh(mesh)) continue;
     const colorCode = mesh.userData.colorCode as number | undefined;
     if (colorCode === undefined) continue;
     for (let i = 0; i < mesh.count; i++) {
@@ -119,6 +120,22 @@ export function flattenPathtraceInstances(meshes: readonly THREE.InstancedMesh[]
     }
   }
   return instances;
+}
+
+/**
+ * Guards against a batch caught mid-construction. With several models loaded there are many
+ * more batches in flight and geometry resolves asynchronously (`PartGeometrySource`), so a
+ * batch can genuinely be in the list with no usable mesh yet, or a mesh whose geometry hasn't
+ * resolved its `position` attribute. Skipping those here — rather than assuming every entry is
+ * ready — is what keeps `bakePathtraceScene` from reading `.count` off `undefined`.
+ */
+function isReadyInstancedMesh(mesh: THREE.InstancedMesh | null | undefined): mesh is THREE.InstancedMesh {
+  if (mesh == null) return false;
+  if (typeof mesh.count !== 'number') return false;
+  const geometry = mesh.geometry;
+  if (geometry == null) return false;
+  const position = geometry.getAttribute?.('position');
+  return position != null && typeof position.count === 'number';
 }
 
 export class SceneRenderer {
