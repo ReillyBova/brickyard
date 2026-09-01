@@ -197,12 +197,28 @@ Baked masks pin the voxel size and fill semantics into shipped bytes, so the man
 the occupancy format version. Changing `OCC_CELL` or what the mask counts as solid is a re-bake and a
 version bump, not a code-only change.
 
+## The output is committed
+
+`public/baked/` is tracked, and Vite copies it into the build verbatim, so the deploy ships exactly
+the bytes a developer generated. Nothing bakes during `build`, `test` or deploy: CI never needs a
+mirror, and no build of this repository ever reaches upstream.
+
+Re-bake and commit the result when one of three things changes:
+
+- the mirror, after `npm run sync-mirror` reports anything other than a 304;
+- the meaning of a baked field — the packed compatibility key, mating-section selection, connection
+  id composition, occupancy cell size or fill rules;
+- the set of parts baked, which today is the shadow library's coverage plus the chest.
+
+A bake is a few seconds, so the cost of re-baking when unsure is nil, and the artifacts are a pure
+function of the mirror: an unnecessary re-bake produces byte-identical files and no commit.
+
 ## Development loop
 
 | Command | Network | Typical cost |
 | --- | --- | --- |
 | `npm run sync-mirror` | 2 conditional requests | seconds when unchanged |
-| `npm run prebake` | none | seconds to minutes |
+| `npm run prebake` | none | 3s across cores, 15s on one |
 | `npm run dev` | none | instant |
 | `npm run test` | none | fast |
 
