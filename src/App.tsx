@@ -37,7 +37,13 @@ function SandboxEditor() {
 
   return (
     <AppShell
-      viewport={<BuilderCanvas />}
+      viewport={
+        <BuilderCanvas
+          heldPartId={selectedPartId}
+          heldColorCode={selectedColorCode}
+          onHeldConsumed={() => setSelectedPartId(undefined)}
+        />
+      }
       chestPanel={
         <PartsChest
           parts={PART_CATALOG}

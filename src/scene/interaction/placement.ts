@@ -135,6 +135,11 @@ export class PlacementController {
     this.scene = scene;
   }
 
+  /** Whether a piece is on the cursor — placement mode versus selection mode. */
+  get holding(): boolean {
+    return this.held !== null;
+  }
+
   /** The piece on the cursor. Null puts the tool back into selection. */
   hold(part: PartDef | null, colorCode = this.heldColor): void {
     this.held = part;
@@ -142,6 +147,15 @@ export class PlacementController {
     this.previous = undefined;
     this.state = { candidates: [], index: 0, roll: 0, transform: null, valid: false };
     if (part === null) this.scene.hideGhost();
+  }
+
+  /**
+   * Recolor the held piece without disturbing candidates, roll or continuity — a
+   * palette click restyles the ghost in place, it doesn't restart placement.
+   */
+  recolor(colorCode: number): void {
+    this.heldColor = colorCode;
+    if (this.held !== null) void this.paint();
   }
 
   add(brick: PlacedBrick): void {
@@ -152,6 +166,20 @@ export class PlacementController {
   remove(id: BrickId): void {
     this.bricks.delete(id);
     this.index.remove(id);
+  }
+
+  /**
+   * Keep a placed brick's lookahead position current after it moves outside a
+   * placement gesture — a keyboard nudge, or an undo/redo landing on a new transform.
+   * Without this, candidate resolution and collision keep testing against where the
+   * brick used to be.
+   */
+  updateTransform(id: BrickId, transform: Mat4): void {
+    const existing = this.bricks.get(id);
+    if (!existing) return;
+    const updated: PlacedBrick = { ...existing, transform };
+    this.bricks.set(id, updated);
+    this.index.insert(id, existing.part, transform);
   }
 
   get placed(): readonly PlacedBrick[] {

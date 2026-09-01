@@ -22,6 +22,8 @@ import { DEFAULT_PARTS_BASE_URL, LDrawPartSource } from './partSource.ts';
 import type { PartGeometrySource } from './partSource.ts';
 import { InstancedBatchManager, batchKey } from './instancedBatches.ts';
 import { GhostPreview } from './ghost.ts';
+import { SelectionOverlay } from './selectionOverlay.ts';
+import type { SelectionEntry } from './selectionOverlay.ts';
 import { createBaseplateGrid } from './grid.ts';
 import type { BaseplateGrid } from './grid.ts';
 import { SceneCamera } from './camera.ts';
@@ -53,6 +55,7 @@ export class SceneRenderer {
   private readonly sceneCamera: SceneCamera;
   private readonly batches = new InstancedBatchManager();
   private readonly ghost = new GhostPreview();
+  private readonly selection = new SelectionOverlay();
   private readonly grid: BaseplateGrid;
   private readonly raycaster = new THREE.Raycaster();
 
@@ -88,6 +91,7 @@ export class SceneRenderer {
     this.root.rotation.x = ROOT_ROTATION_X;
     this.root.add(this.batches.root);
     this.root.add(this.ghost.mesh);
+    this.root.add(this.selection.group);
     this.grid = createBaseplateGrid();
     this.root.add(this.grid);
     this.scene.add(this.root);
@@ -163,6 +167,13 @@ export class SceneRenderer {
 
   hideGhost(): void {
     this.ghost.hide();
+  }
+
+  // ---- selection ----------------------------------------------------------------------
+
+  /** Outline every entry in `entries`; anything not in the list stops being outlined. */
+  setSelection(entries: readonly SelectionEntry[]): void {
+    this.selection.set(entries);
   }
 
   // ---- picking ------------------------------------------------------------------------
@@ -267,6 +278,7 @@ export class SceneRenderer {
     this.stop();
     this.batches.dispose();
     this.ghost.dispose();
+    this.selection.dispose();
     this.grid.dispose();
     this.sceneCamera.dispose();
     this.renderer.dispose();
