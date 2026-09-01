@@ -102,6 +102,11 @@ export function PathtraceToggle({
       renderer: snapshot.renderer,
       camera: snapshot.camera,
       controls: snapshot.controls,
+      // Render mode's frame loop calls this instead of tracing whenever the camera is
+      // moving — see PathTracerController's class doc. sceneRenderer's own RAF loop stays
+      // stopped for the duration (below), so this is the only thing drawing to the canvas
+      // during a drag; there is no second loop racing it for the frame.
+      renderRaster: () => sceneRenderer.renderOnce(),
     });
     controllerRef.current = controller;
     setStats({

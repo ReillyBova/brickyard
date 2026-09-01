@@ -203,7 +203,11 @@ void sampleOnePath( vec3 origin, vec3 direction, out vec3 radiance, out vec3 pri
       float shadowDist;
       bool blocked = traceScene( hitPoint + normal * EPS, sunDir, shadowFace, shadowBary, shadowDist );
       if ( ! blocked ) {
-        vec3 diffuseTerm = color * ( 1.0 - metalness ) * ( 1.0 - fresnel ) * NdotL;
+        // Lambertian BRDF is albedo/PI, not albedo — omitting PI here was overbrightening
+        // every directly-lit diffuse surface by a factor of pi (the dominant contributor
+        // to render mode reading "far too bright", since almost everything visible is a
+        // directly-lit diffuse surface).
+        vec3 diffuseTerm = color * ( 1.0 - metalness ) * ( 1.0 - fresnel ) * NdotL / 3.14159265;
         vec3 halfVec = normalize( sunDir - direction );
         float specAngle = max( dot( normal, halfVec ), 0.0 );
         float shininess = mix( 8.0, 220.0, 1.0 - roughness );

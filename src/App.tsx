@@ -235,6 +235,10 @@ function SandboxEditor({
         {Math.round(pathtraceStats.fps)} fps · {pathtraceStats.raysCast.toLocaleString()} rays ·{' '}
         {Math.round(pathtraceStats.renderScale * 100)}% res
       </span>
+    ) : mode === 'render' && pathtraceStats?.status === 'moving' ? (
+      // No trace runs while the camera moves — see PathTracerController — so there are no
+      // rays or resolution to report, only the live rasterized frame rate.
+      <span className="by-mono">{Math.round(pathtraceStats.fps)} fps · live</span>
     ) : null;
 
   return (
