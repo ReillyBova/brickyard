@@ -40,6 +40,9 @@ font name or px value. `design-language.html` renders the whole system in both t
 transforms, meta commands, and the connectivity model. Read it before working in `src/snap/` or
 `src/ldraw/`.
 
+`docs/MCP.md` covers the MCP channel — the tool surface, the transports that reach a browser tab, and
+the guidance the server carries. Read it before working in `src/features/mcp/` or `tools/bridge.ts`.
+
 ```
 src/ldraw/     part fetch + cache, LDConfig colors, baked catalog
 src/snap/      shadow parser, ConnectionPoint, compatibility, mating solver
