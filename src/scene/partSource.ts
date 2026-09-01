@@ -20,6 +20,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 
 import type { Bounds } from '../types';
 import { boundsFromPositions } from '../ldraw/bounds';
+import { applyKnownCorrections } from '../ldraw/corrections.ts';
 import type { PartGeometry } from '../ldraw/types';
 import { unpackGeometry } from '../ldraw/geometryBaked.ts';
 import { loadBakedParts, type BakedParts } from './bakedParts.ts';
@@ -157,7 +158,15 @@ export class LDrawPartSource implements PartGeometrySource {
 
   private ensureMaterials(): Promise<void> {
     if (this.materialsReady === null) {
-      this.materialsReady = this.loader.preloadMaterials(`${this.baseUrl}LDConfig.ldr`);
+      this.materialsReady = this.loader
+        .preloadMaterials(`${this.baseUrl}LDConfig.ldr`)
+        // `loadAsync` would call this itself before every parse; fetching text ourselves
+        // (below, so `applyKnownCorrections` can see it first) bypasses that, so it's
+        // called once here instead. Idempotent — it only (re)registers colour codes 16
+        // and 24, the pass-through main/edge materials every part relies on.
+        .then(() => {
+          this.loader.addDefaultMaterials();
+        });
     }
     return this.materialsReady;
   }
@@ -182,16 +191,16 @@ export class LDrawPartSource implements PartGeometrySource {
   }
 
   /**
-   * Tries every search prefix in turn, first success wins. `LDrawLoader.loadAsync`
-   * rejects on a non-OK fetch, so a miss on `parts/` just falls through to `p/` — see
-   * `PART_SEARCH_PREFIXES` above for why this matters.
+   * Tries every search prefix in turn, first success wins. A non-OK fetch just falls
+   * through to the next prefix (`p/` after a `parts/` miss) — see `PART_SEARCH_PREFIXES`
+   * above for why this matters.
    */
   private async loadUncached(partId: string): Promise<LoadedPart> {
     await this.ensureMaterials();
     let lastError: unknown;
     for (const prefix of PART_SEARCH_PREFIXES) {
       try {
-        const group = await this.loader.loadAsync(`${this.baseUrl}${prefix}${partId}.dat`);
+        const group = await this.fetchAndParse(partId, `${this.baseUrl}${prefix}${partId}.dat`);
         const geometry = mergeMeshGeometry(group);
         return { partId, geometry, bounds: boundsOf(geometry) };
       } catch (error) {
@@ -199,6 +208,23 @@ export class LDrawPartSource implements PartGeometrySource {
       }
     }
     throw lastError;
+  }
+
+  /**
+   * Fetches one file's text and parses it directly, rather than `LDrawLoader.loadAsync`'s
+   * own fetch-then-parse — the one seam where `applyKnownCorrections` can patch a part's
+   * text before `LDrawLoader` ever sees it (see `src/ldraw/corrections.ts`). Subfile
+   * references inside the parsed tree still resolve and fetch entirely through
+   * `LDrawLoader` itself (`setPartsLibraryPath`, set once in the constructor); this only
+   * intercepts the top-level file this call was asked to load.
+   */
+  private async fetchAndParse(partId: string, url: string): Promise<THREE.Group> {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`LDraw part fetch failed: ${url} (${response.status})`);
+    const text = applyKnownCorrections(partId, await response.text());
+    return new Promise<THREE.Group>((resolve, reject) => {
+      this.loader.parse(text, resolve, reject);
+    });
   }
 }
 
