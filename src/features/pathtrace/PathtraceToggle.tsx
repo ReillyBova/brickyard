@@ -137,10 +137,15 @@ export function PathtraceToggle({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
 
-  // Environment swaps rebake the floor's material but never the model's geometry/BVH.
+  // Environment swaps rebake the floor's material but never the model's geometry/BVH. Loading
+  // the HDRI is async (and cached — see `environments.ts`), so this fires and forgets rather
+  // than blocking the effect.
   useEffect(() => {
     if (!active) return;
-    controllerRef.current?.updateEnvironment(environment, lighting);
+    controllerRef.current?.updateEnvironment(environment, lighting).catch((error: unknown) => {
+      // eslint-disable-next-line no-console
+      console.error('pathtrace: failed to load environment', error);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, environment]);
 

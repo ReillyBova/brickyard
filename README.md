@@ -54,6 +54,7 @@ Group.
 | [LDraw Official Model Repository](https://library.ldraw.org/omr) | CC BY 4.0 |
 | [three-gpu-pathtracer](https://github.com/gkjohnson/three-gpu-pathtracer) | MIT |
 | [three.js](https://threejs.org/) | MIT |
+| [Poly Haven HDRIs](https://polyhaven.com/hdris) — render mode's environment maps | CC0 |
 
 ## License
 
