@@ -17,7 +17,7 @@ import { worldPoint } from '../../snap/mating';
 import { resolvePart } from '../../snap/resolvePart';
 import type { PartDef } from '../../snap/types';
 import type { BrickId, Mat4, Vec3 } from '../../types';
-import { PlacementController, type PlacementScene } from './placement';
+import { PlacementController, createPartCatalog, type PlacementScene } from './placement';
 
 const BRICK_HEIGHT = 24;
 
@@ -308,5 +308,65 @@ describe('keyboard', () => {
     );
     expect(source).not.toMatch(/['"]Tab['"]/);
     expect(source).not.toMatch(/preventDefault/);
+  });
+});
+
+describe('the part catalog', () => {
+  /** A `PartDef`'s worth of baked data for one real part, packed and read back. */
+  async function bakedFor(partId: string) {
+    const [points, triangles] = await Promise.all([
+      resolvePart(partId, fixtureReader),
+      partTriangles(partId, fixtureReader),
+    ]);
+    const bounds = boundsFromTriangles(triangles);
+    return {
+      connections: new Map([[partId, points]]),
+      occupancy: new Map([[partId, { bounds, occupancy: buildOccupancy(triangles, bounds, points) }]]),
+    };
+  }
+
+  it('serves a baked part without touching the network', async () => {
+    const baked = await bakedFor('3001');
+    // A catalog that reaches upstream for a baked part is the bug this guards: the whole
+    // point of the bake is that a covered part costs a lookup.
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (() => {
+      throw new Error('the catalog fetched for a baked part');
+    }) as typeof fetch;
+    try {
+      const catalog = createPartCatalog(Promise.resolve(baked));
+      const part = await catalog('3001');
+      expect(part.connections.length).toBe(baked.connections.get('3001')?.length);
+      expect(part.bounds).toEqual(baked.occupancy.get('3001')?.bounds);
+      expect(part.occupancy.bits).toEqual(baked.occupancy.get('3001')?.occupancy.bits);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('caches per part, so a second request is the same promise', async () => {
+    const catalog = createPartCatalog(Promise.resolve(await bakedFor('3001')));
+    expect(catalog('3001')).toBe(catalog('3001'));
+  });
+
+  it('falls back to resolving from source when the bake has no mask', async () => {
+    // Connections present, occupancy absent — a part must not be served from the bake on
+    // connections alone, or it would place with an empty mask and never collide.
+    const baked = await bakedFor('3001');
+    const catalog = createPartCatalog(
+      Promise.resolve({ connections: baked.connections, occupancy: new Map() }),
+    );
+    const reads: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string) => {
+      reads.push(String(url));
+      return { ok: false, text: async () => '' } as Response;
+    }) as unknown as typeof fetch;
+    try {
+      await catalog('3001').catch(() => undefined);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    expect(reads.length).toBeGreaterThan(0);
   });
 });
