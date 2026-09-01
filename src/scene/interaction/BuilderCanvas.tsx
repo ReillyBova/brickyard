@@ -212,6 +212,7 @@ export function BuilderCanvas({
       else onHeldConsumedRef.current();
       placement.hold(null);
       setIsHolding(false);
+      setBlocked(false);
     };
     cancelHoldRef.current = cancelHold;
 
@@ -246,6 +247,21 @@ export function BuilderCanvas({
     let suppressPickupUntil = 0;
     const PICKUP_SUPPRESS_MS = 400;
 
+    /**
+     * Mirrors PlacementController's current valid/transform into the statusbar's
+     * "Blocked" text. Every place that can change the ghost's transform or validity
+     * outside a mouse hover has to call this explicitly — React state doesn't know
+     * `placement.current` changed just because the imperative controller's internals
+     * did. Before this existed, only `onMove` called it, so resolving a collision (or
+     * causing one) with a keyboard nudge, a roll, a candidate cycle, or a fresh
+     * pick-up left the statusbar reporting whatever it last saw from the mouse —
+     * "Blocked" could sit there for good after the piece was actually clear again,
+     * reading as broken rotation rather than a stale label.
+     */
+    const syncBlocked = (): void => {
+      setBlocked(placement.current.transform !== null && !placement.current.valid);
+    };
+
     const onDown = (): void => {
       dragging = false;
     };
@@ -256,12 +272,25 @@ export function BuilderCanvas({
       }
       lastPointer = ndc(canvas, event);
       placement.move(...lastPointer);
-      setBlocked(placement.current.transform !== null && !placement.current.valid);
+      syncBlocked();
     };
 
     /** Commit whatever the ghost is showing. Shared by a placing click and a dblclick's trailing commit-check. */
+    /**
+     * Whatever the ghost is showing is exactly what gets committed — never a fresh
+     * re-solve at the click position. Re-solving here used to be unconditional, which
+     * silently discarded any keyboard adjustment made since the last real cursor
+     * move (a translate nudge, or — before rotateManually existed — a rotation):
+     * `resolveSnap` would recompute a transform from the cursor and the *pre-nudge*
+     * roll, and that recomputed transform, not the nudged one, is what got placed.
+     * The one legitimate reason to resolve here is a placement that has never been
+     * resolved at all — `state.transform` is still null because no pointermove has
+     * run since `hold()`/`pickUp()`, which needs literally zero cursor movement over
+     * the canvas between picking something up and clicking, an edge case worth
+     * covering but not one that should cost every ordinary placement its nudges.
+     */
     const commitHeld = (pos: readonly [number, number]): void => {
-      placement.move(...pos);
+      if (placement.current.transform === null) placement.move(...pos);
       const placed = placement.commit(mintBrickId());
       if (placed === null) return;
 
@@ -279,6 +308,7 @@ export function BuilderCanvas({
       onHeldConsumedRef.current();
       suppressPickupUntil = performance.now() + PICKUP_SUPPRESS_MS;
       setIsHolding(false);
+      setBlocked(false);
     };
 
     /**
@@ -337,6 +367,7 @@ export function BuilderCanvas({
       // next pointermove — otherwise the piece vanishes with no ghost until the mouse
       // happens to move.
       placement.move(...pos);
+      syncBlocked();
       setIsHolding(true);
     };
 
@@ -403,26 +434,22 @@ export function BuilderCanvas({
         // only mean something while something is mid-placement.
         if (event.key === ']') {
           placement.cycle();
+          syncBlocked();
           return;
         }
         if (event.key.toLowerCase() === 'r') {
           placement.rotate(lastPointer);
+          syncBlocked();
           return;
         }
 
-        const current = placement.current.transform;
-        const rotateGhost = (angleRadians: number): void => {
-          if (!current) return;
-          placement.nudge(rotationAbout([positionOf(current)], angleRadians));
-        };
-
         switch (event.key) {
           case 'ArrowLeft':
-            if (event.shiftKey) rotateGhost((-deg * Math.PI) / 180);
+            if (event.shiftKey) placement.rotateManually((-deg * Math.PI) / 180);
             else placement.nudge(along(ground.right, -xz));
             break;
           case 'ArrowRight':
-            if (event.shiftKey) rotateGhost((deg * Math.PI) / 180);
+            if (event.shiftKey) placement.rotateManually((deg * Math.PI) / 180);
             else placement.nudge(along(ground.right, xz));
             break;
           case 'ArrowUp':
@@ -436,6 +463,11 @@ export function BuilderCanvas({
           default:
             break;
         }
+        // Every branch above either called nudge() or fell through on a key this
+        // handler doesn't own — either way, re-reading placement.current here is
+        // cheap and correct, and it's what keeps this from needing its own copy of
+        // the switch to know which branches actually touched the transform.
+        syncBlocked();
         return;
       }
 
@@ -541,6 +573,7 @@ export function BuilderCanvas({
       placement.hold(null);
       setStatus('');
       setIsHolding(false);
+      setBlocked(false);
       return;
     }
 

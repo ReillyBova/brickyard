@@ -284,6 +284,35 @@ describe('collision', () => {
     expect(c.commit('ok' as BrickId)).not.toBeNull();
   });
 
+  it('nudge re-evaluates collision, flipping valid to true once resolved', async () => {
+    // The regression this guards: nudge() must funnel through the same
+    // collides()-on-the-new-transform path move() uses, not just mutate the transform
+    // and leave `valid` stale from wherever the piece was last resolved.
+    const part = await brick2x4();
+    const studPos = await aStudOn(part, IDENTITY);
+    const scene = stubScene({ brick: 'seed' as BrickId, point: studPos, normal: [0, -1, 0] });
+
+    const c = new PlacementController(scene);
+    c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+    // Squatting exactly where a brick stacked on the seed would land.
+    c.add({
+      id: 'squatter' as BrickId,
+      partId: '3001',
+      colorCode: 14,
+      transform: fromTranslation([0, -BRICK, 0]),
+      part,
+    });
+    c.hold(part);
+    c.move(0, 0);
+    expect(c.current.valid).toBe(false);
+
+    // Translate it well clear of the squatter — a real transform, not a re-hold.
+    c.nudge(fromTranslation([400, 0, 0]));
+
+    expect(c.current.valid).toBe(true);
+    expect(c.commit('nudged-clear' as BrickId)).not.toBeNull();
+  });
+
   it('does not treat a legitimate stack as a collision', async () => {
     const part = await brick2x4();
     const studPos = await aStudOn(part, IDENTITY);
@@ -451,6 +480,108 @@ describe('the part catalog', () => {
       globalThis.fetch = originalFetch;
     }
     expect(reads.length).toBeGreaterThan(0);
+  });
+});
+
+describe('persistent rotation', () => {
+  it('survives a cursor move — the regression behind three separate reports', async () => {
+    // The bug: a rotation applied via a one-off transform mutation lived only in
+    // state.transform, and the next move() overwrote it wholesale by re-deriving a
+    // transform from resolveSnap with the *stale* pre-rotation roll. rotateManually
+    // keeps the rotation in a field move() never touches, so it survives.
+    const part = await brick2x4();
+    const studPos = await aStudOn(part, IDENTITY);
+    const scene = stubScene({ brick: 'seed' as BrickId, point: studPos, normal: [0, -1, 0] });
+
+    const c = new PlacementController(scene);
+    c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+    c.hold(part);
+    c.move(0, 0);
+
+    const rotated = c.rotateManually(Math.PI / 2);
+    expect(rotated).not.toBeNull();
+    expect(rotated).not.toEqual(c.current.candidates[0]?.transform);
+
+    // The cursor "moves" back to the exact same spot — the ordinary case of a mouse
+    // that never left the piece it just rotated.
+    const afterMove = c.move(0, 0);
+
+    expect(afterMove).not.toBeNull();
+    expect(afterMove).toEqual(rotated);
+  });
+
+  it('survives a candidate change — moving from one stud to another keeps the orientation', async () => {
+    const part = await brick2x4();
+    const studA = await aStudOn(part, IDENTITY);
+    const scene = stubScene({ brick: 'seed' as BrickId, point: studA, normal: [0, -1, 0] });
+
+    const c = new PlacementController(scene);
+    c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+    c.hold(part);
+    c.move(0, 0);
+    c.rotateManually(Math.PI / 2);
+    expect(c.current.candidates.length).toBeGreaterThan(1);
+
+    c.cycle();
+
+    // A different candidate (different base position/orientation), same extra spin.
+    expect(c.current.index).not.toBe(0);
+    const withoutRotation = c.current.candidates[c.current.index].transform;
+    expect(c.current.transform).not.toEqual(withoutRotation);
+  });
+
+  it('resets when a new hold begins, so a fresh part does not inherit the last rotation', async () => {
+    const part = await brick2x4();
+    const studPos = await aStudOn(part, IDENTITY);
+    const scene = stubScene({ brick: 'seed' as BrickId, point: studPos, normal: [0, -1, 0] });
+
+    const c = new PlacementController(scene);
+    c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+    c.hold(part);
+    c.move(0, 0);
+    c.rotateManually(Math.PI / 2);
+
+    c.hold(part);
+    const fresh = c.move(0, 0);
+
+    expect(fresh).toEqual(c.current.candidates[0]?.transform);
+  });
+
+  it('commit places exactly the rotated transform the ghost was showing', async () => {
+    const part = await brick2x4();
+    const studPos = await aStudOn(part, IDENTITY);
+    const scene = stubScene({ brick: 'seed' as BrickId, point: studPos, normal: [0, -1, 0] });
+
+    const c = new PlacementController(scene);
+    c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+    c.hold(part);
+    c.move(0, 0);
+    const rotated = c.rotateManually(Math.PI / 2);
+    expect(rotated).not.toBeNull();
+
+    // No move() between the rotation and the commit — the ordinary "rotate, then
+    // click without moving the mouse" gesture.
+    const placed = c.commit('rotated-commit' as BrickId);
+
+    expect(placed).not.toBeNull();
+    expect(placed?.transform).toEqual(rotated);
+  });
+
+  it('a translate nudge also survives to a commit with no intervening cursor move', async () => {
+    const part = await brick2x4();
+    const scene = stubScene(null);
+
+    const c = new PlacementController(scene);
+    c.hold(part);
+    c.move(0, 0);
+    expect(c.current.transform).not.toBeNull(); // ground fallback
+
+    const nudged = c.nudge(fromTranslation([40, 0, 0]));
+    expect(nudged).not.toBeNull();
+    const placed = c.commit('nudged-commit' as BrickId);
+
+    expect(placed).not.toBeNull();
+    expect(placed?.transform).toEqual(nudged);
   });
 });
 
