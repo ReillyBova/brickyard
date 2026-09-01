@@ -46,6 +46,17 @@ export type AppMode = 'editor' | 'graph' | 'render';
 /** LDraw 4 — classic brick red — so the chest always has a real active color to preview. */
 const DEFAULT_COLOR_CODE = 4;
 
+/**
+ * Sample counts climb into the tens of thousands while a render converges, and a
+ * digit-by-digit count makes the status bar reflow on almost every frame. Rounding to
+ * a compact form keeps the width steady, which is what makes it readable at a glance.
+ */
+function formatSamples(samples: number): string {
+  if (samples < 1000) return `${samples}`;
+  const thousands = samples / 1000;
+  return `${thousands < 10 ? thousands.toFixed(1) : Math.round(thousands)}k`;
+}
+
 type ModelLoadState = { progress: number; phase: string } | { error: string } | null;
 
 /**
@@ -242,7 +253,7 @@ function SandboxEditor({
   const pathtraceStatusExtra =
     mode === 'render' && pathtraceStats?.status === 'rendering' ? (
       <span className="by-mono">
-        {Math.round(pathtraceStats.fps)} fps · {pathtraceStats.samples.toLocaleString()}{' '}
+        {Math.round(pathtraceStats.fps)} fps · {formatSamples(pathtraceStats.samples)}{' '}
         {pathtraceStats.samples === 1 ? 'sample' : 'samples'}
       </span>
     ) : mode === 'render' && pathtraceStats?.status === 'moving' ? (
