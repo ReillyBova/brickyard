@@ -50,14 +50,25 @@ export interface SceneStats {
  * purpose: a burst of a few thousand bricks sharing one newly-resolved part all become
  * ready in the same tick, and animating all of them at once is both unreadable (nobody
  * can track that many moving pieces) and a frame-budget cliff on a 20k-brick model.
- * Anything over the cap lands instantly instead of flying in — the natural degrade the
- * roadmap asks for, without needing to know the model's total brick count up front.
+ * Anything over the cap queues (`pendingArrivals`) rather than landing instantly — a
+ * model of any size still assembles visibly, just at a bounded, steady pace, without
+ * needing to know the total brick count up front. See `updateArrivals`.
  */
 const MAX_CONCURRENT_ARRIVALS = 48;
 
 /** However many arrivals land in a burst, the click reads as one seat, not a machine gun —
  *  see the arrival-sound note in `addBrick`. */
 const ARRIVAL_CLICK_MIN_INTERVAL_MS = 220;
+
+/**
+ * How many queued arrivals may start flying in the same `updateArrivals` tick. Geometry
+ * for a part that's cached (or fast over the network) resolves for every brick that
+ * shares it in the same microtask, so without this a whole waiting batch would be
+ * admitted into the concurrency cap in one frame and settle in lockstep 480ms later — a
+ * visible "clump" rather than a trickle. Spreading admission over a handful of frames is
+ * enough to break that lockstep; it costs nothing once the queue is short.
+ */
+const ARRIVAL_ADMIT_PER_TICK = 4;
 
 /** One in-flight "fly in and settle" animation. Position-only: rotation is set to its
  *  final value immediately, which is enough to read as a piece arriving without the
@@ -69,6 +80,19 @@ interface Arrival {
   toPosition: THREE.Vector3;
   startTime: number;
   duration: number;
+}
+
+/**
+ * An arrival waiting for a free concurrency slot. Its brick is already placed in the
+ * batch (at `from`, off-screen) so it exists for picking/removal purposes the instant
+ * `addBrick` resolves — only the flight itself is deferred.
+ */
+interface PendingArrival {
+  id: BrickId;
+  batchKey: string;
+  from: THREE.Vector3;
+  to: THREE.Matrix4;
+  toPosition: THREE.Vector3;
 }
 
 interface BrickMeta {
@@ -160,6 +184,8 @@ export class SceneRenderer {
 
   // ---- arrival animation (progressive load: fly in, settle) ---------------------------
   private readonly arrivals = new Map<BrickId, Arrival>();
+  /** Overflow past `MAX_CONCURRENT_ARRIVALS`, FIFO — see `PendingArrival`. */
+  private readonly pendingArrivals: PendingArrival[] = [];
   private readonly arrivalSound = new SnapSound();
   private lastArrivalClickTime = -Infinity;
   private missingGeometryCount = 0;
@@ -260,9 +286,11 @@ export class SceneRenderer {
    * visible by flying in from off-screen and settling with `--by-ease-snap`'s overshoot
    * (see `updateArrivals`, driven from the frame loop in `start()`) rather than popping
    * in — that flight *is* the load's progress indicator, per the roadmap: "make the wait
-   * the product" rather than a numeric bar. It degrades automatically past
-   * `MAX_CONCURRENT_ARRIVALS` and skips entirely when `--by-dur-arrival` reads 0
-   * (`prefers-reduced-motion`).
+   * the product" rather than a numeric bar. Past `MAX_CONCURRENT_ARRIVALS` a brick queues
+   * (`pendingArrivals`, `PendingArrival`) rather than popping in instantly, so a burst of
+   * many bricks sharing one just-resolved part trickles in at a steady pace regardless of
+   * model size, instead of animating the first 48 and snapping the rest into place. It
+   * skips entirely when `--by-dur-arrival` reads 0 (`prefers-reduced-motion`).
    *
    * Every other caller — hand placement, undo/redo, restyle's recolor-as-remove-plus-
    * re-add — omits `animate` (or passes `false`), and lands instantly. Placement already
@@ -304,7 +332,7 @@ export class SceneRenderer {
     const finalMatrix = new THREE.Matrix4().fromArray(brick.transform as unknown as number[]);
 
     const wantsAnimation = options?.animate === true;
-    if (!wantsAnimation || this.arrivalDurationMs <= 0 || this.arrivals.size >= MAX_CONCURRENT_ARRIVALS) {
+    if (!wantsAnimation || this.arrivalDurationMs <= 0) {
       batch.add(brick.id, finalMatrix);
       return;
     }
@@ -317,6 +345,17 @@ export class SceneRenderer {
     const from = this.computeArrivalStart(position);
     const startMatrix = new THREE.Matrix4().compose(from, quaternion, scale);
     batch.add(brick.id, startMatrix);
+
+    if (this.arrivals.size >= MAX_CONCURRENT_ARRIVALS) {
+      // Every concurrency slot is taken: park this one off-screen, already placed in
+      // the batch, until `updateArrivals` admits it — see `PendingArrival`. This is
+      // what keeps a burst of many bricks sharing one just-resolved part from popping
+      // in instantly once the cap is hit; it trickles in instead, at whatever pace
+      // slots free up (and, at the front of a big queue, at `ARRIVAL_ADMIT_PER_TICK`).
+      this.pendingArrivals.push({ id: brick.id, batchKey: key, from, to: finalMatrix, toPosition: position });
+      return;
+    }
+
     this.arrivals.set(brick.id, {
       batchKey: key,
       from,
@@ -357,31 +396,53 @@ export class SceneRenderer {
   }
 
   /** Advances every in-flight arrival by one frame; called from the render loop. Settled
-   *  arrivals snap exactly to their target transform and play a rate-limited click. */
+   *  arrivals snap exactly to their target transform and play a rate-limited click. Once
+   *  it's done settling this tick's arrivals, tops the concurrency slots it just freed
+   *  back up from `pendingArrivals` — see the module doc and `PendingArrival`. */
   private updateArrivals(now: number): void {
-    if (this.arrivals.size === 0) return;
-    for (const [id, arrival] of this.arrivals) {
-      const batch = this.batches.batchForKey(arrival.batchKey);
-      if (batch === undefined) {
-        this.arrivals.delete(id); // batch (and brick) removed mid-flight
-        continue;
-      }
+    if (this.arrivals.size > 0) {
+      for (const [id, arrival] of this.arrivals) {
+        const batch = this.batches.batchForKey(arrival.batchKey);
+        if (batch === undefined) {
+          this.arrivals.delete(id); // batch (and brick) removed mid-flight
+          continue;
+        }
 
-      const elapsed = now - arrival.startTime;
-      if (elapsed >= arrival.duration) {
-        batch.setTransform(id, arrival.to);
-        this.arrivals.delete(id);
-        this.playArrivalClick();
-        continue;
-      }
+        const elapsed = now - arrival.startTime;
+        if (elapsed >= arrival.duration) {
+          batch.setTransform(id, arrival.to);
+          this.arrivals.delete(id);
+          this.playArrivalClick();
+          continue;
+        }
 
-      const t = this.arrivalEase(elapsed / arrival.duration);
-      const position = arrival.from.clone().lerp(arrival.toPosition, t);
-      const rotation = new THREE.Quaternion();
-      const scale = new THREE.Vector3();
-      arrival.to.decompose(new THREE.Vector3(), rotation, scale);
-      const frame = new THREE.Matrix4().compose(position, rotation, scale);
-      batch.setTransform(id, frame);
+        const t = this.arrivalEase(elapsed / arrival.duration);
+        const position = arrival.from.clone().lerp(arrival.toPosition, t);
+        const rotation = new THREE.Quaternion();
+        const scale = new THREE.Vector3();
+        arrival.to.decompose(new THREE.Vector3(), rotation, scale);
+        const frame = new THREE.Matrix4().compose(position, rotation, scale);
+        batch.setTransform(id, frame);
+      }
+    }
+
+    let admitted = 0;
+    while (
+      admitted < ARRIVAL_ADMIT_PER_TICK &&
+      this.arrivals.size < MAX_CONCURRENT_ARRIVALS &&
+      this.pendingArrivals.length > 0
+    ) {
+      const next = this.pendingArrivals.shift();
+      if (next === undefined) break;
+      this.arrivals.set(next.id, {
+        batchKey: next.batchKey,
+        from: next.from,
+        to: next.to,
+        toPosition: next.toPosition,
+        startTime: now,
+        duration: this.arrivalDurationMs,
+      });
+      admitted++;
     }
   }
 
@@ -396,10 +457,16 @@ export class SceneRenderer {
   }
 
   removeBrick(id: BrickId): void {
-    // Cancels any in-flight arrival for this id — part of what makes loading a large
-    // model interruptible: replacing the document mid-flight (a fresh `loadDocument`,
-    // returning to an empty sandbox) removes bricks that never get to finish arriving.
+    // Cancels any in-flight (or still-queued) arrival for this id — part of what makes
+    // loading a large model interruptible: replacing the document mid-flight (a fresh
+    // `loadDocument`, returning to an empty sandbox) removes bricks that never get to
+    // finish arriving. Pruning the queue also avoids `updateArrivals` later admitting an
+    // entry for a brick `InstancedBatch` no longer tracks.
     this.arrivals.delete(id);
+    if (this.pendingArrivals.length > 0) {
+      const index = this.pendingArrivals.findIndex((p) => p.id === id);
+      if (index !== -1) this.pendingArrivals.splice(index, 1);
+    }
     this.batches.removeBrick(id);
     this.brickMeta.delete(id);
   }
