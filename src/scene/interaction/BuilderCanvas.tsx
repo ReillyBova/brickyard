@@ -410,7 +410,11 @@ export function BuilderCanvas({
       placement.pickUp(found.part, brick.colorCode, brick.transform);
       // Paint immediately at the current cursor position rather than waiting for the
       // next pointermove — otherwise the piece vanishes with no ghost until the mouse
-      // happens to move.
+      // happens to move. Also records it as lastPointer, so a rotate key pressed
+      // before the mouse next moves (rotateManually needs a pointer to re-solve
+      // against once a connector is mated — see PlacementController.rotateManually)
+      // has one to use, rather than whatever stale position preceded the pick-up.
+      lastPointer = pos;
       placement.move(...pos);
       syncBlocked();
       setIsHolding(true);
@@ -507,10 +511,10 @@ export function BuilderCanvas({
           return;
         }
         if (event.shiftKey && event.key === 'ArrowLeft') {
-          placement.rotateManually((-deg * Math.PI) / 180);
+          placement.rotateManually((-deg * Math.PI) / 180, lastPointer);
           syncBlocked();
         } else if (event.shiftKey && event.key === 'ArrowRight') {
-          placement.rotateManually((deg * Math.PI) / 180);
+          placement.rotateManually((deg * Math.PI) / 180, lastPointer);
           syncBlocked();
         }
         return;

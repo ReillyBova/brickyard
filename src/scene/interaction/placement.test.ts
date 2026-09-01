@@ -13,7 +13,7 @@ import { boundsFromTriangles, partTriangles } from '../../ldraw/bounds';
 import { fixtureReader } from '../../snap/__fixtures__/reader';
 import { buildOccupancy } from '../../snap/collision';
 import { unpackKey } from '../../snap/compat';
-import { worldPoint } from '../../snap/mating';
+import { solveMating, worldPoint } from '../../snap/mating';
 import { resolvePart } from '../../snap/resolvePart';
 import type { PartDef } from '../../snap/types';
 import type { BrickId, Mat4, Vec3 } from '../../types';
@@ -527,7 +527,9 @@ describe('persistent rotation', () => {
     // The bug: a rotation applied via a one-off transform mutation lived only in
     // state.transform, and the next move() overwrote it wholesale by re-deriving a
     // transform from resolveSnap with the *stale* pre-rotation roll. rotateManually
-    // keeps the rotation in a field move() never touches, so it survives.
+    // now feeds the rotation into the same resolve as an input (manualRoll, folded
+    // into the roll passed to resolveSnap — see PlacementController.move), so every
+    // later move() naturally reflects it rather than needing to preserve it separately.
     const part = await brick2x4();
     const studPos = await aStudOn(part, IDENTITY);
     const scene = stubScene({ brick: 'seed' as BrickId, point: studPos, normal: [0, -1, 0] });
@@ -535,11 +537,14 @@ describe('persistent rotation', () => {
     const c = new PlacementController(scene);
     c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
     c.hold(part);
-    c.move(0, 0);
+    const unrotated = c.move(0, 0);
 
-    const rotated = c.rotateManually(Math.PI / 2);
+    // Passing the pointer position, exactly as BuilderCanvas does with lastPointer —
+    // rotating a connector-solved piece has to re-resolve to bake the new roll into
+    // the solve (see PlacementController.rotateManually).
+    const rotated = c.rotateManually(Math.PI / 2, [0, 0]);
     expect(rotated).not.toBeNull();
-    expect(rotated).not.toEqual(c.current.candidates[0]?.transform);
+    expect(rotated).not.toEqual(unrotated);
 
     // The cursor "moves" back to the exact same spot — the ordinary case of a mouse
     // that never left the piece it just rotated.
@@ -558,15 +563,26 @@ describe('persistent rotation', () => {
     c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
     c.hold(part);
     c.move(0, 0);
-    c.rotateManually(Math.PI / 2);
+    c.rotateManually(Math.PI / 2, [0, 0]);
     expect(c.current.candidates.length).toBeGreaterThan(1);
 
     c.cycle();
-
-    // A different candidate (different base position/orientation), same extra spin.
     expect(c.current.index).not.toBe(0);
-    const withoutRotation = c.current.candidates[c.current.index].transform;
-    expect(c.current.transform).not.toEqual(withoutRotation);
+
+    // Every candidate from this resolve was solved with the same total roll baked in
+    // (see PlacementController.move), so the cycled candidate's own transform already
+    // carries the rotation — that's the fix, not a gap in it. What the "keeps the
+    // orientation" claim actually means now is that the rotation shows up here at all,
+    // which a parallel, unrotated resolve at the same candidate confirms.
+    const rotatedCandidate = c.current.candidates[c.current.index].transform;
+    expect(c.current.transform).toEqual(rotatedCandidate);
+
+    const fresh = new PlacementController(scene);
+    fresh.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+    fresh.hold(part);
+    fresh.move(0, 0);
+    const unrotatedCandidate = fresh.current.candidates[c.current.index]?.transform;
+    expect(c.current.transform).not.toEqual(unrotatedCandidate);
   });
 
   it('resets when a new hold begins, so a fresh part does not inherit the last rotation', async () => {
@@ -578,7 +594,7 @@ describe('persistent rotation', () => {
     c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
     c.hold(part);
     c.move(0, 0);
-    c.rotateManually(Math.PI / 2);
+    c.rotateManually(Math.PI / 2, [0, 0]);
 
     c.hold(part);
     const fresh = c.move(0, 0);
@@ -594,9 +610,10 @@ describe('persistent rotation', () => {
     const c = new PlacementController(scene);
     c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
     c.hold(part);
-    c.move(0, 0);
-    const rotated = c.rotateManually(Math.PI / 2);
+    const unrotated = c.move(0, 0);
+    const rotated = c.rotateManually(Math.PI / 2, [0, 0]);
     expect(rotated).not.toBeNull();
+    expect(rotated).not.toEqual(unrotated);
 
     // No move() between the rotation and the commit — the ordinary "rotate, then
     // click without moving the mouse" gesture.
@@ -621,6 +638,63 @@ describe('persistent rotation', () => {
 
     expect(placed).not.toBeNull();
     expect(placed?.transform).toEqual(nudged);
+  });
+});
+
+describe('rotating before placing keeps the connector aligned to the target', () => {
+  // The reported bug: rotating a piece in ghost mode rotated about the piece's own
+  // centre — fine for a symmetric footprint, but `solveMating` had already aligned a
+  // *specific* connector to the target assuming no further rotation was coming, so
+  // composing one on afterwards swung that connector away from the target by however
+  // far it sits from the piece's own origin. For a piece like a 2x4 (or a 2x3), that's
+  // a half stud pitch in each direction — the piece would visibly land *between* two
+  // studs, exactly where a real collision sits, rather than snapped onto one. The fix
+  // feeds the rotation into the solve itself (manualRoll, folded into the roll
+  // resolveSnap passes to solveMating — see PlacementController.move) instead of
+  // composing it onto the solve's result, so the aligned connector never moves no
+  // matter how the piece is turned.
+  it('a rotated piece still mates exactly on the target connector, not half a stud off', async () => {
+    const part = await brick2x4();
+    const studPos = await aStudOn(part, IDENTITY); // the seed's own top stud
+    const scene = stubScene({ brick: 'seed' as BrickId, point: studPos, normal: [0, -1, 0] });
+
+    const c = new PlacementController(scene);
+    c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+    c.hold(part);
+    c.move(0, 0);
+    expect(c.current.candidates.length).toBeGreaterThan(0);
+
+    // A quarter turn, with the pointer position BuilderCanvas always has by this
+    // point (lastPointer) — connector-solved rotation has to re-resolve to bake the
+    // new roll into the solve.
+    const rotated = c.rotateManually(Math.PI / 2, [0, 0]);
+    expect(rotated).not.toBeNull();
+    expect(c.current.candidates.length).toBeGreaterThan(0);
+    // Not read back as a collision — the whole symptom this bug produced.
+    expect(c.current.valid).toBe(true);
+    expect(c.current.candidates[c.current.index].mates.length).toBeGreaterThan(0);
+
+    // The transform is exactly the connector-aligned one: recomputed independently
+    // from the chosen candidate's own pairing via solveMating at roll 1 (a quarter
+    // turn), rather than trusting PlacementController's own internals.
+    const chosen = c.current.candidates[c.current.index];
+    const movingPoint = part.connections.find((p) => p.id === chosen.movingPoint);
+    const targetPoint = part.connections.find((p) => p.id === chosen.target.point);
+    expect(movingPoint).toBeDefined();
+    expect(targetPoint).toBeDefined();
+    expect(chosen.target.brick).toBe('seed');
+
+    const expected = solveMating(part, movingPoint!, targetPoint!, IDENTITY, 1);
+    expect(rotated).toEqual(expected);
+
+    // And directly: the moving connector coincides with the target's, not half a stud
+    // away from it — "snapping into place between the bricks" is what a mismatch here
+    // looks like.
+    const moved = worldPoint(movingPoint!, rotated!);
+    const target = worldPoint(targetPoint!, IDENTITY);
+    expect(moved.position[0]).toBeCloseTo(target.position[0], 5);
+    expect(moved.position[1]).toBeCloseTo(target.position[1], 5);
+    expect(moved.position[2]).toBeCloseTo(target.position[2], 5);
   });
 });
 
@@ -731,8 +805,8 @@ describe('pick up', () => {
   });
 
   it('a rotation preserved from pick-up still persists as the cursor keeps moving', async () => {
-    // The seeded rotation must behave exactly like any other manualRotation from here
-    // on — surviving a move to a different candidate, not just the first repaint.
+    // The seeded rotation must behave exactly like any other manualRoll from here on —
+    // surviving a move to a different candidate, not just the first repaint.
     const part = await brick2x4();
     const studA = await aStudOn(part, IDENTITY);
     const scene = stubScene({ brick: 'seed' as BrickId, point: studA, normal: [0, -1, 0] });
@@ -741,7 +815,7 @@ describe('pick up', () => {
     c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
     c.hold(part);
     c.move(0, 0);
-    c.rotateManually(Math.PI / 2);
+    c.rotateManually(Math.PI / 2, [0, 0]);
     const placed = c.commit('rotated' as BrickId);
     const placedTransform = (placed as NonNullable<typeof placed>).transform;
 
@@ -749,12 +823,17 @@ describe('pick up', () => {
     c.pickUp(part, 4, placedTransform);
     c.move(0, 0);
     // A cursor move onto a different candidate (Tab-equivalent) — the base changes,
-    // the seeded spin must still be layered on top of it.
+    // the seeded spin must still show up on it.
     expect(c.current.candidates.length).toBeGreaterThan(1);
     c.cycle();
+    const rotatedIndex = c.current.index;
 
-    const withoutRotation = c.current.candidates[c.current.index].transform;
-    expect(c.current.transform).not.toEqual(withoutRotation);
+    const fresh = new PlacementController(scene);
+    fresh.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+    fresh.hold(part);
+    fresh.move(0, 0);
+    const unrotatedCandidate = fresh.current.candidates[rotatedIndex]?.transform;
+    expect(c.current.transform).not.toEqual(unrotatedCandidate);
   });
 });
 
@@ -794,7 +873,22 @@ describe('rotation input while holding is never gated', () => {
     c.move(0, 0);
 
     expect(c.current.transform).not.toBeNull();
-    expect(c.current.transform).not.toEqual(c.current.candidates[0]?.transform);
+
+    // The candidate itself now carries the spin — every candidate from this resolve
+    // was solved with the same total roll (see PlacementController.move) — so compare
+    // against a parallel, unrotated resolve to confirm the spin actually took effect
+    // rather than being silently dropped while there was nowhere to land.
+    const fresh = new PlacementController({
+      pick: () => ({ brick: 'seed' as BrickId, point: studPos, normal: [0, -1, 0] }),
+      pickRay: () => ({ origin: [0, -500, 0] as Vec3, direction: [0, 1, 0] as Vec3 }),
+      showGhost: async () => {},
+      hideGhost: () => {},
+    });
+    fresh.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+    fresh.hold(part);
+    fresh.move(0, 0);
+
+    expect(c.current.transform).not.toEqual(fresh.current.candidates[0]?.transform);
   });
 
   it('rotateManually only refuses when nothing is held at all', async () => {

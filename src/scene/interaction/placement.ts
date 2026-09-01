@@ -24,6 +24,16 @@ const LDRAW_BASE = 'https://raw.githubusercontent.com/gkjohnson/ldraw-parts-libr
 const SHADOW_BASE = 'https://raw.githubusercontent.com/RolandMelkert/LDCadShadowLibrary/main/';
 
 /**
+ * The angle of a matrix known to be a pure rotation about local Y — `fromYRotation`'s
+ * inverse. Only ever called on a delta between two such rotations (see `move()`'s
+ * pick-up seeding), never on an arbitrary matrix, so no general-purpose decomposition
+ * is needed: `gl-matrix`'s own `fromYRotation` writes `m[0] = cos`, `m[8] = sin`.
+ */
+function angleOfYRotation(m: Mat4): number {
+  return Math.atan2(m[8], m[0]);
+}
+
+/**
  * Runtime connectivity, from the bake where possible and from source otherwise, cached
  * for the session either way.
  *
@@ -160,28 +170,47 @@ export class PlacementController {
    */
   private wasPickedUp = false;
   /**
-   * The last transform `resolveSnap`/`groundPlacement` actually produced — before
-   * `manualRotation` (below) is layered on top. Kept separately so a manual rotation
-   * can be recomposed instantly, without needing to "unbake" itself from
-   * `state.transform` (which already has the *previous* manualRotation folded in).
+   * The last transform `resolveSnap`/`groundPlacement` actually produced. What, if
+   * anything, still needs composing on top of it depends on `baseIsSolved` — see
+   * `composed()`.
    */
   private baseTransform: Mat4 | null = null;
   /**
-   * A persistent extra spin about the piece's own local +Y axis (the connector-axis
-   * convention throughout this codebase — see CLAUDE.md), composed on top of
-   * `baseTransform` every time either changes. This is what makes a rotation survive
-   * a candidate change or a cursor move: `move()` and `cycle()` only ever replace
-   * `baseTransform`, never this, so whatever the user last dialed in keeps applying
-   * to whichever base transform is current. Reset on `hold`/`pickUp`, exactly like
-   * `state.roll` already was — a fresh piece never inherits the last one's spin.
+   * Whether `baseTransform` came from a connector solve (`resolveSnap` found a
+   * candidate) rather than the ground fallback. A solved base already has
+   * `manualRoll` baked in — see `move()` — because `solveMating` was given the total
+   * roll directly; `composed()` must not layer it on again on top of that. A ground
+   * placement has no connector to solve against, so its rotation is still applied by
+   * `composed()` the ordinary way.
    */
-  private manualRotation: Mat4 = IDENTITY;
+  private baseIsSolved = false;
+  /**
+   * A persistent extra spin about the connection axis (the same axis `state.roll`'s
+   * quarter turns already rotate about — see CLAUDE.md's "connection point's axis is
+   * its local +Y"), in radians, on top of whatever `state.roll` contributes. Reset on
+   * `hold`/`pickUp`, exactly like `state.roll` already was — a fresh piece never
+   * inherits the last one's spin.
+   *
+   * This used to be a matrix composed onto `baseTransform` *after* the mating solve
+   * ran — which looked right for a connector at the piece's own centre, and produced
+   * exactly the reported bug otherwise: `solveMating` aligns a connector assuming no
+   * further rotation is coming, so composing one on afterwards swings that connector
+   * away from the target by however far it sits from the piece's origin — a half
+   * stud pitch in each direction for a piece like a 2x3, i.e. landing *between* studs
+   * rather than on one. Keeping this as a scalar and feeding `state.roll + manualRoll`
+   * into `resolveSnap` (see `move()`) instead means the solve itself places the
+   * connector correctly no matter how much extra spin is dialled in — `solveMating`
+   * already takes a `roll` for exactly this, just previously only ever fed the
+   * discrete quarter-turns from the 'r' key.
+   */
+  private manualRoll = 0;
   /**
    * Set by `pickUp`, consumed by the first `move()` that resolves a real base — a
-   * picked-up piece's own orientation, waiting to be folded into `manualRotation` as
-   * soon as there is a base to fold it onto. A fresh chest hold never sets this, since
-   * there is no prior orientation to preserve; `manualRotation` starting at `IDENTITY`
-   * already covers that case.
+   * picked-up piece's own orientation, waiting to be re-expressed as `manualRoll` (a
+   * connector-relative roll) once there is a base — and, for the connector-solved
+   * case, a chosen connector — to express it against. A fresh chest hold never sets
+   * this, since there is no prior orientation to preserve; `manualRoll` starting at
+   * `0` already covers that case.
    */
   private pendingRotationSeed: Mat4 | null = null;
 
@@ -208,7 +237,8 @@ export class PlacementController {
     this.wasPickedUp = false;
     this.previous = undefined;
     this.baseTransform = null;
-    this.manualRotation = IDENTITY;
+    this.baseIsSolved = false;
+    this.manualRoll = 0;
     this.pendingRotationSeed = null;
     this.state = { candidates: [], index: 0, roll: 0, transform: null, valid: false };
     if (part === null) this.scene.hideGhost();
@@ -227,8 +257,8 @@ export class PlacementController {
    * `pendingRotationSeed`, so the piece keeps the orientation it was actually sitting
    * in rather than resetting to whatever bare orientation the next resolved base
    * happens to have — the piece hasn't changed, only what's holding it has. See the
-   * comment on `move()` for how the seed is folded into `manualRotation` once a real
-   * base exists to fold it onto.
+   * comment on `move()` for how the seed is turned into `manualRoll` once a real base
+   * exists to express it against.
    */
   pickUp(part: PartDef, colorCode: number, previousTransform: Mat4): void {
     this.held = part;
@@ -236,7 +266,8 @@ export class PlacementController {
     this.wasPickedUp = true;
     this.previous = previousTransform;
     this.baseTransform = null;
-    this.manualRotation = IDENTITY;
+    this.baseIsSolved = false;
+    this.manualRoll = 0;
     this.pendingRotationSeed = previousTransform;
     this.state = { candidates: [], index: 0, roll: 0, transform: null, valid: false };
   }
@@ -283,16 +314,26 @@ export class PlacementController {
     return b ? { part: b.part, transform: b.transform } : null;
   };
 
-  /** `baseTransform` with the persistent manual rotation composed on top. */
+  /**
+   * `baseTransform`, with `manualRoll` composed on top only when it isn't already
+   * baked in. A connector-solved base already has the full `state.roll + manualRoll`
+   * folded into the solve itself (see `move()`), so composing it again here would
+   * apply it twice — once correctly, about the connector the solve aligned, and once
+   * more about the piece's own local origin, right back into the original bug. A
+   * ground-fallback base has no connector to solve against, so its rotation is still
+   * applied here the ordinary way, about the piece's own origin.
+   */
   private composed(): Mat4 | null {
     if (this.baseTransform === null) return null;
-    return multiply(this.baseTransform, this.manualRotation);
+    if (this.baseIsSolved) return this.baseTransform;
+    return multiply(this.baseTransform, fromYRotation(this.manualRoll));
   }
 
   /** Re-evaluates `state` from a new `baseTransform`: collision, and the ghost repaint. */
-  private applyBase(base: Mat4 | null): Mat4 | null {
+  private applyBase(base: Mat4 | null, solved: boolean): Mat4 | null {
     const part = this.held;
     this.baseTransform = base;
+    this.baseIsSolved = solved;
     const transform = part === null ? null : this.composed();
     this.state = {
       ...this.state,
@@ -311,6 +352,13 @@ export class PlacementController {
 
     const hit = this.scene.pick(ndcX, ndcY);
     const ray = this.scene.pickRay(ndcX, ndcY);
+    // `solveMating`'s `roll` is quarter turns but accepts any real number — the
+    // fractional part is exactly the persistent spin `manualRoll` (radians) contributes
+    // once converted to the same units. Feeding the *total* orientation into the solve,
+    // rather than resolving at `state.roll` alone and composing `manualRoll` onto the
+    // result afterwards, is what keeps the connector the solve aligned from swinging
+    // away from the target — see the comment on `manualRoll` above.
+    const totalRoll = this.state.roll + this.manualRoll / (Math.PI / 2);
     const candidates = resolveSnap(
       {
         part,
@@ -318,15 +366,17 @@ export class PlacementController {
         rayDirection: ray.direction,
         ...(hit ? { hit } : {}),
         ...(this.previous ? { previous: this.previous } : {}),
-        roll: this.state.roll,
+        roll: totalRoll,
       },
       this.index,
       this.lookup,
     );
 
     let base: Mat4 | null = null;
+    let solved = false;
     if (candidates.length > 0) {
       base = candidates[0].transform;
+      solved = true;
     } else if (!hit) {
       // Over empty space: rest it on the baseplate rather than showing nothing.
       const ray = this.scene.pickRay(ndcX, ndcY);
@@ -335,25 +385,34 @@ export class PlacementController {
 
     this.state = { ...this.state, candidates, index: 0 };
 
-    // Fold a pending pick-up orientation into manualRotation as soon as there's a real
-    // base to fold it onto — deferred rather than done in pickUp() itself, since the
-    // base (and its own rotation) isn't known until resolveSnap/groundPlacement runs
-    // here. manualRotation is applied *before* base's own rotation (see composed()),
-    // so solving for it as base's rotation inverse times the piece's actual previous
-    // rotation is exactly what makes composed's rotation equal the piece's previous
-    // rotation the instant base's translation also matches — which it does the moment
-    // the cursor is still where the double-click that picked it up left it, landing
-    // the piece back exactly as it was. Once folded in, this behaves exactly like any
-    // other manualRotation: it persists through every later move()/cycle() the same
-    // way a fresh hold's rotation would.
+    // Re-express a pending pick-up orientation as `manualRoll` as soon as there's a
+    // real base to express it against — deferred rather than done in pickUp() itself,
+    // since neither the base nor (for the solved case) which connector it chose is
+    // known until resolveSnap/groundPlacement runs here.
     if (base !== null && this.pendingRotationSeed !== null) {
       const baseRotation = fromBasis(basisOf(base), [0, 0, 0]);
       const previousRotation = fromBasis(basisOf(this.pendingRotationSeed), [0, 0, 0]);
-      this.manualRotation = multiply(invert(baseRotation), previousRotation);
+      const delta = multiply(invert(baseRotation), previousRotation);
       this.pendingRotationSeed = null;
+      if (solved) {
+        // `delta` is the extra spin, about the connector's own axis, needed on top of
+        // this candidate's roll-0 solve to reproduce the piece's actual prior
+        // rotation — true because every rotation this codebase ever applies to a
+        // mated piece (this seed included, transitively) is itself a turn about some
+        // connector's own axis, so the accumulated difference from a fresh solve is
+        // always expressible as one. Folding it into `manualRoll` and re-resolving
+        // (rather than composing `delta` onto `base` directly) is what bakes it into
+        // the solve, so the mated connector lands exactly on target, not offset by
+        // the same half-stud error this whole fix exists to remove.
+        this.manualRoll += angleOfYRotation(delta);
+        return this.move(ndcX, ndcY);
+      }
+      // No connector to solve against — the ground fallback has no roll to feed, so
+      // the seeded rotation is simply the extra spin composed the ordinary way.
+      this.manualRoll = angleOfYRotation(delta);
     }
 
-    return this.applyBase(base);
+    return this.applyBase(base, solved);
   }
 
   /** Cycle to the next candidate. Cuts, never tweens — see docs/DESIGN.md. */
@@ -361,7 +420,9 @@ export class PlacementController {
     if (this.state.candidates.length < 2) return;
     const index = (this.state.index + 1) % this.state.candidates.length;
     this.state = { ...this.state, index };
-    this.applyBase(this.state.candidates[index].transform);
+    // Every candidate in state.candidates came from the same resolveSnap call in
+    // move(), solved with the current total roll already baked in.
+    this.applyBase(this.state.candidates[index].transform, true);
   }
 
   /**
@@ -377,32 +438,51 @@ export class PlacementController {
   }
 
   /**
-   * A persistent extra spin, about the piece's own local +Y axis, layered on top of
-   * whatever `move`/`cycle` resolve — not a one-off transform mutation `move` would
-   * silently discard on the very next hover. That was the actual bug behind three
-   * separate reports: a rotation applied via a raw `nudge`-style mutation lived only
-   * in `state.transform`, which the next pointer move overwrote wholesale by
+   * A persistent extra spin about the connection axis, layered on top of whatever
+   * `state.roll` and the cursor resolve — not a one-off transform mutation `move`
+   * would silently discard on the very next hover. That was the actual bug behind
+   * three separate reports: a rotation applied via a raw `nudge`-style mutation lived
+   * only in `state.transform`, which the next pointer move overwrote wholesale by
    * re-deriving it from `resolveSnap` with the *stale* pre-rotation `roll` — so the
    * rotation vanished on the next hover (looked like "rotating a ghost doesn't
    * persist"), or on commit, since `commitHeld` always resolves once more at the
    * click position before committing (looked like "committed orientation doesn't
    * match the ghost" and, transitively, "the collision/valid state goes stale after a
    * transform" — the same silent overwrite discards the freshly-recomputed `valid`
-   * too). Storing it separately from `baseTransform` means every future `move()` or
-   * `cycle()` call still composes it back in, because they only ever replace
-   * `baseTransform`, never this.
+   * too). Storing it in `manualRoll`, which `move()` feeds into the solve on every
+   * call, is what makes it survive: every future `move()` or `cycle()` still reflects
+   * it, because it's an input the solve sees, not a mutation layered on the solve's
+   * output.
+   *
+   * Takes the last pointer position, for the same reason `rotate()` does: changing
+   * the roll alone leaves the ghost showing the old orientation until the pointer
+   * happens to move, which reads as the key not working. It matters more here than
+   * for `rotate()`, because when a connector has been solved (`baseIsSolved`), the new
+   * roll has to be *fed back into that same solve* to keep the mated connector on
+   * target (see `move()`) — there is no cheaper way to recompute it than re-resolving.
+   * Without a pointer position to re-resolve at, the spin is still recorded (never
+   * gated — see below) and simply takes effect on the next real cursor move, exactly
+   * as `rotate()`'s roll does when called without one.
    *
    * Never gated on `baseTransform` being set, `state.valid`, or there being any
    * candidates at all: rotating is how a user *searches* for a valid placement, so
    * refusing the input exactly when the current position doesn't work yet would
    * refuse it exactly when it's needed most. A piece floating over empty space with no
-   * candidate still records the spin here — `composed()` simply has no base to apply
-   * it to until one exists, at which point this same persisted value takes effect, the
-   * same as it does for every other base change.
+   * candidate still records the spin here — there is simply no base yet for it to take
+   * effect on, the same as for every other base change.
    */
-  rotateManually(angleRadians: number): Mat4 | null {
+  rotateManually(angleRadians: number, ndc?: readonly [number, number]): Mat4 | null {
     if (this.held === null) return null;
-    this.manualRotation = multiply(fromYRotation(angleRadians), this.manualRotation);
+    this.manualRoll += angleRadians;
+
+    if (this.baseIsSolved) {
+      if (ndc) return this.move(ndc[0], ndc[1]);
+      return this.state.transform;
+    }
+
+    // No connector was solved (ground fallback, or nothing resolved yet) — there is no
+    // aligned connector a post-hoc rotation could swing away from, so composing it
+    // directly here, without a raycast, is correct and immediate.
     const transform = this.composed();
     this.state = {
       ...this.state,
@@ -417,10 +497,11 @@ export class PlacementController {
   /**
    * Nudge the piece on the cursor by a rigid world-space `delta` — the same keyboard
    * vocabulary a placed selection uses (`EditorSession.transformSelection`), applied
-   * to the ghost instead of a document brick. Composed into `baseTransform` (with the
-   * persistent manual rotation still layered on top of that), so a translate nudge
-   * followed by a rotate — or the other way around — both apply against where the
-   * piece actually is, not a stale pre-nudge position.
+   * to the ghost instead of a document brick. Composed into `baseTransform` directly
+   * (carrying `baseIsSolved` through unchanged, since a pure translation doesn't
+   * touch orientation), so a translate nudge followed by a rotate — or the other way
+   * around — both apply against where the piece actually is, not a stale pre-nudge
+   * position.
    *
    * Deliberately *not* persistent the way `rotateManually` is: the very next cursor
    * move legitimately supersedes it, because "the ghost follows the cursor" is the
@@ -430,7 +511,7 @@ export class PlacementController {
    */
   nudge(delta: Mat4): Mat4 | null {
     if (this.held === null || this.baseTransform === null) return null;
-    return this.applyBase(multiply(delta, this.baseTransform));
+    return this.applyBase(multiply(delta, this.baseTransform), this.baseIsSolved);
   }
 
   private async paint(): Promise<void> {
@@ -477,7 +558,8 @@ export class PlacementController {
     this.previous = undefined;
     this.wasPickedUp = false;
     this.baseTransform = null;
-    this.manualRotation = IDENTITY;
+    this.baseIsSolved = false;
+    this.manualRoll = 0;
     this.pendingRotationSeed = null;
     this.scene.hideGhost();
     return brick;
