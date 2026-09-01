@@ -22,6 +22,7 @@ import type { BrickId, Mat3, Mat4, Vec3 } from '../types';
 import { fixtureReader } from './__fixtures__/reader';
 import { buildOccupancy, collides, connectorsAt, isExemptOverlap, OCC_CELL } from './collision';
 import { isCompatible } from './compat';
+import { findMates } from './mating';
 import { resolvePart } from './resolvePart';
 import { HashSpatialIndex } from './spatialIndex';
 import type { ConnectionPoint, PartDef } from './types';
@@ -242,6 +243,30 @@ describe('collides, real 3001 pairs', () => {
     const index = new HashSpatialIndex();
     const hit = collides(p, IDENTITY, index);
     expect(hit).toBe(false);
+  });
+
+  it('spans two bricks placed side by side, engaging studs on both and colliding with neither', async () => {
+    // The scenario behind two separate reports: "a 2x2 across two bricks" placement,
+    // and "I can\'t move a snapped piece around on the surface it\'s on top of" — both
+    // hinge on collision correctly exempting a piece\'s overlap with *every* brick it
+    // legitimately mates, not only the one brick a raycast happened to hit. Two 2x4s
+    // side by side stand in for the reported 2x1-next-to-1x1 footprint (not available
+    // as a committed fixture); the geometry that matters — exempting overlap with two
+    // separate, unrelated neighbour bricks in one query — is the same.
+    const p = await part('3001');
+    const index = new HashSpatialIndex();
+    index.insert(brick(1), p, IDENTITY);
+    index.insert(brick(2), p, fromTranslation([80, 0, 0]));
+
+    // Centered on the seam: half its footprint mates brick 1, half mates brick 2.
+    const spanning: Mat4 = fromTranslation([40, -24, 0]);
+    const hit = collides(p, spanning, index);
+    expect(hit).toBe(false);
+
+    const groups = findMates(p, spanning, index);
+    const byBrick = new Map(groups.map((g) => [g.brick, g.mates.length]));
+    expect(byBrick.get(brick(1))).toBe(4);
+    expect(byBrick.get(brick(2))).toBe(4);
   });
 
   it('a three-high stack — each pair mates squarely — collides with neither neighbour', async () => {

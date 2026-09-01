@@ -378,6 +378,33 @@ describe('transformSelection collision', () => {
     expect([...s.document.graph.edges.values()][0].mates).toHaveLength(8);
   });
 
+  it('slides a snapped piece sideways along the surface it rests on', async () => {
+    // "If I have a snapped piece I can't even move it around on the surface it's on
+    // top of" — this is that gesture exactly: not moving it away and back to the same
+    // spot (already covered above), but one stud over, to a *different* set of studs
+    // on the same brick it's resting on, remaining in contact the entire time.
+    const part = await brick2x4WithOccupancy();
+    const s = new EditorSession(recordingScene());
+    s.registerPart(part);
+
+    const lower = instance(part, IDENTITY);
+    s.place(lower, part);
+    const upper = instance(part, fromTranslation([0, -BRICK_HEIGHT, 0]));
+    s.place(upper, part);
+    expect(s.document.graph.edges.size).toBe(1);
+    expect([...s.document.graph.edges.values()][0].mates).toHaveLength(8);
+
+    // One stud (20 LDU) sideways — still squarely resting on the lower brick, just
+    // engaging a different four of its eight studs.
+    const applied = s.transformSelection([upper.id], fromTranslation([20, 0, 0]), 'Move brick');
+
+    expect(applied).toBe(true);
+    expect(s.document.bricks.get(upper.id)?.transform).toEqual(fromTranslation([20, -BRICK_HEIGHT, 0]));
+    expect(s.document.graph.edges.size).toBe(1);
+    // A 2x4 on a 2x4 offset by one stud shares (4-1)*2 = 6 of its eight studs.
+    expect([...s.document.graph.edges.values()][0].mates).toHaveLength(6);
+  });
+
   it('does not let one selected brick block another moving together', async () => {
     // A rigid group move must not treat the group's own members as obstacles to each
     // other — collides() is called with the whole moving set as `ignore`, mirroring

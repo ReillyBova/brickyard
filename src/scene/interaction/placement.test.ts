@@ -483,6 +483,45 @@ describe('the part catalog', () => {
   });
 });
 
+describe('nudge while resting on a surface — "I can\'t move a snapped piece around"', () => {
+  it('stays valid sliding one stud sideways across the same brick it rests on', async () => {
+    const part = await brick2x4();
+    const studPos = await aStudOn(part, IDENTITY);
+    const scene = stubScene({ brick: 'seed' as BrickId, point: studPos, normal: [0, -1, 0] });
+
+    const c = new PlacementController(scene);
+    c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+    c.hold(part);
+    c.move(0, 0);
+    // Lands squarely stacked on the seed — snapped, and valid.
+    expect(c.current.valid).toBe(true);
+
+    const slid = c.nudge(fromTranslation([20, 0, 0]));
+
+    expect(slid).not.toBeNull();
+    expect(c.current.valid).toBe(true);
+  });
+
+  it('stays valid through several consecutive one-stud slides', async () => {
+    const part = await brick2x4();
+    const studPos = await aStudOn(part, IDENTITY);
+    const scene = stubScene({ brick: 'seed' as BrickId, point: studPos, normal: [0, -1, 0] });
+
+    const c = new PlacementController(scene);
+    c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+    c.hold(part);
+    c.move(0, 0);
+    expect(c.current.valid).toBe(true);
+
+    c.nudge(fromTranslation([20, 0, 0]));
+    expect(c.current.valid).toBe(true);
+    c.nudge(fromTranslation([20, 0, 0]));
+    expect(c.current.valid).toBe(true);
+    c.nudge(fromTranslation([0, 0, 20]));
+    expect(c.current.valid).toBe(true);
+  });
+});
+
 describe('persistent rotation', () => {
   it('survives a cursor move — the regression behind three separate reports', async () => {
     // The bug: a rotation applied via a one-off transform mutation lived only in
