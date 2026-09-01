@@ -24,6 +24,14 @@ interface Resolved {
  * itself caches per `(partId, colorHex)`, so switching the active color and back is free
  * — this hook only tracks the async status of that lookup for one tile.
  *
+ * `enabled` (default `true`) gates the fetch itself, not just the render: `PartTile`
+ * passes its `useLazyVisible` result here so a tile scrolled off-screen never calls
+ * `source.get` at all. At chest sizes in the hundreds, rendering every tile's thumbnail
+ * on mount would stall the frame and put hundreds of requests on a mirror we don't
+ * control (`docs/PREBAKE.md`) — this is what keeps that from happening. Going from
+ * disabled to enabled starts the fetch; going the other way is a no-op — once resolved,
+ * a tile keeps showing its thumbnail rather than reverting to the pictogram.
+ *
  * "Loading" is derived during render by comparing the last *resolved* key against the
  * current one, rather than set by the effect the moment it starts — the effect only ever
  * calls `setState` once real work finishes, so a key change never causes the redundant
@@ -33,12 +41,13 @@ export function usePartThumbnail(
   source: ThumbnailSource | undefined,
   partId: string,
   colorHex: string,
+  enabled: boolean = true,
 ): ThumbnailState {
   const key = `${partId}::${colorHex}`;
   const [resolved, setResolved] = useState<Resolved | null>(null);
 
   useEffect(() => {
-    if (source === undefined) return;
+    if (source === undefined || !enabled) return;
     let cancelled = false;
 
     source.get(partId, colorHex).then(
@@ -53,9 +62,9 @@ export function usePartThumbnail(
     return () => {
       cancelled = true;
     };
-  }, [source, partId, colorHex, key]);
+  }, [source, partId, colorHex, key, enabled]);
 
   if (source === undefined) return IDLE;
-  if (resolved === null || resolved.key !== key) return LOADING;
+  if (resolved === null || resolved.key !== key) return enabled ? LOADING : IDLE;
   return { url: resolved.url, status: resolved.status };
 }

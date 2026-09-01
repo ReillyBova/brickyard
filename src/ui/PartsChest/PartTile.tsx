@@ -1,7 +1,10 @@
+import { useRef } from 'react';
+
 import { AxonBrick } from '../AxonBrick';
 import { studsForTitle } from '../brickPictogram';
 import type { ThumbnailSource } from '../../scene/thumbnail';
 import { displayTitle } from './format';
+import { useLazyVisible } from './useLazyVisible';
 import { usePartThumbnail } from './usePartThumbnail';
 import type { ChestPart } from './types';
 
@@ -36,10 +39,17 @@ export function PartTile({
   onSelect,
   onKeyDown,
 }: PartTileProps) {
-  const thumbnail = usePartThumbnail(thumbnailSource, part.id, activeColorHex);
+  const tileRef = useRef<HTMLButtonElement | null>(null);
+  // Gates the thumbnail fetch itself, not just its render — see usePartThumbnail's doc.
+  // A chest in the hundreds mounts every tile immediately (the grid isn't virtualised),
+  // so without this every tile would render its thumbnail on mount regardless of scroll
+  // position.
+  const isVisible = useLazyVisible(tileRef);
+  const thumbnail = usePartThumbnail(thumbnailSource, part.id, activeColorHex, isVisible);
 
   return (
     <button
+      ref={tileRef}
       type="button"
       aria-pressed={isSelected}
       className={`by-tile${isSelected ? ' is-selected' : ''}`}
