@@ -1,65 +1,48 @@
 /**
- * Owns the GL resources and the per-frame loop: camera-motion detection, the resolution/spp
- * controller (`resolutionPolicy.ts`), reprojection uniforms, and the two draw passes (TRACE,
- * PRESENT). Shares the caller's `WebGLRenderer` and canvas — no second GL context.
+ * Owns three-gpu-pathtracer's `WebGLPathTracer` and the per-frame loop: camera-motion
+ * detection, and the two draw states that follow from it. Shares the caller's `WebGLRenderer`
+ * and canvas — no second GL context.
  *
  * While the camera is moving, this loop does not trace at all — it calls back into
  * `renderRaster` (a thin wrapper around `SceneRenderer.renderOnce()`) so the canvas shows an
  * ordinary rasterized frame: clean, instant, and free, since that rasterizer already exists and
- * shares this same renderer/scene/camera. Tracing only begins once the camera comes to rest,
- * at which point the resolution ladder starts at its cheapest rung and climbs as `resolutionPolicy`
- * allows. This is why interactivity does not depend on the resolution ladder at all — the ladder
- * is purely an optimisation for the converging, stationary-camera phase.
+ * shares this same renderer/scene/camera. Tracing only resumes once the camera comes to rest,
+ * at which point `pathTracer.updateCamera()` resets accumulation and `renderSample()` starts
+ * climbing samples again. `WebGLPathTracer` owns its own resolution/sample-count ramp
+ * internally (`dynamicLowRes`, `renderDelay`, `fadeDuration`) — there is no separate ladder to
+ * maintain here the way a hand-rolled tracer would need.
  *
- * The accumulation buffers are allocated once at full canvas resolution and never resized on a
- * resolution-ladder change; TRACE instead draws into a shrinking top-left viewport of them and
- * PRESENT samples only that sub-rect (`uRegion` of `uFull`), so a camera coming to rest doesn't
- * throw away the low-res frames that got it there — it just keeps filling in more of the buffer
- * it already has. Full reallocation only happens on an actual canvas resize.
+ * `build()` does the expensive part — flattening the live scene into real meshes and calling
+ * `pathTracer.setScene()`, which builds the BVH — and only runs when the model on the
+ * baseplate changes (entering render mode) or the environment preset changes (its floor colour
+ * is baked into a real material). Everything a lighting dial touches (`updateLighting`) or an
+ * environment swap that doesn't touch geometry (`updateEnvironment`) goes through the library's
+ * cheap `update*()` calls instead, so dragging a slider never re-triggers a BVH build.
  */
 
 import * as THREE from 'three';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
+import { ShapedAreaLight, WebGLPathTracer } from 'three-gpu-pathtracer';
 
 import { BUNDLED_COLOR_LIBRARY } from '../../ldraw/bundledLibrary.ts';
 
 import type { PathtraceSnapshot } from '../../scene/SceneRenderer.ts';
 
-import { bakePathtraceScene, MAX_MATERIALS } from './sceneBake.ts';
-import type { PathtraceMaterial } from './materials.ts';
-import { FULLSCREEN_VERTEX_SHADER, PRESENT_FRAGMENT_SHADER, TRACE_FRAGMENT_SHADER } from './shaders.ts';
-import { initialResolutionState, nextResolutionState, renderScaleFor, sppFor } from './resolutionPolicy.ts';
-import type { ResolutionState } from './resolutionPolicy.ts';
-import { DEFAULT_ENVIRONMENT } from './environments.ts';
+import { bakePathtraceScene } from './sceneBake.ts';
+import { DEFAULT_ENVIRONMENT, buildEnvironmentTexture } from './environments.ts';
 import type { PathtraceEnvironment } from './environments.ts';
-import { DEFAULT_LIGHTING } from './lighting.ts';
-import type { LightingPreset } from './lighting.ts';
+import { DEFAULT_LIGHTING, kelvinToRGB, sunDirectionFor } from './lighting.ts';
+import type { LightingSettings } from './lighting.ts';
 
 /** What `build()` renders: the environment (sky + floor) and the key light. */
 export interface PathtraceRenderSettings {
   readonly environment: PathtraceEnvironment;
-  readonly lighting: LightingPreset;
+  readonly lighting: LightingSettings;
 }
 
 export const DEFAULT_RENDER_SETTINGS: PathtraceRenderSettings = {
   environment: DEFAULT_ENVIRONMENT,
   lighting: DEFAULT_LIGHTING,
-};
-
-const NEUTRAL_MATERIAL: PathtraceMaterial = {
-  color: [0.6, 0.6, 0.6],
-  roughness: 0.4,
-  metalness: 0,
-  clearcoat: 0,
-  clearcoatRoughness: 0.2,
-  transmission: 0,
-  ior: 1.49,
-  attenuationColor: [1, 1, 1],
-  attenuationDistance: 1000,
-  opacity: 1,
-  sheen: 0,
-  sheenColor: [1, 1, 1],
 };
 
 export interface PathtraceStats {
@@ -68,51 +51,23 @@ export interface PathtraceStats {
    *  the accumulating path trace. */
   readonly status: 'building' | 'moving' | 'rendering';
   readonly samples: number;
-  readonly renderScale: number;
-  readonly spp: number;
   readonly frameMs: number;
   readonly fps: number;
   readonly triangleCount: number;
-  /** Primary rays traced since the camera last moved — see docs on `raysSinceMove` below. */
-  readonly raysCast: number;
 }
 
-function packMaterials(materials: readonly PathtraceMaterial[]): {
-  matA: THREE.Vector4[];
-  matB: THREE.Vector4[];
-  matC: THREE.Vector4[];
-  matD: THREE.Vector4[];
-  matE: THREE.Vector4[];
-} {
-  const matA: THREE.Vector4[] = [];
-  const matB: THREE.Vector4[] = [];
-  const matC: THREE.Vector4[] = [];
-  const matD: THREE.Vector4[] = [];
-  const matE: THREE.Vector4[] = [];
-  for (let i = 0; i < MAX_MATERIALS; i++) {
-    const m = materials[i] ?? NEUTRAL_MATERIAL;
-    matA.push(new THREE.Vector4(m.color[0], m.color[1], m.color[2], m.roughness));
-    matB.push(new THREE.Vector4(m.metalness, m.clearcoat, m.clearcoatRoughness, m.transmission));
-    matC.push(new THREE.Vector4(m.attenuationColor[0], m.attenuationColor[1], m.attenuationColor[2], m.ior));
-    matD.push(new THREE.Vector4(m.sheenColor[0], m.sheenColor[1], m.sheenColor[2], m.sheen));
-    matE.push(new THREE.Vector4(m.attenuationDistance, m.opacity, 0, 0));
-  }
-  return { matA, matB, matC, matD, matE };
-}
-
-function createAccumulationTarget(width: number, height: number): THREE.WebGLRenderTarget {
-  const target = new THREE.WebGLRenderTarget(Math.max(2, width), Math.max(2, height), {
-    type: THREE.HalfFloatType,
-    minFilter: THREE.LinearFilter,
-    magFilter: THREE.LinearFilter,
-    wrapS: THREE.ClampToEdgeWrapping,
-    wrapT: THREE.ClampToEdgeWrapping,
-    depthBuffer: false,
-    stencilBuffer: false,
-  });
-  target.texture.generateMipmaps = false;
-  return target;
-}
+/** Key light distance is proportional to the model's own size (`SceneBounds.radius`) rather
+ *  than a fixed LDU constant, so a tiny model and a 20k-brick set both get a light that reads
+ *  as "outside the scene" instead of sitting inside or absurdly far from the bricks. */
+const LIGHT_DISTANCE_FACTOR = 3.5;
+const MIN_LIGHT_DISTANCE = 500;
+/** Disc diameter at `softness = 0` and `softness = 1`, as a fraction of the light's distance —
+ *  small reads as a near-point source (hard shadows), large as a big soft source. */
+const MIN_SOFTNESS_FRACTION = 0.02;
+const MAX_SOFTNESS_FRACTION = 0.55;
+/** Calibrated against the studio environment default so `intensity = 1` reads as a plausible
+ *  single light source next to the environment's own contribution, not a blowout or a no-op. */
+const BASE_LIGHT_POWER = 6;
 
 /** Max-abs-difference matrix comparison — exact `.equals()` almost never fires under damping. */
 function cameraMoved(a: THREE.Matrix4, b: THREE.Matrix4, eps = 1e-4): boolean {
@@ -131,26 +86,25 @@ export class PathTracerController {
   /** Draws one ordinary rasterized frame to the shared canvas — `SceneRenderer.renderOnce()`.
    *  Called instead of tracing whenever the camera is in motion. */
   private readonly renderRaster: () => void;
+  private readonly previousToneMapping: THREE.ToneMapping;
 
-  private traceQuad: FullScreenQuad | null = null;
-  private traceMaterial: THREE.ShaderMaterial | null = null;
-  private presentQuad: FullScreenQuad | null = null;
-  private presentMaterial: THREE.ShaderMaterial | null = null;
-  private targets: [THREE.WebGLRenderTarget, THREE.WebGLRenderTarget] | null = null;
-  private bakedScene: ReturnType<typeof bakePathtraceScene> | null = null;
+  private pathTracer: WebGLPathTracer | null = null;
+  private scene: THREE.Scene | null = null;
+  private baked: ReturnType<typeof bakePathtraceScene> | null = null;
+  private envTexture: THREE.Texture | null = null;
+  private keyLight: ShapedAreaLight | null = null;
+  private lightDistance = MIN_LIGHT_DISTANCE;
+  private lightTarget = new THREE.Vector3();
+  /** The live viewport's own background colour, for `showBackground = false` — a plain ground
+   *  rather than a hole through to black. */
+  private canvasBackground: THREE.Color | null = null;
 
-  private readonly fullSize = new THREE.Vector2();
-  private prevRegion = new THREE.Vector2(2, 2);
-  private readonly prevViewProj = new THREE.Matrix4();
   private readonly prevCameraMatrix = new THREE.Matrix4();
-  private resolution: ResolutionState = initialResolutionState();
-  private frameIndex = 0;
+  /** True while the camera is moving or has just stopped — the next still frame after this is
+   *  true resets the tracer's accumulation once, rather than every still frame. */
+  private wasMoving = true;
   private rafHandle: number | null = null;
   private lastFrameMs = 0;
-  private triangleCount = 0;
-  /** Primary rays traced since the camera last moved (spp × active pixel count, summed
-   *  frame over frame); zeroed the instant `cameraMoved` sees a new pose. */
-  private raysSinceMove = 0;
 
   private onStats: ((stats: PathtraceStats) => void) | null = null;
 
@@ -164,95 +118,73 @@ export class PathTracerController {
     this.camera = handles.camera;
     this.controls = handles.controls;
     this.renderRaster = handles.renderRaster;
+    this.previousToneMapping = handles.renderer.toneMapping;
   }
 
   /**
-   * Fetches the LDraw palette, flattens+bakes the live scene (plus a grounding floor sized
-   * to it) into a BVH, and compiles shaders. `settings` picks the environment (sky + floor)
-   * and lighting preset; switching either later means calling `build()` again — a full
-   * rebake, but a rare, user-initiated one, not a per-frame cost. See `docs/DESIGN.md` for
-   * the "studio / golden hour / dramatic rim / catalogue" presets this reads.
+   * Fetches the LDraw palette, flattens+bakes the live scene (plus a grounding floor sized to
+   * it) into real meshes, builds the environment texture, and hands both to
+   * `WebGLPathTracer.setScene()` — a full BVH build, but only run when the model changes or the
+   * environment preset (and its baked-in floor colour) changes. See the class doc for why
+   * lighting dials don't come through here.
    */
   async build(snapshot: PathtraceSnapshot, settings: PathtraceRenderSettings = DEFAULT_RENDER_SETTINGS): Promise<void> {
     const colorLibrary = BUNDLED_COLOR_LIBRARY;
     const { environment, lighting } = settings;
+
+    this.baked?.dispose();
     const baked = bakePathtraceScene(snapshot.instances, colorLibrary, {
       color: environment.floorColor,
       roughness: environment.floorRoughness,
     });
-    this.bakedScene = baked;
-    this.triangleCount = baked.triangleCount;
+    this.baked = baked;
+    this.lightDistance = Math.max(MIN_LIGHT_DISTANCE, baked.bounds.radius * LIGHT_DISTANCE_FACTOR);
+    this.lightTarget.set(...baked.bounds.center);
+    this.canvasBackground = snapshot.backgroundColor;
 
-    const { matA, matB, matC, matD, matE } = packMaterials(baked.materials);
-    const skyZenith = new THREE.Color().fromArray(environment.skyZenith).multiplyScalar(lighting.ambientMultiplier);
-    const skyHorizon = new THREE.Color().fromArray(environment.skyHorizon).multiplyScalar(lighting.ambientMultiplier);
+    const scene = new THREE.Scene();
+    scene.add(baked.group);
 
-    this.renderer.getDrawingBufferSize(this.fullSize);
-    this.targets = [
-      createAccumulationTarget(this.fullSize.x, this.fullSize.y),
-      createAccumulationTarget(this.fullSize.x, this.fullSize.y),
-    ];
+    this.envTexture?.dispose();
+    const envTexture = buildEnvironmentTexture(environment);
+    this.envTexture = envTexture;
+    scene.environment = envTexture;
+    scene.background = lighting.showBackground ? envTexture : this.canvasBackground;
+    scene.environmentRotation.y = THREE.MathUtils.degToRad(lighting.envRotationDeg);
+    scene.backgroundRotation.y = scene.environmentRotation.y;
 
-    this.traceMaterial = new THREE.ShaderMaterial({
-      vertexShader: FULLSCREEN_VERTEX_SHADER,
-      fragmentShader: TRACE_FRAGMENT_SHADER,
-      depthTest: false,
-      depthWrite: false,
-      uniforms: {
-        bvh: { value: baked.bvhUniform },
-        uNormalAttr: { value: baked.normalTexture },
-        uMaterialIndexAttr: { value: baked.materialIndexTexture },
-        uInvProjection: { value: new THREE.Matrix4() },
-        uCameraWorld: { value: new THREE.Matrix4() },
-        uPrevViewProj: { value: new THREE.Matrix4() },
-        uPrevColor: { value: null },
-        uRegion: { value: new THREE.Vector2() },
-        uPrevRegion: { value: new THREE.Vector2() },
-        uFull: { value: this.fullSize.clone() },
-        uFrame: { value: 0 },
-        uSpp: { value: 1 },
-        uMoving: { value: false },
-        uHistScale: { value: 1 },
-        uSunDirection: { value: new THREE.Vector3().fromArray(lighting.sunDirection).normalize() },
-        uSunColor: { value: new THREE.Color().fromArray(lighting.sunColor) },
-        uSunRadius: { value: lighting.sunRadius },
-        uSkyZenith: { value: skyZenith },
-        uSkyHorizon: { value: skyHorizon },
-        uMatA: { value: matA },
-        uMatB: { value: matB },
-        uMatC: { value: matC },
-        uMatD: { value: matD },
-        uMatE: { value: matE },
-      },
-    });
-    this.traceQuad = new FullScreenQuad(this.traceMaterial);
+    const light = new ShapedAreaLight(0xffffff, 1, 1, 1);
+    light.isCircular = true;
+    this.keyLight = light;
+    this.applyLighting(light, lighting);
+    scene.add(light);
 
-    this.presentMaterial = new THREE.ShaderMaterial({
-      vertexShader: FULLSCREEN_VERTEX_SHADER,
-      fragmentShader: PRESENT_FRAGMENT_SHADER,
-      depthTest: false,
-      depthWrite: false,
-      uniforms: {
-        uTex: { value: null },
-        uRegion: { value: new THREE.Vector2() },
-        uFull: { value: this.fullSize.clone() },
-        // three.js's own path-tracer example (webgl_renderer_pathtracer, ACESFilmicToneMapping)
-        // leaves exposure at the renderer default of 1 rather than boosting it — match that
-        // now that the diffuse NEE term in shaders.ts carries its own PI normalisation and
-        // isn't relying on exposure to compensate for missing energy conservation.
-        uExposure: { value: 1.0 },
-      },
-    });
-    this.presentQuad = new FullScreenQuad(this.presentMaterial);
+    this.scene = scene;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = lighting.exposure;
 
-    this.prevCameraMatrix.copy(this.camera.matrixWorld);
-    this.prevViewProj.copy(this.camera.projectionMatrix).multiply(this.camera.matrixWorldInverse);
+    if (this.pathTracer === null) {
+      const pathTracer = new WebGLPathTracer(this.renderer);
+      pathTracer.multipleImportanceSampling = true;
+      pathTracer.filterGlossyFactor = 0.5;
+      pathTracer.renderScale = 1;
+      pathTracer.minSamples = 1;
+      pathTracer.renderToCanvas = true;
+      // We already draw the raster fallback ourselves while the camera moves (see the class
+      // doc), so the library doesn't need to cross-fade its own raster preview underneath.
+      pathTracer.rasterizeScene = false;
+      pathTracer.dynamicLowRes = true;
+      pathTracer.lowResScale = 0.25;
+      this.pathTracer = pathTracer;
+    }
+    this.pathTracer.setScene(scene, this.camera);
+    this.wasMoving = true;
   }
 
   start(onStats: (stats: PathtraceStats) => void): void {
     this.onStats = onStats;
-    const tick = (now: number): void => {
-      this.renderFrame(now);
+    const tick = (): void => {
+      this.renderFrame();
       this.rafHandle = requestAnimationFrame(tick);
     };
     this.rafHandle = requestAnimationFrame(tick);
@@ -263,8 +195,71 @@ export class PathTracerController {
     this.rafHandle = null;
   }
 
-  private renderFrame(_now: number): void {
-    if (this.traceMaterial === null || this.presentMaterial === null || this.targets === null) return;
+  /** Cheap per-dial update — no geometry rebake, no new BVH. Call on every slider tick. */
+  updateLighting(lighting: LightingSettings): void {
+    if (this.pathTracer === null || this.scene === null || this.keyLight === null) return;
+    this.applyLighting(this.keyLight, lighting);
+    this.pathTracer.updateLights();
+
+    this.scene.environmentRotation.y = THREE.MathUtils.degToRad(lighting.envRotationDeg);
+    this.scene.backgroundRotation.y = this.scene.environmentRotation.y;
+    this.scene.background = lighting.showBackground ? this.envTexture : this.canvasBackground;
+    this.pathTracer.updateEnvironment();
+
+    this.renderer.toneMappingExposure = lighting.exposure;
+    this.pathTracer.reset();
+  }
+
+  /** Swaps the environment map and the floor's material properties without rebuilding the
+   *  BVH — the floor's own colour/roughness change but its geometry does not. */
+  updateEnvironment(environment: PathtraceEnvironment, lighting: LightingSettings): void {
+    if (this.pathTracer === null || this.scene === null || this.baked === null) return;
+
+    this.envTexture?.dispose();
+    const envTexture = buildEnvironmentTexture(environment);
+    this.envTexture = envTexture;
+    this.scene.environment = envTexture;
+    this.scene.background = lighting.showBackground ? envTexture : this.canvasBackground;
+    this.scene.environmentRotation.y = THREE.MathUtils.degToRad(lighting.envRotationDeg);
+    this.scene.backgroundRotation.y = this.scene.environmentRotation.y;
+    this.pathTracer.updateEnvironment();
+
+    for (const child of this.baked.group.children) {
+      if (child.name === 'pathtrace-floor' && child instanceof THREE.Mesh) {
+        const material = child.material as THREE.MeshPhysicalMaterial;
+        material.color.setRGB(...environment.floorColor);
+        material.roughness = environment.floorRoughness;
+        material.needsUpdate = true;
+      }
+    }
+    this.pathTracer.updateMaterials();
+    this.pathTracer.reset();
+  }
+
+  private applyLighting(light: ShapedAreaLight, lighting: LightingSettings): void {
+    const [dx, dy, dz] = sunDirectionFor(lighting);
+    light.position
+      .set(dx, dy, dz)
+      .multiplyScalar(this.lightDistance)
+      .add(this.lightTarget);
+    light.lookAt(this.lightTarget);
+
+    const diameter =
+      this.lightDistance * THREE.MathUtils.lerp(MIN_SOFTNESS_FRACTION, MAX_SOFTNESS_FRACTION, lighting.softness);
+    light.width = diameter;
+    light.height = diameter;
+
+    const [r, g, b] = kelvinToRGB(lighting.warmthK);
+    light.color.setRGB(r, g, b);
+    // A physically real area light dims as it's spread over a larger disc at fixed radiance —
+    // compensate by distance so the `intensity` dial reads as "brightness", and softness reads
+    // as "shadow character", rather than the two fighting each other.
+    const distanceCompensation = (this.lightDistance / MIN_LIGHT_DISTANCE) ** 2;
+    light.intensity = lighting.intensity * BASE_LIGHT_POWER * distanceCompensation;
+  }
+
+  private renderFrame(): void {
+    if (this.pathTracer === null) return;
     const frameStart = performance.now();
 
     this.controls.update();
@@ -272,121 +267,47 @@ export class PathTracerController {
     const moved = cameraMoved(this.camera.matrixWorld, this.prevCameraMatrix);
     this.prevCameraMatrix.copy(this.camera.matrixWorld);
 
-    // Reallocate at full canvas resolution only on an actual resize — never on a resolution-
-    // ladder step, which would otherwise wipe the accumulation buffer for no reason.
-    const prevFull = this.fullSize.clone();
-    this.renderer.getDrawingBufferSize(this.fullSize);
-    if (!this.fullSize.equals(prevFull)) {
-      this.targets[0].dispose();
-      this.targets[1].dispose();
-      this.targets = [
-        createAccumulationTarget(this.fullSize.x, this.fullSize.y),
-        createAccumulationTarget(this.fullSize.x, this.fullSize.y),
-      ];
-    }
-
     if (moved) {
-      // Clean, instant and free: the rasterizer already renders this exact scene, so a
-      // moving camera gets its frames from there rather than from a 1spp trace. The
-      // resolution ladder still resets here (mirroring what `nextResolutionState` would do
-      // for a traced frame) so the instant the camera settles, tracing resumes at its
-      // cheapest rung rather than wherever it happened to be before the drag started.
-      this.resolution = nextResolutionState(this.resolution, { frameMs: this.lastFrameMs, cameraMoved: true });
-      this.raysSinceMove = 0;
+      this.wasMoving = true;
       this.renderRaster();
-      this.prevViewProj.copy(this.camera.projectionMatrix).multiply(this.camera.matrixWorldInverse);
       this.lastFrameMs = performance.now() - frameStart;
       this.onStats?.({
         status: 'moving',
         samples: 0,
-        renderScale: renderScaleFor(this.resolution),
-        spp: 0,
         frameMs: this.lastFrameMs,
         fps: this.lastFrameMs > 0 ? 1000 / this.lastFrameMs : 0,
-        triangleCount: this.triangleCount,
-        raysCast: 0,
+        triangleCount: this.baked?.triangleCount ?? 0,
       });
       return;
     }
 
-    this.resolution = nextResolutionState(this.resolution, { frameMs: this.lastFrameMs, cameraMoved: moved });
-    const scale = renderScaleFor(this.resolution);
-    const spp = sppFor(this.resolution);
-    const rw = Math.max(2, Math.round(this.fullSize.x * scale));
-    const rh = Math.max(2, Math.round(this.fullSize.y * scale));
-
-    // Rays cast resets the instant the camera moves — it counts progress toward the
-    // current, settled view, not a lifetime total that would just climb forever.
-    this.raysSinceMove = moved ? 0 : this.raysSinceMove + rw * rh * spp;
-
-    const src = this.frameIndex % 2;
-    const dst = 1 - src;
-    const srcTarget = this.targets[src];
-    const dstTarget = this.targets[dst];
-
-    const u = this.traceMaterial.uniforms;
-    u.uPrevColor.value = srcTarget.texture;
-    u.uRegion.value.set(rw, rh);
-    u.uPrevRegion.value.copy(this.prevRegion);
-    u.uFull.value.copy(this.fullSize);
-    u.uCameraWorld.value.copy(this.camera.matrixWorld);
-    u.uInvProjection.value.copy(this.camera.projectionMatrixInverse);
-    u.uPrevViewProj.value.copy(this.prevViewProj);
-    u.uFrame.value = this.frameIndex;
-    u.uSpp.value = spp;
-    u.uMoving.value = moved;
-    u.uHistScale.value = this.resolution.justStepped ? 0.35 : 1;
-
-    // `setViewport` multiplies whatever it's given by the renderer's pixelRatio, but
-    // `fullSize`/`rw`/`rh` are already physical (drawing-buffer) pixels — the render
-    // targets are deliberately allocated at that resolution for quality. Divide back out
-    // so the viewport rect lands on the intended texels rather than pixelRatio² of them.
-    const pixelRatio = this.renderer.getPixelRatio();
-
-    const previousAutoClear = this.renderer.autoClear;
-    this.renderer.autoClear = false;
-    this.renderer.setRenderTarget(dstTarget);
-    this.renderer.setViewport(0, 0, rw / pixelRatio, rh / pixelRatio);
-    this.traceQuad?.render(this.renderer);
-    this.renderer.autoClear = previousAutoClear;
-
-    if (this.presentMaterial !== null) {
-      const pu = this.presentMaterial.uniforms;
-      pu.uTex.value = dstTarget.texture;
-      pu.uRegion.value.set(rw, rh);
-      pu.uFull.value.copy(this.fullSize);
-      this.renderer.setRenderTarget(null);
-      this.renderer.setViewport(0, 0, this.fullSize.x / pixelRatio, this.fullSize.y / pixelRatio);
-      this.presentQuad?.render(this.renderer);
+    if (this.wasMoving) {
+      this.pathTracer.updateCamera();
+      this.wasMoving = false;
     }
-
-    this.prevRegion.set(rw, rh);
-    this.prevViewProj.copy(this.camera.projectionMatrix).multiply(this.camera.matrixWorldInverse);
-    this.frameIndex += 1;
+    this.pathTracer.renderSample();
 
     this.lastFrameMs = performance.now() - frameStart;
     this.onStats?.({
       status: 'rendering',
-      samples: this.resolution.settled,
-      renderScale: scale,
-      spp,
+      samples: this.pathTracer.samples,
       frameMs: this.lastFrameMs,
       fps: this.lastFrameMs > 0 ? 1000 / this.lastFrameMs : 0,
-      triangleCount: this.triangleCount,
-      raysCast: this.raysSinceMove,
+      triangleCount: this.baked?.triangleCount ?? 0,
     });
   }
 
   dispose(): void {
     this.stop();
-    this.traceQuad?.dispose();
-    this.presentQuad?.dispose();
-    this.traceMaterial?.dispose();
-    this.presentMaterial?.dispose();
-    this.targets?.[0].dispose();
-    this.targets?.[1].dispose();
-    this.bakedScene?.dispose();
-    this.targets = null;
-    this.bakedScene = null;
+    this.pathTracer?.dispose();
+    this.pathTracer = null;
+    this.baked?.dispose();
+    this.baked = null;
+    this.envTexture?.dispose();
+    this.envTexture = null;
+    this.scene = null;
+    this.keyLight = null;
+    this.renderer.toneMapping = this.previousToneMapping;
+    this.renderer.toneMappingExposure = 1;
   }
 }

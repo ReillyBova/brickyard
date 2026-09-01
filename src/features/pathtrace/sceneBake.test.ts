@@ -13,14 +13,18 @@ function brickAt(y: number): PathtraceBrickInstance {
   };
 }
 
+function findMesh(group: THREE.Group, name: string): THREE.Mesh | undefined {
+  return group.children.find((child): child is THREE.Mesh => child instanceof THREE.Mesh && child.name === name);
+}
+
 describe('bakePathtraceScene floor', () => {
-  it('adds no floor geometry when no floor spec is given', () => {
+  it('adds no floor mesh when no floor spec is given', () => {
     const baked = bakePathtraceScene([brickAt(0)], BUNDLED_COLOR_LIBRARY);
-    expect(baked.floorMaterialIndex).toBeNull();
+    expect(findMesh(baked.group, 'pathtrace-floor')).toBeUndefined();
     baked.dispose();
   });
 
-  it('grounds the floor at the model\'s lowest point and reserves a material slot for it', () => {
+  it('grounds the floor at the model\'s lowest point and adds one material', () => {
     const instances = [brickAt(0), brickAt(-100)];
     const withoutFloor = bakePathtraceScene(instances, BUNDLED_COLOR_LIBRARY);
     const baked = bakePathtraceScene(instances, BUNDLED_COLOR_LIBRARY, {
@@ -28,11 +32,12 @@ describe('bakePathtraceScene floor', () => {
       roughness: 0.5,
     });
 
-    expect(baked.floorMaterialIndex).not.toBeNull();
-    // Two extra triangles (a quad) over the brick-only bake, and one extra material entry.
+    const floorMesh = findMesh(baked.group, 'pathtrace-floor');
+    expect(floorMesh).not.toBeUndefined();
+    // Two extra triangles (a quad) over the brick-only bake, and one extra material.
     expect(baked.triangleCount).toBe(withoutFloor.triangleCount + 2);
-    expect(baked.materials.length).toBe(withoutFloor.materials.length + 1);
-    expect(baked.materials[baked.floorMaterialIndex as number].roughness).toBeCloseTo(0.5);
+    expect(baked.materialCount).toBe(withoutFloor.materialCount + 1);
+    expect((floorMesh!.material as THREE.MeshPhysicalMaterial).roughness).toBeCloseTo(0.5);
 
     withoutFloor.dispose();
     baked.dispose();
@@ -40,8 +45,19 @@ describe('bakePathtraceScene floor', () => {
 
   it('grounds an empty scene with a default-sized floor rather than crashing', () => {
     const baked = bakePathtraceScene([], BUNDLED_COLOR_LIBRARY, { color: [0.5, 0.5, 0.5], roughness: 0.5 });
-    expect(baked.floorMaterialIndex).toBe(0);
+    expect(findMesh(baked.group, 'pathtrace-floor')).not.toBeUndefined();
+    expect(baked.materialCount).toBe(1);
     expect(baked.triangleCount).toBe(2);
+    baked.dispose();
+  });
+});
+
+describe('bakePathtraceScene materials', () => {
+  it('merges instances of the same colour into one mesh', () => {
+    const baked = bakePathtraceScene([brickAt(0), brickAt(-24), brickAt(-48)], BUNDLED_COLOR_LIBRARY);
+    const brickMeshes = baked.group.children.filter((c): c is THREE.Mesh => c instanceof THREE.Mesh);
+    expect(brickMeshes).toHaveLength(1);
+    expect(baked.materialCount).toBe(1);
     baked.dispose();
   });
 });

@@ -57,7 +57,7 @@ describe('physicalParamsFor', () => {
     const params = physicalParamsFor(color({ material: 'transparent', value: 0xc4281c, alpha: 128 }));
     // Beer-Lambert: remaining transmittance at `attenuationDistance` equals `attenuationColor`
     // exactly, so a short distance relative to typical part size (tens of LDU) is what makes
-    // the tint read as strong rather than pale — see shaders.ts.
+    // the tint read as strong rather than pale.
     expect(params.attenuationDistance).toBeLessThan(30);
     expect(params.transmission).toBeGreaterThan(0.9);
   });

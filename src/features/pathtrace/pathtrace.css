@@ -32,6 +32,23 @@
   height: auto;
 }
 
+/* One dial row's right-hand cell: the slider grows, its live readout stays a fixed,
+   non-reflowing width so digits ticking up/down don't shove the thumb sideways. */
+.by-render-dial {
+  display: flex;
+  align-items: center;
+  gap: var(--by-space-2);
+  min-width: 0;
+}
+.by-render-dial .by-slider { flex: 1 1 auto; min-width: 0; }
+.by-render-dial__value {
+  flex: none;
+  width: 44px;
+  font-size: var(--by-text-xs);
+  color: var(--by-text-muted);
+  text-align: right;
+}
+
 .by-pathtrace-stats {
   pointer-events: none;
   padding: var(--by-space-1) var(--by-space-3);

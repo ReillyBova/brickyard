@@ -14,7 +14,7 @@ import type { PathtraceStats } from './PathTracerController.ts';
 import { DEFAULT_ENVIRONMENT } from './environments.ts';
 import type { PathtraceEnvironment } from './environments.ts';
 import { DEFAULT_LIGHTING } from './lighting.ts';
-import type { LightingPreset } from './lighting.ts';
+import type { LightingSettings } from './lighting.ts';
 import './pathtrace.css';
 
 /** Lucide "aperture", inlined per docs/DESIGN.md (stroke-width 2.75, `data-lucide` for review). */
@@ -51,11 +51,12 @@ interface PathtraceToggleProps {
   rendererRef: RefObject<SceneRenderer | null>;
   active: boolean;
   onActiveChange: (active: boolean) => void;
-  /** The chosen environment and lighting preset — see `App.tsx`'s render-mode panel, which
-   *  replaces the parts chest. Changing either rebuilds the traced scene (a full, but rare
-   *  and user-initiated, BVH rebake — see `PathTracerController.build`). */
+  /** The chosen environment and lighting settings — see `App.tsx`'s render-mode panel, which
+   *  replaces the parts chest. The environment triggers a scene rebake (its floor colour is a
+   *  real material — see `PathTracerController.updateEnvironment`); lighting dials are cheap
+   *  per-frame updates with no rebake, so they can be dragged live. */
   environment?: PathtraceEnvironment;
-  lighting?: LightingPreset;
+  lighting?: LightingSettings;
   /**
    * Reports the live stats object on every frame (and `null` when inactive), so a caller
    * can surface it somewhere other than this component's own floating readout — see
@@ -83,6 +84,9 @@ export function PathtraceToggle({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stats]);
 
+  // Builds the traced scene once per activation — a real BVH build, so it must not re-run on
+  // every lighting-dial tick. Environment and lighting changes while active are handled by the
+  // two effects below via the controller's cheap `update*` calls instead of re-running this one.
   useEffect(() => {
     if (!active) {
       controllerRef.current?.dispose();
@@ -109,16 +113,7 @@ export function PathtraceToggle({
       renderRaster: () => sceneRenderer.renderOnce(),
     });
     controllerRef.current = controller;
-    setStats({
-      status: 'building',
-      samples: 0,
-      renderScale: 0,
-      spp: 0,
-      frameMs: 0,
-      fps: 0,
-      triangleCount: 0,
-      raysCast: 0,
-    });
+    setStats({ status: 'building', samples: 0, frameMs: 0, fps: 0, triangleCount: 0 });
 
     controller
       .build(snapshot, { environment, lighting })
@@ -140,7 +135,21 @@ export function PathtraceToggle({
       sceneRenderer.start();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, environment, lighting]);
+  }, [active]);
+
+  // Environment swaps rebake the floor's material but never the model's geometry/BVH.
+  useEffect(() => {
+    if (!active) return;
+    controllerRef.current?.updateEnvironment(environment, lighting);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, environment]);
+
+  // Lighting dials are the cheap path: no rebake, safe to fire on every slider tick.
+  useEffect(() => {
+    if (!active) return;
+    controllerRef.current?.updateLighting(lighting);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, lighting]);
 
   const label = active ? 'Exit path-traced render' : 'Path-traced render';
 
