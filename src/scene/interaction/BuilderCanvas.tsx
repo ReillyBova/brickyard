@@ -416,23 +416,64 @@ export function BuilderCanvas({
     <>
       {/* Focusable so it can receive keys without a window-level listener. */}
       <canvas ref={canvasRef} tabIndex={0} aria-label="Building canvas" />
+      {selectedCount > 0 && (
+        // Nothing else names these keys — there's no toolbar button or drag gesture
+        // for any of them, so the legend appears the moment they start doing
+        // something. Rotate carries the accent variant: it's the one action with no
+        // other affordance anywhere in the UI, mouse or menu.
+        <div className="by-shortcut-card">
+          <span className="by-shortcut-card__item">
+            <span className="by-kbd-set">
+              <kbd className="by-kbd">◄</kbd>
+              <kbd className="by-kbd">▲</kbd>
+              <kbd className="by-kbd">▼</kbd>
+              <kbd className="by-kbd">►</kbd>
+            </span>
+            Move
+          </span>
+          <span className="by-shortcut-card__item">
+            <span className="by-kbd-set">
+              <kbd className="by-kbd">Pg Up</kbd>
+              <kbd className="by-kbd">Pg Dn</kbd>
+            </span>
+            Up / down
+          </span>
+          <span className="by-shortcut-card__item by-shortcut-card__item--accent">
+            <span className="by-kbd-set">
+              <kbd className="by-kbd">Shift</kbd>
+              <kbd className="by-kbd">◄</kbd>
+              <kbd className="by-kbd">►</kbd>
+            </span>
+            Rotate
+          </span>
+          <span className="by-shortcut-card__item">
+            <span className="by-kbd-set">
+              <kbd className="by-kbd">Alt</kbd>
+            </span>
+            Fine step
+          </span>
+          <span className="by-shortcut-card__item">
+            <span className="by-kbd-set">
+              <kbd className="by-kbd">⌫</kbd>
+            </span>
+            Delete
+          </span>
+        </div>
+      )}
       <div className="by-statusbar">
         <span>
           {count} {count === 1 ? 'brick' : 'bricks'}
         </span>
         <span>
-          {selectedCount > 0
-            ? `${selectedCount} selected`
-            : blocked
-              ? 'Blocked — that space is taken'
-              : 'Ready'}
+          {selectedCount === 1
+            ? '1 selected — click again to pick back up'
+            : selectedCount > 1
+              ? `${selectedCount} selected`
+              : blocked
+                ? 'Blocked — that space is taken'
+                : 'Ready'}
         </span>
         <span>{status}</span>
-        <span className="by-kbd-set">
-          <kbd className="by-kbd">◄▲▼►</kbd> move ·{' '}
-          <kbd className="by-kbd">Pg Up/Dn</kbd> up/down ·{' '}
-          <kbd className="by-kbd">Shift</kbd>+<kbd className="by-kbd">◄►</kbd> rotate
-        </span>
       </div>
     </>
   );
