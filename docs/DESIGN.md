@@ -199,7 +199,7 @@ What the viewport does draw:
 | Hover | `--by-3d-hover` edge lift on the hovered brick only |
 | Selected | `--by-3d-select` outline; multi-select outlines every member, no per-brick handles |
 | Ghost | `--by-3d-ghost` at `--by-3d-ghost-alpha`, solid geometry, no wireframe |
-| Invalid placement | `--by-3d-invalid` on the ghost; collision, not incompatibility |
+| Invalid placement | `--by-3d-invalid` edges (`EdgesGeometry`, hard silhouette only) over a faint fill at `--by-3d-invalid-alpha`, depth-test disabled; collision, not incompatibility |
 | Connected set | `--by-3d-connected` (sage) when "select connected" or graph inspection is active |
 | Baseplate | `--by-canvas-grid` dots, one per stud at 20 LDU pitch, fading with distance |
 
