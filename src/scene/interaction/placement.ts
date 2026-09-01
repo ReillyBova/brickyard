@@ -10,7 +10,7 @@
  * reasoned about from a diagram.
  */
 
-import { IDENTITY, multiply } from '../../math';
+import { IDENTITY, fromYRotation, multiply } from '../../math';
 import type { BrickId, Mat4, Vec3 } from '../../types';
 import { boundsFromTriangles, partTriangles } from '../../ldraw/bounds';
 import { loadBakedParts, type BakedParts } from '../bakedParts.ts';
@@ -159,6 +159,23 @@ export class PlacementController {
    * chest choice does.
    */
   private wasPickedUp = false;
+  /**
+   * The last transform `resolveSnap`/`groundPlacement` actually produced — before
+   * `manualRotation` (below) is layered on top. Kept separately so a manual rotation
+   * can be recomposed instantly, without needing to "unbake" itself from
+   * `state.transform` (which already has the *previous* manualRotation folded in).
+   */
+  private baseTransform: Mat4 | null = null;
+  /**
+   * A persistent extra spin about the piece's own local +Y axis (the connector-axis
+   * convention throughout this codebase — see CLAUDE.md), composed on top of
+   * `baseTransform` every time either changes. This is what makes a rotation survive
+   * a candidate change or a cursor move: `move()` and `cycle()` only ever replace
+   * `baseTransform`, never this, so whatever the user last dialed in keeps applying
+   * to whichever base transform is current. Reset on `hold`/`pickUp`, exactly like
+   * `state.roll` already was — a fresh piece never inherits the last one's spin.
+   */
+  private manualRotation: Mat4 = IDENTITY;
 
   private readonly scene: PlacementScene;
 
@@ -182,6 +199,8 @@ export class PlacementController {
     this.heldColor = colorCode;
     this.wasPickedUp = false;
     this.previous = undefined;
+    this.baseTransform = null;
+    this.manualRotation = IDENTITY;
     this.state = { candidates: [], index: 0, roll: 0, transform: null, valid: false };
     if (part === null) this.scene.hideGhost();
   }
@@ -202,6 +221,8 @@ export class PlacementController {
     this.heldColor = colorCode;
     this.wasPickedUp = true;
     this.previous = previousTransform;
+    this.baseTransform = null;
+    this.manualRotation = IDENTITY;
     this.state = { candidates: [], index: 0, roll: 0, transform: null, valid: false };
   }
 
@@ -247,6 +268,27 @@ export class PlacementController {
     return b ? { part: b.part, transform: b.transform } : null;
   };
 
+  /** `baseTransform` with the persistent manual rotation composed on top. */
+  private composed(): Mat4 | null {
+    if (this.baseTransform === null) return null;
+    return multiply(this.baseTransform, this.manualRotation);
+  }
+
+  /** Re-evaluates `state` from a new `baseTransform`: collision, and the ghost repaint. */
+  private applyBase(base: Mat4 | null): Mat4 | null {
+    const part = this.held;
+    this.baseTransform = base;
+    const transform = part === null ? null : this.composed();
+    this.state = {
+      ...this.state,
+      transform,
+      valid: part === null || transform === null ? false : !collides(part, transform, this.index),
+    };
+    this.previous = transform ?? undefined;
+    void this.paint();
+    return transform;
+  }
+
   /** Recompute from the pointer. Returns the transform the ghost should show. */
   move(ndcX: number, ndcY: number): Mat4 | null {
     const part = this.held;
@@ -267,40 +309,25 @@ export class PlacementController {
       this.lookup,
     );
 
-    let transform: Mat4 | null = null;
+    let base: Mat4 | null = null;
     if (candidates.length > 0) {
-      transform = candidates[0].transform;
+      base = candidates[0].transform;
     } else if (!hit) {
       // Over empty space: rest it on the baseplate rather than showing nothing.
       const ray = this.scene.pickRay(ndcX, ndcY);
-      transform = groundPlacement(part, ray.origin, ray.direction);
+      base = groundPlacement(part, ray.origin, ray.direction);
     }
 
-    this.state = {
-      candidates,
-      index: 0,
-      roll: this.state.roll,
-      transform,
-      valid: transform === null ? false : !collides(part, transform, this.index),
-    };
-    this.previous = transform ?? undefined;
-    void this.paint();
-    return transform;
+    this.state = { ...this.state, candidates, index: 0 };
+    return this.applyBase(base);
   }
 
   /** Cycle to the next candidate. Cuts, never tweens — see docs/DESIGN.md. */
   cycle(): void {
     if (this.state.candidates.length < 2) return;
     const index = (this.state.index + 1) % this.state.candidates.length;
-    const transform = this.state.candidates[index].transform;
-    this.state = {
-      ...this.state,
-      index,
-      transform,
-      valid: this.held === null ? false : !collides(this.held, transform, this.index),
-    };
-    this.previous = this.state.transform ?? undefined;
-    void this.paint();
+    this.state = { ...this.state, index };
+    this.applyBase(this.state.candidates[index].transform);
   }
 
   /**
@@ -316,27 +343,52 @@ export class PlacementController {
   }
 
   /**
-   * Nudge or rotate the piece on the cursor by a rigid world-space `delta`, bypassing
-   * candidate resolution — the same keyboard vocabulary a placed selection uses
-   * (`EditorSession.transformSelection`), applied to the ghost instead of a document
-   * brick. Every key operation available on a placed selection works identically while
-   * a piece is held, rather than holding being a poorer, more limited mode.
-   *
-   * `previous` is updated the same way `move`, `cycle` and `rotate` already anchor
-   * it, so continuity is *biased* toward this position — not pinned to it, since a
-   * genuine cursor move still wins over a stale bias (see `resolve.ts` and the
-   * "continuity is bounded" tests in `placement.test.ts`). In practice this is exactly
-   * right: a keyboard nudge and a mouse hover aren't happening in the same instant, so
-   * the ghost simply stays where the keys put it until the pointer genuinely moves.
+   * A persistent extra spin, about the piece's own local +Y axis, layered on top of
+   * whatever `move`/`cycle` resolve — not a one-off transform mutation `move` would
+   * silently discard on the very next hover. That was the actual bug behind three
+   * separate reports: a rotation applied via a raw `nudge`-style mutation lived only
+   * in `state.transform`, which the next pointer move overwrote wholesale by
+   * re-deriving it from `resolveSnap` with the *stale* pre-rotation `roll` — so the
+   * rotation vanished on the next hover (looked like "rotating a ghost doesn't
+   * persist"), or on commit, since `commitHeld` always resolves once more at the
+   * click position before committing (looked like "committed orientation doesn't
+   * match the ghost" and, transitively, "the collision/valid state goes stale after a
+   * transform" — the same silent overwrite discards the freshly-recomputed `valid`
+   * too). Storing it separately from `baseTransform` means every future `move()` or
+   * `cycle()` call still composes it back in, because they only ever replace
+   * `baseTransform`, never this.
    */
-  nudge(delta: Mat4): void {
-    const part = this.held;
-    const current = this.state.transform;
-    if (part === null || current === null) return;
-    const next = multiply(delta, current);
-    this.state = { ...this.state, transform: next, valid: !collides(part, next, this.index) };
-    this.previous = next;
+  rotateManually(angleRadians: number): Mat4 | null {
+    if (this.held === null || this.baseTransform === null) return null;
+    this.manualRotation = multiply(fromYRotation(angleRadians), this.manualRotation);
+    const transform = this.composed();
+    this.state = {
+      ...this.state,
+      transform,
+      valid: transform === null ? false : !collides(this.held, transform, this.index),
+    };
+    this.previous = transform ?? undefined;
     void this.paint();
+    return transform;
+  }
+
+  /**
+   * Nudge the piece on the cursor by a rigid world-space `delta` — the same keyboard
+   * vocabulary a placed selection uses (`EditorSession.transformSelection`), applied
+   * to the ghost instead of a document brick. Composed into `baseTransform` (with the
+   * persistent manual rotation still layered on top of that), so a translate nudge
+   * followed by a rotate — or the other way around — both apply against where the
+   * piece actually is, not a stale pre-nudge position.
+   *
+   * Deliberately *not* persistent the way `rotateManually` is: the very next cursor
+   * move legitimately supersedes it, because "the ghost follows the cursor" is the
+   * whole point of placement, and unlike orientation, position has an obvious next
+   * authority — wherever the mouse is. It does survive to a commit that happens
+   * without an intervening cursor move, which is the case that actually matters.
+   */
+  nudge(delta: Mat4): Mat4 | null {
+    if (this.held === null || this.baseTransform === null) return null;
+    return this.applyBase(multiply(delta, this.baseTransform));
   }
 
   private async paint(): Promise<void> {
@@ -382,6 +434,8 @@ export class PlacementController {
     };
     this.previous = undefined;
     this.wasPickedUp = false;
+    this.baseTransform = null;
+    this.manualRotation = IDENTITY;
     this.scene.hideGhost();
     return brick;
   }
