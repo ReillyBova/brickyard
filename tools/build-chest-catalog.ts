@@ -68,21 +68,21 @@ type Category =
  * which parts earn a spot inside it.
  */
 const CATEGORY_CAPS: Record<Category, number> = {
-  Bricks: 38,
-  Plates: 34,
-  Tiles: 26,
-  Slopes: 32,
-  Wedges: 18,
-  Arches: 18,
-  Round: 34,
-  SNOT: 18,
-  Hinges: 26,
-  Connectors: 30,
-  Technic: 61,
-  Wheels: 24,
-  'Windows & Doors': 26,
-  Plants: 20,
-  Minifigure: 39,
+  Bricks: 52,
+  Plates: 48,
+  Tiles: 34,
+  Slopes: 42,
+  Wedges: 22,
+  Arches: 24,
+  Round: 44,
+  SNOT: 24,
+  Hinges: 32,
+  Connectors: 38,
+  Technic: 70,
+  Wheels: 30,
+  'Windows & Doors': 32,
+  Plants: 26,
+  Minifigure: 44,
 }
 
 /**
