@@ -323,6 +323,74 @@ describe('keyboard', () => {
     );
     expect(source).not.toMatch(/stopPropagation/);
   });
+
+  it('Escape clears a selection when nothing is held', async () => {
+    // Escape used to be scoped entirely to cancelling a hold — a selected piece with
+    // nothing on the cursor had no keyboard way to deselect. The interaction model
+    // asks for both: cancel a hold, or clear a selection, whichever applies.
+    const source = await import('node:fs').then((fs) =>
+      fs.readFileSync(new URL('./BuilderCanvas.tsx', import.meta.url), 'utf8'),
+    );
+    const onKeyBody = source.slice(source.indexOf('const onKey ='), source.indexOf('\n    canvas.addEventListener'));
+    const escapeBranch = onKeyBody.slice(onKeyBody.indexOf("'Escape'"));
+    expect(escapeBranch).toMatch(/session\.setSelection\(\[\]\)/);
+  });
+
+  it('has no Page Up/Down: vertical movement needs no Fn key on a laptop', async () => {
+    // Page Up/Down need Fn on a MacBook with no numeric keypad — awkward enough that
+    // it isn't "laptop-friendly, directional keys only" per the rule this project set
+    // for itself. Vertical movement is Shift+Up/Down instead: Shift already means
+    // "the other axis" (it also turns Left/Right from translate into rotate), so this
+    // extends a rule already in place rather than inventing a new one.
+    const source = await import('node:fs').then((fs) =>
+      fs.readFileSync(new URL('./BuilderCanvas.tsx', import.meta.url), 'utf8'),
+    );
+    expect(source).not.toMatch(/PageUp/);
+    expect(source).not.toMatch(/PageDown/);
+  });
+});
+
+describe('pointer gestures', () => {
+  it('picks up only from a real dblclick, never from a second single click', async () => {
+    // The regression this guards: pick-up used to be a special case inside the
+    // single-click (pointerup) handler — "click an already-selected brick again" —
+    // which made it indistinguishable from two separate, deliberate clicks that
+    // happened to land on the same brick within a click or two of each other. A
+    // native `dblclick` only fires when the browser's own timing-and-proximity
+    // heuristic agrees the two clicks were one gesture, which is what actually makes
+    // "one click selects, double-click picks up" reliable instead of flaky.
+    const source = await import('node:fs').then((fs) =>
+      fs.readFileSync(new URL('./BuilderCanvas.tsx', import.meta.url), 'utf8'),
+    );
+    // A real listener is registered and cleaned up.
+    expect(source).toMatch(/addEventListener\('dblclick'/);
+    expect(source).toMatch(/removeEventListener\('dblclick'/);
+    // The single-click path never reads the current selection to decide whether to
+    // pick up — that reasoning belongs to the dblclick handler alone. This is a
+    // coarse but deliberate guard: it would fail if pick-up logic crept back into
+    // `onUp` keyed off `session.selection`.
+    const onUpBody = source.slice(source.indexOf('const onUp ='), source.indexOf('const onDoubleClick ='));
+    expect(onUpBody).not.toMatch(/session\.selection\.has/);
+    expect(onUpBody).not.toMatch(/pickUp/);
+  });
+
+  it('place commits and releases: holding never survives a landed piece', async () => {
+    // The regression this guards: PlacementController.commit() used to clear its own
+    // candidate/transform state but never reset `held`, so `holding` stayed true
+    // after a successful placement. See the dedicated PlacementController test for
+    // the behavioural version of this; this one guards commitHeld's contract in
+    // BuilderCanvas — it must not separately call `hold(null)` to compensate for a
+    // commit() that used to need it, which would silently re-introduce the coupling
+    // if commit() ever regresses.
+    const source = await import('node:fs').then((fs) =>
+      fs.readFileSync(new URL('./BuilderCanvas.tsx', import.meta.url), 'utf8'),
+    );
+    const commitHeldBody = source.slice(
+      source.indexOf('const commitHeld ='),
+      source.indexOf('};', source.indexOf('const commitHeld =')),
+    );
+    expect(commitHeldBody).not.toMatch(/\.hold\(null\)/);
+  });
 });
 
 describe('the part catalog', () => {
@@ -437,5 +505,79 @@ describe('pick up', () => {
     c.commit('a' as BrickId);
 
     expect(c.pickedUp).toBe(false);
+  });
+
+  it('commit releases the hold — placing a picked-up piece does not leave it stuck on the cursor', async () => {
+    // The regression this guards: commit() used to clear its own transform/candidate
+    // state but never touched `held`, so `holding` stayed true after a successful
+    // placement. That was invisible for a fresh chest hold, whose caller (BuilderCanvas)
+    // separately clears the chest tile's selectedPartId, which round-trips into a
+    // hold(null) call — but a picked-up piece has no such round-trip, so it stayed
+    // stuck on the cursor until the user pressed Escape.
+    const part = await brick2x4();
+    const studPos = await aStudOn(part, IDENTITY);
+    const scene = stubScene({ brick: 'seed' as BrickId, point: studPos, normal: [0, -1, 0] });
+
+    const c = new PlacementController(scene);
+    c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+    c.pickUp(part, 4, fromTranslation([500, 0, 0]));
+    c.move(0, 0);
+    const placed = c.commit('a' as BrickId);
+
+    expect(placed).not.toBeNull();
+    expect(c.holding).toBe(false);
+  });
+});
+
+describe('keyboard nudge while holding', () => {
+  it('moves the ghost by a rigid delta, bypassing candidate resolution', async () => {
+    const part = await brick2x4();
+    const studPos = await aStudOn(part, IDENTITY);
+    const scene = stubScene({ brick: 'seed' as BrickId, point: studPos, normal: [0, -1, 0] });
+
+    const c = new PlacementController(scene);
+    c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+    c.hold(part);
+    c.move(0, 0);
+    const before = c.current.transform;
+    expect(before).not.toBeNull();
+
+    c.nudge(fromTranslation([40, 0, 0]));
+
+    const after = c.current.transform;
+    expect(after).not.toBeNull();
+    expect(positionOf(after as NonNullable<typeof after>)[0]).toBeCloseTo(
+      positionOf(before as NonNullable<typeof before>)[0] + 40,
+      6,
+    );
+  });
+
+  it('does nothing when nothing is held', async () => {
+    const part = await brick2x4();
+    const scene = stubScene(null);
+    const c = new PlacementController(scene);
+    c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+
+    expect(() => c.nudge(fromTranslation([40, 0, 0]))).not.toThrow();
+    expect(c.current.transform).toBeNull();
+  });
+
+  it('composes: a second nudge applies on top of the first, not from the original', async () => {
+    const part = await brick2x4();
+    const studPos = await aStudOn(part, IDENTITY);
+    const scene = stubScene({ brick: 'seed' as BrickId, point: studPos, normal: [0, -1, 0] });
+
+    const c = new PlacementController(scene);
+    c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+    c.hold(part);
+    c.move(0, 0);
+    const start = positionOf(c.current.transform as NonNullable<ReturnType<typeof c.move>>);
+
+    c.nudge(fromTranslation([40, 0, 0]));
+    c.nudge(fromTranslation([0, 0, 40]));
+
+    const end = positionOf(c.current.transform as NonNullable<ReturnType<typeof c.move>>);
+    expect(end[0]).toBeCloseTo(start[0] + 40, 6);
+    expect(end[2]).toBeCloseTo(start[2] + 40, 6);
   });
 });
