@@ -17,7 +17,7 @@
 
 import { multiply } from '../../math';
 import { collides } from '../../snap/collision';
-import { findMates, mateCount } from '../../snap/mating';
+import { findMates, mateCount, pointMatrix } from '../../snap/mating';
 import { HashSpatialIndex } from '../../snap/spatialIndex';
 import type { MateGroup, PartDef } from '../../snap/types';
 import {
@@ -236,6 +236,41 @@ export class EditorSession {
         { type: 'remove', bricks },
       ],
     });
+  }
+
+  /**
+   * The world-space connector frame `id` is currently mated to — position and full
+   * 3-axis orientation, not just the connector's own axis. This is what "the
+   * coordinate system of what it is anchored to" means for a placed brick: the
+   * lattice it can step along without breaking connectivity is defined by whichever
+   * connection is actually holding it there, not world or camera axes.
+   *
+   * Deterministic when several mates apply: the strongest edge (most points engaged)
+   * wins, tie-broken by the lowest neighbour brick id. Null when `id` isn't mated to
+   * anything — the caller falls back to world axes in that case.
+   */
+  anchorFrame(id: BrickId): Mat4 | null {
+    const node = this.document.graph.nodes.get(id);
+    if (!node) return null;
+    const edgeIds = [...node.out, ...node.in, ...node.peer];
+    const edges = edgeIds
+      .map((edgeId) => this.document.graph.edges.get(edgeId))
+      .filter((e): e is ConnectionEdge => !!e);
+    if (edges.length === 0) return null;
+
+    const strongest = [...edges].sort(
+      (a, b) => b.mates.length - a.mates.length || (a.id < b.id ? -1 : 1),
+    )[0];
+    const otherId = strongest.a === id ? strongest.b : strongest.a;
+    const otherBrick = this.document.bricks.get(otherId);
+    const otherPart = otherBrick && this.parts.get(otherBrick.partId);
+    if (!otherBrick || !otherPart) return null;
+
+    const mate = strongest.mates[0];
+    const otherPointId = strongest.a === id ? mate.bPoint : mate.aPoint;
+    const targetPoint = otherPart.connections.find((c) => c.id === otherPointId);
+    if (!targetPoint) return null;
+    return multiply(otherBrick.transform, pointMatrix(targetPoint));
   }
 
   /**

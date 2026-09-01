@@ -24,11 +24,11 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-import { fromTranslation, fromYRotation, multiplyAll, positionOf } from '../../math';
+import { basisOf, fromTranslation, fromYRotation, multiplyAll, positionOf } from '../../math';
 import { mintBrickId } from '../../model/ids.ts';
 import type { BrickInstance, SceneDocument } from '../../model/types';
 import type { PartDef } from '../../snap/types';
-import type { Mat4, Vec3 } from '../../types';
+import type { Mat3, Mat4, Vec3 } from '../../types';
 import { SceneRenderer } from '../SceneRenderer.ts';
 import type { SelectionEntry } from '../selectionOverlay.ts';
 import { SnapSound } from './click.ts';
@@ -65,6 +65,43 @@ const isUndo = (e: KeyboardEvent): boolean =>
   (e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'z';
 const isRedo = (e: KeyboardEvent): boolean =>
   (e.metaKey || e.ctrlKey) && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'));
+
+/** World X/Y/Z — the lattice a selected brick with no anchor (shouldn't happen for a
+ * placed piece, but kept for safety) still has. */
+const WORLD_BASIS: Mat3 = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+
+const negate = (v: Vec3): Vec3 => [-v[0], -v[1], -v[2]];
+
+/** Whichever of `candidates` points most toward `desired` — how a screen direction
+ * picks a signed axis out of an anchor's basis. */
+function mostAligned(candidates: readonly Vec3[], desired: Vec3): Vec3 {
+  let best = candidates[0];
+  let bestDot = -Infinity;
+  for (const c of candidates) {
+    const d = c[0] * desired[0] + c[1] * desired[1] + c[2] * desired[2];
+    if (d > bestDot) {
+      bestDot = d;
+      best = c;
+    }
+  }
+  return best;
+}
+
+/**
+ * A translation of `magnitude` LDU along whichever of `anchor`'s own axes (or the
+ * world axes, with no anchor) best matches `screenDirection` — "stud by stud in the
+ * coordinate system of what it is anchored to", per the interaction model. `vertical`
+ * selects the anchor's connector axis instead of the two axes perpendicular to it.
+ */
+function anchorStep(anchor: Mat4 | null, vertical: boolean, screenDirection: Vec3, magnitude: number): Mat4 {
+  const basis = anchor ? basisOf(anchor) : WORLD_BASIS;
+  const axisX: Vec3 = [basis[0], basis[1], basis[2]];
+  const axisY: Vec3 = [basis[3], basis[4], basis[5]];
+  const axisZ: Vec3 = [basis[6], basis[7], basis[8]];
+  const candidates = vertical ? [axisY, negate(axisY)] : [axisX, negate(axisX), axisZ, negate(axisZ)];
+  const direction = mostAligned(candidates, screenDirection);
+  return fromTranslation([direction[0] * magnitude, direction[1] * magnitude, direction[2] * magnitude]);
+}
 
 /** What a caller hands `BuilderCanvas` to replace the document — an imported model. */
 export interface DocumentSeed {
@@ -430,16 +467,17 @@ export function BuilderCanvas({
       // camera can have orbited since the last one. Without this, "left" reads as
       // world -X regardless of where the camera is looking — correct only until
       // someone orbits behind the model, at which point every arrow reads reversed.
+      // Only the selection branch below still needs it — a held ghost no longer takes
+      // keyboard translation at all.
       const ground = renderer.groundBasis();
-      const along = (dir: Vec3, magnitude: number): Mat4 =>
-        fromTranslation([dir[0] * magnitude, dir[1] * magnitude, dir[2] * magnitude]);
-      const vertical = (magnitude: number): Mat4 => fromTranslation([0, magnitude, 0]);
 
       if (placement.holding) {
-        // Every operation below also exists on a placed selection, applied to the
-        // ghost instead — holding is not a separate, poorer mode. `]` and `r` stay
-        // scoped to holding: cycling candidates and rolling about a connection axis
-        // only mean something while something is mid-placement.
+        // A held piece already follows the cursor — that's the whole mechanism of
+        // placement — so keyboard translation would just fight the pointer for
+        // control of the same thing. Rotation has no mouse equivalent, so it stays:
+        // Shift+Left/Right (persistent — see PlacementController.rotateManually), `r`
+        // (a discrete quarter-turn about the connection axis) and `]` (cycle
+        // candidates) are the only keys that do anything while holding.
         if (event.key === ']') {
           placement.cycle();
           syncBlocked();
@@ -450,32 +488,13 @@ export function BuilderCanvas({
           syncBlocked();
           return;
         }
-
-        switch (event.key) {
-          case 'ArrowLeft':
-            if (event.shiftKey) placement.rotateManually((-deg * Math.PI) / 180);
-            else placement.nudge(along(ground.right, -xz));
-            break;
-          case 'ArrowRight':
-            if (event.shiftKey) placement.rotateManually((deg * Math.PI) / 180);
-            else placement.nudge(along(ground.right, xz));
-            break;
-          case 'ArrowUp':
-            if (event.shiftKey) placement.nudge(vertical(-vy));
-            else placement.nudge(along(ground.forward, xz));
-            break;
-          case 'ArrowDown':
-            if (event.shiftKey) placement.nudge(vertical(vy));
-            else placement.nudge(along(ground.forward, -xz));
-            break;
-          default:
-            break;
+        if (event.shiftKey && event.key === 'ArrowLeft') {
+          placement.rotateManually((-deg * Math.PI) / 180);
+          syncBlocked();
+        } else if (event.shiftKey && event.key === 'ArrowRight') {
+          placement.rotateManually((deg * Math.PI) / 180);
+          syncBlocked();
         }
-        // Every branch above either called nudge() or fell through on a key this
-        // handler doesn't own — either way, re-reading placement.current here is
-        // cheap and correct, and it's what keeps this from needing its own copy of
-        // the switch to know which branches actually touched the transform.
-        syncBlocked();
         return;
       }
 
@@ -495,22 +514,30 @@ export function BuilderCanvas({
         .filter((t): t is Mat4 => t !== undefined)
         .map(positionOf);
 
+      // Stud by stud in the coordinate system of whatever the piece is anchored to —
+      // that's the whole point of the snapping. The first selected brick stands in
+      // for the group on a multi-select: simple and deterministic, and a rigid group
+      // move already keeps every member's relative pose fixed, so one anchor speaks
+      // for all of them. No anchor (nothing mated) falls back to world axes inside
+      // anchorStep itself.
+      const anchor = session.anchorFrame(selection[0]);
+
       switch (event.key) {
         case 'ArrowLeft':
           if (event.shiftKey) session.transformSelection(selection, rotationAbout(positions, (-deg * Math.PI) / 180), rotateLabel);
-          else session.transformSelection(selection, along(ground.right, -xz), label);
+          else session.transformSelection(selection, anchorStep(anchor, false, negate(ground.right), xz), label);
           break;
         case 'ArrowRight':
           if (event.shiftKey) session.transformSelection(selection, rotationAbout(positions, (deg * Math.PI) / 180), rotateLabel);
-          else session.transformSelection(selection, along(ground.right, xz), label);
+          else session.transformSelection(selection, anchorStep(anchor, false, ground.right, xz), label);
           break;
         case 'ArrowUp':
-          if (event.shiftKey) session.transformSelection(selection, vertical(-vy), label);
-          else session.transformSelection(selection, along(ground.forward, xz), label);
+          if (event.shiftKey) session.transformSelection(selection, anchorStep(anchor, true, [0, -1, 0], vy), label);
+          else session.transformSelection(selection, anchorStep(anchor, false, ground.forward, xz), label);
           break;
         case 'ArrowDown':
-          if (event.shiftKey) session.transformSelection(selection, vertical(vy), label);
-          else session.transformSelection(selection, along(ground.forward, -xz), label);
+          if (event.shiftKey) session.transformSelection(selection, anchorStep(anchor, true, [0, 1, 0], vy), label);
+          else session.transformSelection(selection, anchorStep(anchor, false, negate(ground.forward), xz), label);
           break;
         default:
           break;
@@ -628,58 +655,69 @@ export function BuilderCanvas({
       {/* Focusable so it can receive keys without a window-level listener. */}
       <canvas ref={canvasRef} tabIndex={0} aria-label="Building canvas" />
       {!suspended && (selectedCount > 0 || isHolding) && (
-        // Nothing else names these keys — there's no toolbar button or drag gesture
-        // for any of them, so the legend appears the moment they start doing
-        // something, and it's the same legend whether the piece is selected or still
-        // on the cursor: every one of these operations works identically in both
-        // modes. Rotate carries the accent variant: it's the one action with no other
+        // A held ghost already follows the cursor for position, so only rotation (no
+        // mouse equivalent) has a keyboard path while holding — the legend shows just
+        // that. A selection has no pointer-driven move at all, so it gets the full
+        // set. Rotate carries the accent variant: it's the one action with no other
         // affordance anywhere in the UI, mouse or menu.
         <div className="by-shortcut-card">
-          <span className="by-shortcut-card__item">
-            <span className="by-kbd-set">
-              <kbd className="by-kbd">◄</kbd>
-              <kbd className="by-kbd">▲</kbd>
-              <kbd className="by-kbd">▼</kbd>
-              <kbd className="by-kbd">►</kbd>
-            </span>
-            Move
-          </span>
-          <span className="by-shortcut-card__item">
-            <span className="by-kbd-set">
-              <kbd className="by-kbd">Shift</kbd>
-              <kbd className="by-kbd">▲</kbd>
-              <kbd className="by-kbd">▼</kbd>
-            </span>
-            Up / down
-          </span>
-          <span className="by-shortcut-card__item by-shortcut-card__item--accent">
-            <span className="by-kbd-set">
-              <kbd className="by-kbd">Shift</kbd>
-              <kbd className="by-kbd">◄</kbd>
-              <kbd className="by-kbd">►</kbd>
-            </span>
-            Rotate
-          </span>
-          <span className="by-shortcut-card__item">
-            <span className="by-kbd-set">
-              <kbd className="by-kbd">Alt</kbd>
-            </span>
-            Fine step
-          </span>
           {isHolding ? (
-            <span className="by-shortcut-card__item">
-              <span className="by-kbd-set">
-                <kbd className="by-kbd">Esc</kbd>
+            <>
+              <span className="by-shortcut-card__item by-shortcut-card__item--accent">
+                <span className="by-kbd-set">
+                  <kbd className="by-kbd">Shift</kbd>
+                  <kbd className="by-kbd">◄</kbd>
+                  <kbd className="by-kbd">►</kbd>
+                </span>
+                Rotate
               </span>
-              Cancel
-            </span>
+              <span className="by-shortcut-card__item">
+                <span className="by-kbd-set">
+                  <kbd className="by-kbd">Esc</kbd>
+                </span>
+                Cancel
+              </span>
+            </>
           ) : (
-            <span className="by-shortcut-card__item">
-              <span className="by-kbd-set">
-                <kbd className="by-kbd">⌫</kbd>
+            <>
+              <span className="by-shortcut-card__item">
+                <span className="by-kbd-set">
+                  <kbd className="by-kbd">◄</kbd>
+                  <kbd className="by-kbd">▲</kbd>
+                  <kbd className="by-kbd">▼</kbd>
+                  <kbd className="by-kbd">►</kbd>
+                </span>
+                Move
               </span>
-              Delete
-            </span>
+              <span className="by-shortcut-card__item">
+                <span className="by-kbd-set">
+                  <kbd className="by-kbd">Shift</kbd>
+                  <kbd className="by-kbd">▲</kbd>
+                  <kbd className="by-kbd">▼</kbd>
+                </span>
+                Up / down
+              </span>
+              <span className="by-shortcut-card__item by-shortcut-card__item--accent">
+                <span className="by-kbd-set">
+                  <kbd className="by-kbd">Shift</kbd>
+                  <kbd className="by-kbd">◄</kbd>
+                  <kbd className="by-kbd">►</kbd>
+                </span>
+                Rotate
+              </span>
+              <span className="by-shortcut-card__item">
+                <span className="by-kbd-set">
+                  <kbd className="by-kbd">Alt</kbd>
+                </span>
+                Fine step
+              </span>
+              <span className="by-shortcut-card__item">
+                <span className="by-kbd-set">
+                  <kbd className="by-kbd">⌫</kbd>
+                </span>
+                Delete
+              </span>
+            </>
           )}
         </div>
       )}

@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { IDENTITY, fromTranslation } from '../../math';
+import { basisOf, IDENTITY, fromTranslation, positionOf } from '../../math';
 import { createDocument } from '../../model';
 import { mintBrickId } from '../../model/ids';
 import type { BrickInstance } from '../../model/types';
@@ -425,5 +425,39 @@ describe('transformSelection collision', () => {
     expect(applied).toBe(true);
     // The pair's own connection survives a shared rigid move.
     expect(s.document.graph.edges.size).toBe(1);
+  });
+});
+
+describe('anchorFrame', () => {
+  it('is the world connector frame of the strongest mate, and null when unmated', async () => {
+    const part = await brick2x4WithOccupancy();
+    const s = new EditorSession(recordingScene());
+    s.registerPart(part);
+
+    const lower = instance(part, IDENTITY);
+    s.place(lower, part);
+    expect(s.anchorFrame(lower.id)).toBeNull(); // nothing mated to it yet
+
+    const upper = instance(part, fromTranslation([0, -BRICK_HEIGHT, 0]));
+    s.place(upper, part);
+
+    const anchor = s.anchorFrame(upper.id);
+    expect(anchor).not.toBeNull();
+    // The connector frame sits at the mated stud, on the lower brick's top face —
+    // somewhere between the two bricks' own origins, not at either one directly.
+    const pos = positionOf(anchor as Mat4);
+    expect(pos[1]).toBeGreaterThan(-BRICK_HEIGHT);
+    expect(pos[1]).toBeLessThanOrEqual(0);
+    // A real orthonormal basis, not a degenerate/zero one.
+    const basis = basisOf(anchor as Mat4);
+    const lenSq = (x: number, y: number, z: number) => x * x + y * y + z * z;
+    expect(lenSq(basis[0], basis[1], basis[2])).toBeCloseTo(1, 5);
+    expect(lenSq(basis[3], basis[4], basis[5])).toBeCloseTo(1, 5);
+    expect(lenSq(basis[6], basis[7], basis[8])).toBeCloseTo(1, 5);
+  });
+
+  it('is null for an id with no graph node at all', async () => {
+    const s = new EditorSession(recordingScene());
+    expect(s.anchorFrame('nope' as BrickId)).toBeNull();
   });
 });
