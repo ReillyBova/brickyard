@@ -143,6 +143,24 @@ instructions that group work sensibly rather than one brick at a time.
 
 Named so they are decisions rather than surprises.
 
+- **Some upstream part files carry inward-wound faces.** `973p1u`, the minifig torso, had
+  three back-panel quads authored counter-clockwise as seen from inside, so back-face
+  culling correctly dropped them and the interior showed through from behind. The
+  canonical LDraw library fixed exactly this on 2023-01-15, but the CORS-enabled mirror
+  this app fetches from — synced 2023-01-30, after the fix — still serves the pre-fix
+  vertex order. `src/ldraw/corrections.ts` patches those three lines by exact text before
+  parsing, and goes inert if the mirror ever catches up.
+
+  That is a narrow fix for one known part. Arms `3818` and `3819` were checked and are
+  clean, so the extent of the problem across the corpus is unmeasured. Two systemic
+  options, in order of preference: **repoint at a fresher CORS-enabled mirror**, which
+  would fix every stale part at once and retire the correction table entirely; or
+  **repair winding geometrically** at bake time, propagating a consistent orientation
+  across shared edges and fixing the global sense with a signed-volume test. The second
+  is more powerful and much riskier — it touches every part in the app, LDraw has
+  legitimately single-sided parts that must be left alone, and getting the global sense
+  backwards would invert everything while looking plausible from one angle.
+
 - **`buildOccupancy` has a performance cliff.** Measured at **187.7 seconds** for one high-poly curved
   part, which made a 384-second model import before the loader was changed to skip occupancy it does
   not use. Placement builds occupancy for the held piece, so the same part in the chest would freeze
