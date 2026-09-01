@@ -1,0 +1,88 @@
+/*
+ * Layout for the restyle panel and its per-row color target picker. No new component
+ * classes for anything components.css already covers (`.by-panel`, `.by-row`,
+ * `.by-swatch`, `.by-tag`, `.by-btn`, `.by-icon-btn`) — only the row grid and the
+ * target picker's popover, which are specific to this feature. Every value is a token.
+ */
+
+.by-restyle-panel {
+  width: 100%;
+}
+
+.by-restyle-panel__icon {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  color: var(--by-accent);
+}
+
+.by-restyle-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* One color's mapping: current swatch + name + usage count, an arrow, then the
+   replacement swatch and a per-row reset. Grid rather than flex so every row's arrow
+   and target swatch line up regardless of how long a color's name runs. */
+.by-restyle-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto auto auto;
+  align-items: center;
+  gap: var(--by-space-2);
+  min-height: var(--by-control-h);
+  padding: var(--by-space-1) 0;
+}
+
+.by-restyle-row__from {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  cursor: default;
+}
+/* The "from" swatch is read-only data, not a button — no hover scale. */
+.by-restyle-row__from:hover { transform: none; }
+
+.by-restyle-row__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--by-text-sm);
+}
+
+.by-restyle-row__arrow {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  color: var(--by-text-faint);
+}
+
+.by-restyle-row__reset {
+  width: var(--by-control-h-sm);
+  height: var(--by-control-h-sm);
+}
+
+.by-restyle-panel__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--by-space-2);
+}
+.by-restyle-panel__summary {
+  margin-right: auto;
+  font-size: var(--by-text-xs);
+}
+
+/* ── Target picker ──────────────────────────────────────────────────────── */
+.by-restyle-target__trigger {
+  width: 28px;
+  height: 28px;
+  flex: none;
+}
+
+/* Portaled into document.body — position: fixed with JS-measured coordinates, per
+   PartsChest/CategoryMenu.tsx. `ColorPicker` sizes and shadows itself
+   (`.by-palette-wrap`); this only has to position it. */
+.by-restyle-target__panel {
+  position: fixed;
+  z-index: var(--by-z-popover);
+}

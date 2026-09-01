@@ -76,3 +76,54 @@ export function MoonIcon(props: SVGProps<SVGSVGElement>) {
     </Icon>
   );
 }
+
+/** The restyle action: bulk semantic recolor. */
+export function PaintbrushIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon data-lucide="paintbrush" {...props}>
+      <path d="m14.622 17.897-10.68-2.913" />
+      <path d="M18.376 2.622a1 1 0 1 1 3.002 3.002L17.36 9.643a.5.5 0 0 0 0 .707l.944.944a2.41 2.41 0 0 1 0 3.408l-.944.944a.5.5 0 0 1-.707 0L8.354 7.348a.5.5 0 0 1 0-.707l.944-.944a2.41 2.41 0 0 1 3.408 0l.944.944a.5.5 0 0 0 .707 0z" />
+      <path d="M9 8c-1.804 2.71-3.97 3.46-6.583 3.948a.507.507 0 0 0-.302.819l7.32 8.883a1 1 0 0 0 1.185.204C12.735 20.405 16 16.792 16 15" />
+    </Icon>
+  );
+}
+
+/** A restyle row's "maps to" connector, from current color to replacement. */
+export function ArrowRightIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon data-lucide="arrow-right" {...props}>
+      <path d="M5 12h14" />
+      <path d="m12 5 7 7-7 7" />
+    </Icon>
+  );
+}
+
+/** Resets one restyle row back to its original color, and undoes a committed restyle. */
+export function Undo2Icon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon data-lucide="undo-2" {...props}>
+      <path d="M9 14 4 9l5-5" />
+      <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11" />
+    </Icon>
+  );
+}
+
+/** Redoes a restyle after an undo. */
+export function Redo2Icon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon data-lucide="redo-2" {...props}>
+      <path d="m15 14 5-5-5-5" />
+      <path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13" />
+    </Icon>
+  );
+}
+
+/** Closes a popover or panel. */
+export function XIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon data-lucide="x" {...props}>
+      <path d="M18 6 6 18" />
+      <path d="m6 6 12 12" />
+    </Icon>
+  );
+}
