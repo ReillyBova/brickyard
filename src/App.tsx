@@ -48,13 +48,13 @@ const DEFAULT_COLOR_CODE = 4;
 
 /**
  * Sample counts climb into the tens of thousands while a render converges, and a
- * digit-by-digit count makes the status bar reflow on almost every frame. Rounding to
- * a compact form keeps the width steady, which is what makes it readable at a glance.
+ * digit-by-digit count makes the status bar reflow on almost every frame. Always
+ * rounded, never fractional: the exact figure carries no meaning to a reader, and a
+ * steady width is the whole point.
  */
 function formatSamples(samples: number): string {
   if (samples < 1000) return `${samples}`;
-  const thousands = samples / 1000;
-  return `${thousands < 10 ? thousands.toFixed(1) : Math.round(thousands)}k`;
+  return `${Math.round(samples / 1000)}k`;
 }
 
 type ModelLoadState = { progress: number; phase: string } | { error: string } | null;
