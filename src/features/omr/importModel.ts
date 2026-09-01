@@ -3,10 +3,10 @@
  *
  * Three phases, matching the "opening a model" flow in `docs/ARCHITECTURE.md`:
  *
- * 1. Resolve every unique part's connections and bounds — `resolvePart` for connectivity,
- *    `partTriangles`/`boundsFromTriangles` for bounds — in parallel, once per distinct
- *    part id rather than once per brick. Occupancy is a placeholder; see
- *    `PLACEHOLDER_OCCUPANCY` below for why.
+ * 1. Resolve every unique part's connections, bounds and occupancy — `resolveFullPart`,
+ *    the same baked-first resolution `createPartCatalog` (`src/scene/interaction/
+ *    placement.ts`) gives the chest — in parallel, once per distinct part id rather than
+ *    once per brick.
  * 2. Mint a `BrickInstance` per flattened reference and index it in a `SpatialIndex`.
  * 3. Solve the connection graph geometrically with `findMates` (via `matesForCommit`),
  *    the same code the placement interaction uses, so an imported model's connectivity
@@ -25,49 +25,57 @@
 import { HashSpatialIndex } from '../../snap/spatialIndex';
 import { resolvePart, type ReadFile } from '../../snap/resolvePart';
 import { matesForCommit } from '../../snap/resolve';
-import type { OccupancyMask, PartDef } from '../../snap/types';
+import { buildOccupancy } from '../../snap/collision';
+import type { PartDef } from '../../snap/types';
 import { partTriangles, boundsFromTriangles } from '../../ldraw/bounds';
 import { mintBrickId } from '../../model/ids';
 import { createDocument, connectBricks } from '../../model/document';
 import type { MateLink } from '../../model/graph';
 import type { BrickInstance, SceneDocument } from '../../model/types';
+import { loadBakedParts, type BakedParts } from '../../scene/bakedParts.ts';
 
 import { parseMpd, type ParsedModel } from './parseMpd';
 
 export type { ReadFile };
 
 /**
- * A stand-in for a real occupancy mask. `buildOccupancy` (`src/snap/collision.ts`)
- * voxelises a part's full triangle soup at 4 LDU and its interior pass is
- * O(voxels × triangles) — fine for an ordinary brick (hundreds of each), but a measured
- * 187.7 **seconds** for one part alone on Galaxy Explorer (928): `3947`, the radar dish
- * (160×15×160 = 384,000 voxels against 39,304 triangles). That single part accounted for
- * over 80% of a 232-second import.
- *
- * Occupancy exists for collision detection during interactive placement, which this
- * viewer never exercises — it loads a document and renders it, it does not let anyone
- * drag a brick into another. Computing a real mask here would pay that cost for every
- * unique part in every bundled model on every open, for a query this pipeline never
- * makes. A degenerate 1-voxel mask keeps `PartDef` well-typed without the cost; real
- * occupancy is a bake-time concern once a part reaches the chest (`docs/PREBAKE.md`), not
- * something a one-off import should compute cold. The underlying performance cliff in
- * `buildOccupancy` is real regardless of this workaround — flagged separately, since it
- * would also hang a real interactive drag on a dish-shaped part; see the import report.
- */
-const PLACEHOLDER_OCCUPANCY: OccupancyMask = { dims: [1, 1, 1], bits: new Uint8Array(1) };
-
-/**
  * Everything resolving one part id costs, reused across every brick that references it.
  * Exported so `src/features/persist/` can resolve the same way when restoring a saved
  * `SceneDocument`, which carries part ids but no geometry — see `partResolve.ts`.
+ *
+ * Baked-first, exactly the route `createPartCatalog` (`src/scene/interaction/
+ * placement.ts`) gives the chest: a part the corpus bake covers costs a map lookup, real
+ * mask included. Only a part outside the bake — or a session with no `public/baked/` at
+ * all — falls to `buildOccupancy` against this call's own triangles. That fallback used
+ * to be a degenerate 1-voxel placeholder instead, on the reasoning that the read-only
+ * model viewer never queried collision; it does now (loading a model drops you into the
+ * editor with it), so every part it minted was silently uncollidable. `buildOccupancy`
+ * itself was the real cost that reasoning was working around — 187.7s for one dish-shaped
+ * part — and is now a voxel-row ray pass, mean well under a second even for that part
+ * (`collision.perf.test.ts`), so paying it here is no longer the cliff it was.
  */
-export async function resolveFullPart(partId: string, read: ReadFile): Promise<PartDef> {
+export async function resolveFullPart(
+  partId: string,
+  read: ReadFile,
+  baked: Promise<BakedParts> = loadBakedParts(),
+): Promise<PartDef> {
+  const sets = await baked;
+  const collision = sets.occupancy.get(partId);
+  if (collision !== undefined) {
+    return {
+      id: partId,
+      title: partId,
+      connections: sets.connections.get(partId) ?? [],
+      bounds: collision.bounds,
+      occupancy: collision.occupancy,
+    };
+  }
   const [connections, triangles] = await Promise.all([
     resolvePart(partId, read),
     partTriangles(partId, read),
   ]);
   const bounds = boundsFromTriangles(triangles);
-  return { id: partId, title: partId, connections, bounds, occupancy: PLACEHOLDER_OCCUPANCY };
+  return { id: partId, title: partId, connections, bounds, occupancy: buildOccupancy(triangles, bounds, connections) };
 }
 
 export interface ImportOptions {

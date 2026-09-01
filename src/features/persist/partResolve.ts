@@ -6,7 +6,7 @@
  * free of `PartDef`s (`docs/ARCHITECTURE.md`: "the document stores only part ids").
  * Reopening a save therefore needs the same resolution step a fresh import does, so this
  * reuses `resolveFullPart` from `src/features/omr/importModel.ts` — the exact logic that
- * turns a part id into connections, bounds and a (placeholder) occupancy mask — rather
+ * turns a part id into connections, bounds and a real occupancy mask, baked-first — rather
  * than re-deriving it.
  */
 
