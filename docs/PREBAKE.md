@@ -22,12 +22,13 @@ flowchart LR
     C2["catalog.json<br/>chest metadata"]
     C3["geometry.bin<br/>chest parts only"]
     C4["models/*.manifest.json"]
+    C5["occupancy.bin<br/>masks + bounds, all annotated parts"]
   end
   Z --> M
   S --> M
   M --> R --> C1
   R --> C2
-  M --> O --> C1
+  M --> O --> C5
   M --> G --> C3
   M --> C4
 ```
@@ -112,6 +113,24 @@ corpus.
 Shipping all of it means **snapping always works**, for any part in any model the user opens, with no
 network round trip. This is the highest-value bake and the cheapest.
 
+### Occupancy — masks and bounds for the whole annotated corpus
+
+The 4 LDU occupancy mask and part-local bounds every collision query needs, packed binary: bounds as
+six float32, then the mask bitfield, one bit per voxel.
+
+Masks are long runs of solid and empty, so they compress about 13:1 — an ordinary brick is ~100
+bytes gzipped and a 32x32 baseplate, the largest thing in the library, is 3.5 KB. The whole corpus is
+well under a megabyte. Size grows as the cube of a part's extent, so if the large-panel end of the
+corpus grows, per-row span encoding replaces the raw bitfield.
+
+Separate from `connections.bin` because the two cover different sets — a part with no shadow
+coverage still has a body that collides — go stale on different upstreams, and carry different
+licences.
+
+Shipping masks means **collision works the moment snapping does**, for any covered part, with no
+geometry loaded and no network round trip. A part outside the corpus voxelises at runtime instead,
+which costs milliseconds (`buildOccupancy`, `src/snap/collision.ts`).
+
 ### Geometry — the curated chest only
 
 Flattened, deduplicated, packed vertex and index buffers for the parts in the chest. Geometry is
@@ -141,8 +160,9 @@ flowchart TB
   U --> R
 ```
 
-Connection data is bundled for the entire annotated corpus, so snapping is available immediately for
-any covered part regardless of which geometry tier it falls into. Only geometry is lazy. A part
+Connection data and occupancy masks are bundled for the entire annotated corpus, so snapping and
+collision are available immediately for any covered part regardless of which geometry tier it falls
+into. Only geometry is lazy. A part
 outside the shadow library entirely still loads and renders — it simply has no connection points and
 is placed freely.
 
@@ -154,7 +174,8 @@ expected to be rare once the hosted tier exists, and it never blocks the frame.
 Hosting and bundling means redistributing, so the bake outputs carry upstream terms rather than the
 application's licence:
 
-- Geometry derives from the LDraw parts library (**CC BY 2.0**) — attribution required.
+- Geometry and occupancy masks derive from the LDraw parts library (**CC BY 2.0**) — attribution
+  required.
 - Connection data derives from the LDCad shadow library (**CC BY-SA 4.0**) — attribution **and
   share-alike**, so the baked connection files are themselves CC BY-SA 4.0.
 - Model manifests derive from OMR models (**CC BY 4.0**).
@@ -171,6 +192,10 @@ under `tsconfig.tools.json`.
 The bake is a pure function of the mirror contents. `tools/prebake.ts` writes a manifest recording
 the source library version, the shadow library commit, and a content hash of each output, so a stale
 or partial bake is detectable rather than mysterious.
+
+Baked masks pin the voxel size and fill semantics into shipped bytes, so the manifest also records
+the occupancy format version. Changing `OCC_CELL` or what the mask counts as solid is a re-bake and a
+version bump, not a code-only change.
 
 ## Development loop
 
