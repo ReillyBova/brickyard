@@ -51,6 +51,12 @@ export interface ToolDefinition {
   description: string;
   inputSchema: Record<string, unknown>;
   handler: (args: Record<string, unknown>, ctx: ToolContext) => Promise<ToolResult>;
+  /**
+   * Whether this session can serve the tool at all. A tool that needs a capability
+   * nobody attached is left out of `tools/list` rather than advertised and refused:
+   * an unusable tool still costs a model context to read and a call to discover.
+   */
+  available?: (ctx: ToolContext) => boolean;
 }
 
 // ---------------------------------------------------------------- helpers
@@ -372,6 +378,7 @@ const modelGroup: ToolDefinition = {
 
 const modelScreenshot: ToolDefinition = {
   name: 'model_screenshot',
+  available: (ctx) => ctx.render !== undefined,
   description:
     'Look at the model. Renders the current build from a named view or an explicit angle and returns an image. Cheap — check the silhouette every so often while building rather than at the end.',
   inputSchema: {
@@ -455,6 +462,7 @@ const modelSave: ToolDefinition = {
 
 const partsSearch: ToolDefinition = {
   name: 'parts_search',
+  available: (ctx) => ctx.reference !== undefined,
   description:
     'Search the parts catalog by name or category — "plate 1x2", "slope", "hinge". Returns part numbers to pass to brick_place.',
   inputSchema: {
@@ -474,6 +482,7 @@ const partsSearch: ToolDefinition = {
 
 const referenceLookup: ToolDefinition = {
   name: 'reference_lookup',
+  available: (ctx) => ctx.reference?.hasCorpus === true,
   description:
     'Look up how published models solve a construction problem — attaching a wing, turning a surface sideways, building a hinge. Returns real examples as the bricks involved and how they connect.',
   inputSchema: {
@@ -513,6 +522,13 @@ export const TOOLS: readonly ToolDefinition[] = [
 export const TOOLS_BY_NAME: ReadonlyMap<string, ToolDefinition> = new Map(
   TOOLS.map((tool) => [tool.name, tool]),
 );
+
+/**
+ * The tools this session can actually serve. `callTool` still accepts the rest and
+ * explains what is missing, because a client may hold a list from before.
+ */
+export const availableTools = (ctx: ToolContext): readonly ToolDefinition[] =>
+  TOOLS.filter((tool) => tool.available?.(ctx) ?? true);
 
 /**
  * Run a tool, turning caller error into a result the model can act on. A thrown

@@ -83,6 +83,38 @@ describe('tools/list', () => {
     expect(tools.every((t) => t.inputSchema !== undefined)).toBe(true);
   });
 
+  it('leaves out tools this session cannot serve', async () => {
+    const res = await call('tools/list');
+    const names = (res.result as { tools: { name: string }[] }).tools.map((t) => t.name);
+
+    // No renderer, no catalog, no corpus attached in the bare context.
+    expect(names).not.toContain('model_screenshot');
+    expect(names).not.toContain('parts_search');
+    expect(names).not.toContain('reference_lookup');
+    expect(names).toContain('brick_place');
+  });
+
+  it('advertises a tool once its capability is attached', async () => {
+    const ctx = context({
+      render: async () => 'iVBORw0KGgo=',
+      reference: createReference([{ id: '3001', title: 'Brick 2 x 4', category: 'Bricks' }]),
+    });
+    const res = await call('tools/list', undefined, ctx);
+    const names = (res.result as { tools: { name: string }[] }).tools.map((t) => t.name);
+
+    expect(names).toContain('model_screenshot');
+    expect(names).toContain('parts_search');
+    // A catalog is not a corpus: reference_lookup still has nothing to answer from.
+    expect(names).not.toContain('reference_lookup');
+  });
+
+  it('still explains an unadvertised tool if a client calls it anyway', async () => {
+    const res = await call('tools/call', { name: 'model_screenshot', arguments: {} });
+    const result = res.result as { isError?: boolean; content: { text: string }[] };
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/connected page/);
+  });
+
   it('namespaces tools by what they act on', async () => {
     const res = await call('tools/list');
     const names = (res.result as { tools: { name: string }[] }).tools.map((t) => t.name);
