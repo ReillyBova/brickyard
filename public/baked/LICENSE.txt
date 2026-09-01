@@ -1,0 +1,17 @@
+Baked output in this directory is derived from third-party open datasets and
+carries their terms, not the application's licence.
+
+LDraw parts library — geometry, part titles and categories
+  (c) LDraw.org contributors, CC BY 2.0
+  https://library.ldraw.org/
+
+LDCad shadow library — connection metadata
+  (c) Roland Melkert and contributors, CC BY-SA 4.0
+  Files derived from it are themselves CC BY-SA 4.0.
+  https://github.com/RolandMelkert/LDCadShadowLibrary
+
+LDraw Official Model Repository — model manifests
+  (c) their respective authors, CC BY 4.0
+  https://omr.ldraw.org/
+
+LEGO is a trademark of the LEGO Group, which does not sponsor or endorse this project.
