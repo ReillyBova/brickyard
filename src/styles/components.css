@@ -882,6 +882,39 @@ a:hover { color: var(--by-accent-hover); }
 }
 .by-empty__body { max-width: 30ch; font-size: var(--by-text-lg); }
 
+/* ── Toast ──────────────────────────────────────────────────────────────────
+   A one-line, self-dismissing readout for something that just happened away
+   from where the user was looking — a save, an open, an import failure. The
+   status bar comment says it plainly: "not a place for warnings — those are
+   toasts." Anchored under the top bar rather than the status bar's bottom
+   spot, so it never collides with the brick/selection readout.
+   ------------------------------------------------------------------------- */
+.by-toast {
+  position: absolute;
+  top: calc(var(--by-control-h) + var(--by-space-3) * 2);
+  right: var(--by-space-4);
+  z-index: var(--by-z-toast);
+  max-width: min(360px, calc(100% - var(--by-space-4) * 2));
+  display: flex;
+  align-items: center;
+  gap: var(--by-space-2);
+  padding: var(--by-space-3) var(--by-space-4);
+  border-radius: var(--by-radius-md);
+  background: var(--by-popover);
+  color: var(--by-text);
+  box-shadow: var(--by-shadow-lg);
+  font-size: var(--by-text-sm);
+  animation: by-toast-in var(--by-dur-base) var(--by-ease-out);
+}
+.by-toast--error { color: var(--by-danger); }
+@keyframes by-toast-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .by-toast { animation: none; }
+}
+
 /* ── Dialog ─────────────────────────────────────────────────────────────── */
 .by-dialog-backdrop {
   position: fixed;

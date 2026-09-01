@@ -52,6 +52,16 @@
   font-size: var(--by-text-lg);
   letter-spacing: var(--by-tracking-display);
 }
+/* Rendered as a <button> when it navigates home (AppShell's `onWordmarkClick`); reset to
+   read exactly like the inert <span> it replaces. */
+button.by-shell__wordmark {
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+  border-radius: var(--by-radius-sm);
+}
 
 /* The panel-open segmented switch has no effect at the wide layout (both rails are
    always visible there), so it's hidden until the narrow layout gives it a job. */

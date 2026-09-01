@@ -198,6 +198,50 @@ export function GraphModeIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+/** Toolbar: save the document to a `.json` file. */
+export function SaveIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon data-lucide="save" {...props}>
+      <path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
+      <path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7" />
+      <path d="M7 3v4a1 1 0 0 0 1 1h7" />
+    </Icon>
+  );
+}
+
+/** Toolbar: open a previously saved `.json` document. */
+export function FolderOpenIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon data-lucide="folder-open" {...props}>
+      <path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" />
+    </Icon>
+  );
+}
+
+/** Toolbar: export the model as `.ldr`, for Studio, LeoCAD or LDView. */
+export function FileDownIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon data-lucide="file-down" {...props}>
+      <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+      <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+      <path d="M12 18v-6" />
+      <path d="m9 15 3 3 3-3" />
+    </Icon>
+  );
+}
+
+/** Toolbar: import a `.ldr`/`.mpd` model. */
+export function FileUpIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon data-lucide="file-up" {...props}>
+      <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+      <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+      <path d="M12 12v6" />
+      <path d="m9 15 3-3 3 3" />
+    </Icon>
+  );
+}
+
 /**
  * Toolbar mode switch: render. `src/features/pathtrace/PathtraceToggle.tsx` already
  * inlines this exact glyph for the same action — lifted from there rather than

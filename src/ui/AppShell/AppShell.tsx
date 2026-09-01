@@ -21,6 +21,13 @@ interface AppShellProps {
    * empty state shows instead.
    */
   viewport?: ReactNode;
+  /**
+   * Clicking "BrickYard" navigates home. Passed in rather than hard-wired so this slice
+   * never imports the router or knows about unsaved-work guards (`src/features/persist/`
+   * owns the dirty check and its confirmation dialog) — it only renders a button instead
+   * of an inert span when a handler is supplied.
+   */
+  onWordmarkClick?: () => void;
 }
 
 /**
@@ -36,7 +43,7 @@ interface AppShellProps {
  * At narrow widths both panels collapse into on-demand overlays opened from a compact
  * bar, so the viewport always keeps the full window.
  */
-export function AppShell({ chestPanel, colorPanel, toolbar, viewport }: AppShellProps) {
+export function AppShell({ chestPanel, colorPanel, toolbar, viewport, onWordmarkClick }: AppShellProps) {
   const [openRail, setOpenRail] = useState<'chest' | 'color' | null>(null);
   const [theme, toggleTheme] = useTheme();
   const themeLabel = theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
@@ -53,7 +60,13 @@ export function AppShell({ chestPanel, colorPanel, toolbar, viewport }: AppShell
 
       <div className="by-shell">
         <div className="by-shell__bar">
-          <span className="by-shell__wordmark">BrickYard</span>
+          {onWordmarkClick ? (
+            <button type="button" className="by-shell__wordmark" onClick={onWordmarkClick}>
+              BrickYard
+            </button>
+          ) : (
+            <span className="by-shell__wordmark">BrickYard</span>
+          )}
           <button
             type="button"
             className="by-icon-btn"
