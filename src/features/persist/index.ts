@@ -5,3 +5,4 @@ export { useFileActions } from './useFileActions.tsx';
 export type { FileStatus, UseFileActionsResult } from './useFileActions.tsx';
 export { UnsavedChangesDialog } from './UnsavedChangesDialog.tsx';
 export { StatusToast } from './StatusToast.tsx';
+export { ClearSceneDialog, type ClearSceneDialogProps } from './ClearSceneDialog';

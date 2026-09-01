@@ -101,18 +101,16 @@ describe('findOverlapVoxels, real 3001 pairs', () => {
     expect(voxels.length).toBeLessThanOrEqual(3);
   });
 
-  it('default limit is generous relative to a real dragging-style overlap, and stays cheap', async () => {
+  it('default limit is generous relative to a real dragging-style overlap', async () => {
     // Half the brick sunk into another, the kind of overlap a drag actually produces.
+    // No wall-clock assertion here: timing measures the machine as much as the code, so
+    // budgets live in *.perf.test.ts under vitest.perf.config.ts. Asserting elapsed time
+    // in the unit suite made this fail intermittently whenever the box was busy.
     const p = await part('3001');
     const halfOverlap: Mat4 = multiply(IDENTITY, fromTranslation([0, -12, 0]));
-    const start = performance.now();
     const voxels = findOverlapVoxels(p, IDENTITY, p, halfOverlap);
-    const elapsed = performance.now() - start;
-    // eslint-disable-next-line no-console
-    console.log(`findOverlapVoxels(3001 half-height overlap): ${voxels.length} voxels, ${elapsed.toFixed(3)} ms`);
 
     expect(voxels.length).toBeLessThan(DEFAULT_OVERLAP_LIMIT);
-    expect(elapsed).toBeLessThan(10); // frame-budget headroom; see docs/ARCHITECTURE.md
   });
 });
 
