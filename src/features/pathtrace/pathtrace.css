@@ -24,6 +24,14 @@
   box-shadow: var(--by-shadow-md);
 }
 
+/* The render-mode panel's lighting row has four options — one more than the segmented
+   control comfortably fits on the 268px chest rail at once, so it wraps to two lines
+   instead of overflowing or shrinking labels illegibly. */
+.by-seg--wrap {
+  flex-wrap: wrap;
+  height: auto;
+}
+
 .by-pathtrace-stats {
   pointer-events: none;
   padding: var(--by-space-1) var(--by-space-3);

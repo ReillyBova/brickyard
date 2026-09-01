@@ -97,6 +97,30 @@ export interface PathtraceSnapshot {
   readonly backgroundColor: THREE.Color | null;
 }
 
+/**
+ * Flattens live `InstancedMesh` batches into per-brick instances for the path tracer.
+ * A free function (not a method) so it's unit-testable against `InstancedBatchManager`
+ * output directly, without spinning up a whole `SceneRenderer` (which needs a real
+ * `WebGLRenderer`/canvas and can't run under the node test environment).
+ *
+ * Colour comes from `mesh.userData.colorCode`, set once per batch in
+ * `InstancedBatch.createMesh` — structured data, not a `"partId colorCode"` string decoded
+ * back out of `batchKey` on every read.
+ */
+export function flattenPathtraceInstances(meshes: readonly THREE.InstancedMesh[]): PathtraceBrickInstance[] {
+  const instances: PathtraceBrickInstance[] = [];
+  for (const mesh of meshes) {
+    const colorCode = mesh.userData.colorCode as number | undefined;
+    if (colorCode === undefined) continue;
+    for (let i = 0; i < mesh.count; i++) {
+      const matrix = new THREE.Matrix4();
+      mesh.getMatrixAt(i, matrix);
+      instances.push({ geometry: mesh.geometry, colorCode, matrix });
+    }
+  }
+  return instances;
+}
+
 export class SceneRenderer {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
@@ -555,23 +579,11 @@ export class SceneRenderer {
 
   /** A snapshot of what's on the baseplate right now, for building a path-traced scene. */
   getPathtraceSnapshot(): PathtraceSnapshot {
-    const instances: PathtraceBrickInstance[] = [];
-    for (const mesh of this.batches.meshes) {
-      const key = mesh.userData.batchKey as string | undefined;
-      if (key === undefined) continue;
-      const separator = key.lastIndexOf(' ');
-      const colorCode = Number(key.slice(separator + 1));
-      for (let i = 0; i < mesh.count; i++) {
-        const matrix = new THREE.Matrix4();
-        mesh.getMatrixAt(i, matrix);
-        instances.push({ geometry: mesh.geometry, colorCode, matrix });
-      }
-    }
     return {
       renderer: this.renderer,
       camera: this.sceneCamera.camera,
       controls: this.sceneCamera.controls,
-      instances,
+      instances: flattenPathtraceInstances(this.batches.meshes),
       backgroundColor: this.scene.background instanceof THREE.Color ? this.scene.background.clone() : null,
     };
   }

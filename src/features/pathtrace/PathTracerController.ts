@@ -23,11 +23,21 @@ import type { PathtraceMaterial } from './materials.ts';
 import { FULLSCREEN_VERTEX_SHADER, PRESENT_FRAGMENT_SHADER, TRACE_FRAGMENT_SHADER } from './shaders.ts';
 import { initialResolutionState, nextResolutionState, renderScaleFor, sppFor } from './resolutionPolicy.ts';
 import type { ResolutionState } from './resolutionPolicy.ts';
+import { DEFAULT_ENVIRONMENT } from './environments.ts';
+import type { PathtraceEnvironment } from './environments.ts';
+import { DEFAULT_LIGHTING } from './lighting.ts';
+import type { LightingPreset } from './lighting.ts';
 
-/** Matches the live raster scene's key `DirectionalLight` — see `SceneRenderer.ts`. */
-const SUN_DIRECTION = new THREE.Vector3(300, 500, 200).normalize();
-const SUN_COLOR = new THREE.Color(0xfff3e0).multiplyScalar(2.6);
-const DEFAULT_AMBIENT = new THREE.Color(0x1b1915);
+/** What `build()` renders: the environment (sky + floor) and the key light. */
+export interface PathtraceRenderSettings {
+  readonly environment: PathtraceEnvironment;
+  readonly lighting: LightingPreset;
+}
+
+export const DEFAULT_RENDER_SETTINGS: PathtraceRenderSettings = {
+  environment: DEFAULT_ENVIRONMENT,
+  lighting: DEFAULT_LIGHTING,
+};
 
 const NEUTRAL_MATERIAL: PathtraceMaterial = {
   color: [0.6, 0.6, 0.6],
@@ -50,7 +60,10 @@ export interface PathtraceStats {
   readonly renderScale: number;
   readonly spp: number;
   readonly frameMs: number;
+  readonly fps: number;
   readonly triangleCount: number;
+  /** Primary rays traced since the camera last moved — see docs on `raysSinceMove` below. */
+  readonly raysCast: number;
 }
 
 function packMaterials(materials: readonly PathtraceMaterial[]): {
@@ -121,6 +134,9 @@ export class PathTracerController {
   private rafHandle: number | null = null;
   private lastFrameMs = 0;
   private triangleCount = 0;
+  /** Primary rays traced since the camera last moved (spp × active pixel count, summed
+   *  frame over frame); zeroed the instant `cameraMoved` sees a new pose. */
+  private raysSinceMove = 0;
 
   private onStats: ((stats: PathtraceStats) => void) | null = null;
 
@@ -130,14 +146,26 @@ export class PathTracerController {
     this.controls = handles.controls;
   }
 
-  /** Fetches the LDraw palette, flattens+bakes the live scene into a BVH, and compiles shaders. */
-  async build(snapshot: PathtraceSnapshot): Promise<void> {
+  /**
+   * Fetches the LDraw palette, flattens+bakes the live scene (plus a grounding floor sized
+   * to it) into a BVH, and compiles shaders. `settings` picks the environment (sky + floor)
+   * and lighting preset; switching either later means calling `build()` again — a full
+   * rebake, but a rare, user-initiated one, not a per-frame cost. See `docs/DESIGN.md` for
+   * the "studio / golden hour / dramatic rim / catalogue" presets this reads.
+   */
+  async build(snapshot: PathtraceSnapshot, settings: PathtraceRenderSettings = DEFAULT_RENDER_SETTINGS): Promise<void> {
     const colorLibrary = BUNDLED_COLOR_LIBRARY;
-    const baked = bakePathtraceScene(snapshot.instances, colorLibrary);
+    const { environment, lighting } = settings;
+    const baked = bakePathtraceScene(snapshot.instances, colorLibrary, {
+      color: environment.floorColor,
+      roughness: environment.floorRoughness,
+    });
     this.bakedScene = baked;
     this.triangleCount = baked.triangleCount;
 
     const { matA, matB, matC, matD, matE } = packMaterials(baked.materials);
+    const skyZenith = new THREE.Color().fromArray(environment.skyZenith).multiplyScalar(lighting.ambientMultiplier);
+    const skyHorizon = new THREE.Color().fromArray(environment.skyHorizon).multiplyScalar(lighting.ambientMultiplier);
 
     this.renderer.getDrawingBufferSize(this.fullSize);
     this.targets = [
@@ -165,9 +193,11 @@ export class PathTracerController {
         uSpp: { value: 1 },
         uMoving: { value: false },
         uHistScale: { value: 1 },
-        uSunDirection: { value: SUN_DIRECTION.clone() },
-        uSunColor: { value: SUN_COLOR.clone() },
-        uAmbientColor: { value: (snapshot.backgroundColor ?? DEFAULT_AMBIENT).clone() },
+        uSunDirection: { value: new THREE.Vector3().fromArray(lighting.sunDirection).normalize() },
+        uSunColor: { value: new THREE.Color().fromArray(lighting.sunColor) },
+        uSunRadius: { value: lighting.sunRadius },
+        uSkyZenith: { value: skyZenith },
+        uSkyHorizon: { value: skyHorizon },
         uMatA: { value: matA },
         uMatB: { value: matB },
         uMatC: { value: matC },
@@ -237,6 +267,10 @@ export class PathTracerController {
     const rw = Math.max(2, Math.round(this.fullSize.x * scale));
     const rh = Math.max(2, Math.round(this.fullSize.y * scale));
 
+    // Rays cast resets the instant the camera moves — it counts progress toward the
+    // current, settled view, not a lifetime total that would just climb forever.
+    this.raysSinceMove = moved ? 0 : this.raysSinceMove + rw * rh * spp;
+
     const src = this.frameIndex % 2;
     const dst = 1 - src;
     const srcTarget = this.targets[src];
@@ -289,7 +323,9 @@ export class PathTracerController {
       renderScale: scale,
       spp,
       frameMs: this.lastFrameMs,
+      fps: this.lastFrameMs > 0 ? 1000 / this.lastFrameMs : 0,
       triangleCount: this.triangleCount,
+      raysCast: this.raysSinceMove,
     });
   }
 

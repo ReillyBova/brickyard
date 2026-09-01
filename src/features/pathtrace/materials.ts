@@ -3,12 +3,17 @@
  * mapping is unit-testable on its own; `sceneBake.ts` packs the result into the uniform arrays the
  * trace shader reads.
  *
- * ABS is not plain diffuse plastic: injection-molded parts carry a thin, glossier clearcoat-ish
- * lobe over a fairly rough base, and light colors let a little light travel under the surface
- * before it scatters back out. Neither of those is a special case here — every LDraw color gets a
- * touch of clearcoat and, if light enough, a touch of `transmission`+`attenuation` standing in for
- * that shallow subsurface softness — plain `solid` is just the default point in the same parameter
- * space the other finishes occupy.
+ * ABS is not plain diffuse plastic: injection-molded parts are noticeably glossy — a distinct
+ * clearcoat lobe over a low-roughness base, IOR ~1.53 — and light colors let a little light
+ * travel under the surface before it scatters back out. Neither of those is a special case here
+ * — every LDraw color gets a touch of clearcoat and, if light enough, a touch of
+ * `transmission`+`attenuation` standing in for that shallow subsurface softness — plain `solid`
+ * is just the default point in the same parameter space the other finishes occupy.
+ *
+ * `transparent` parts are solid tinted volumes, not thin dyed shells: `attenuationColor` and
+ * `attenuationDistance` here are Beer-Lambert absorption parameters the trace shader
+ * (`shaders.ts`) integrates over the ray's actual path length inside the part, not a flat
+ * per-surface tint.
  */
 
 import type { LDrawColor, MaterialClass } from '../../ldraw/types.ts';
@@ -50,14 +55,17 @@ function luminance(rgb: readonly [number, number, number]): number {
   return 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
 }
 
+// Injection-moulded ABS: a dielectric at IOR ~1.53, noticeably glossy rather than matte —
+// low base roughness plus a distinct clearcoat lobe on top, per docs/DESIGN.md-adjacent
+// research: moulded plastic reads as "manufactured", not "sanded".
 const BASE: PathtraceMaterial = {
   color: [0.6, 0.6, 0.6],
-  roughness: 0.34,
+  roughness: 0.22,
   metalness: 0,
-  clearcoat: 0.5,
-  clearcoatRoughness: 0.2,
+  clearcoat: 0.55,
+  clearcoatRoughness: 0.12,
   transmission: 0,
-  ior: 1.49,
+  ior: 1.53,
   attenuationColor: WHITE,
   attenuationDistance: 1000,
   opacity: 1,
@@ -109,15 +117,22 @@ function byFinish(material: MaterialClass, color: readonly [number, number, numb
       return { ...BASE, color, roughness: 0.4, clearcoat: 0.6, sheen: 0.25, sheenColor: WHITE };
 
     case 'transparent':
+      // A solid volume, not a thin tinted shell: the trace shader integrates real
+      // Beer-Lambert absorption (`exp(-sigma * distance)`, `sigma` derived from
+      // `attenuationColor`/`attenuationDistance` below) over however far the ray actually
+      // travels inside the part, rather than applying one flat tint per surface crossing.
+      // A short attenuation distance is what makes that read as *strongly* tinted glass at
+      // ordinary brick thickness (tens of LDU) instead of pale — the LDraw colour is deep,
+      // fully saturated glass, not a wash.
       return {
         ...BASE,
         color: WHITE,
-        roughness: 0.05,
-        clearcoat: 0.3,
-        transmission: 0.95,
-        ior: 1.49,
+        roughness: 0.04,
+        clearcoat: 0.35,
+        transmission: 0.97,
+        ior: 1.55,
         attenuationColor: color,
-        attenuationDistance: 60,
+        attenuationDistance: 22,
       };
 
     case 'solid':
