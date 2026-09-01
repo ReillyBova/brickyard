@@ -116,6 +116,9 @@
   --by-3d-ghost:      var(--color-accent-500);
   --by-3d-ghost-alpha: 0.42;
   --by-3d-invalid:    var(--by-danger);
+  /* Fill under the invalid ghost's wireframe — lower than --by-3d-ghost-alpha on
+     purpose, so the shape reads through its edges rather than as a solid block. */
+  --by-3d-invalid-alpha: 0.16;
   --by-3d-connected:  var(--color-accent-2-600);
 
   --by-shadow-sm: 0 1px 2px color-mix(in srgb, var(--color-neutral-900) 14%, transparent);
@@ -177,6 +180,7 @@
   --by-3d-ghost:      var(--color-accent-400);
   --by-3d-ghost-alpha: 0.5;
   --by-3d-invalid:    var(--by-danger);
+  --by-3d-invalid-alpha: 0.22;
   --by-3d-connected:  var(--color-accent-2-400);
 
   /* Elevation on a dark ground is a hairline plus ambient darkness; a soft
