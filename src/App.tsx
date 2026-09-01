@@ -3,8 +3,18 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { importModel, RESOLVE_SHARE } from './features/omr/importModel';
 import { createNetworkReader } from './features/omr/network';
 import type { BundledModelEntry } from './features/omr/types';
+import {
+  StatusToast,
+  UnsavedChangesDialog,
+  useAutosave,
+  useAutosaveRestore,
+  useBeforeUnload,
+  useDirty,
+  useFileActions,
+} from './features/persist';
 import { AppRouter } from './routes/AppRouter';
 import { MODELS_BASE } from './routes/ModelPicker';
+import { useRoute } from './routes/route-context';
 import { RouteProvider } from './routes/router';
 import type { DocumentSeed } from './scene/interaction/BuilderCanvas.tsx';
 import { BuilderCanvas } from './scene/interaction/BuilderCanvas.tsx';
@@ -24,6 +34,7 @@ import { RestyleContainer } from './features/restyle';
 import type { SceneRenderer } from './scene/SceneRenderer.ts';
 import { PaintbrushIcon } from './ui/icons';
 import { Toolbar, useGrouping, useUndoRedo } from './ui/toolbar';
+import type { ToolbarAction } from './ui/toolbar/types';
 
 /** The app's three modes. Editor is where everything is built; the other two are views over it. */
 export type AppMode = 'editor' | 'graph' | 'render';
@@ -95,11 +106,15 @@ function BuilderToolbar({
   onModeChange,
   onToggleRestyle,
   restyleOpen,
+  fileActions,
 }: {
   mode: AppMode;
   onModeChange: (mode: AppMode) => void;
   onToggleRestyle: () => void;
   restyleOpen: boolean;
+  /** Save / Open / Export / Import — built in `SandboxEditor` via `useFileActions`, so
+   * the dialog guarding the wordmark and this toolbar group share one `markSaved`. */
+  fileActions: readonly ToolbarAction[];
 }) {
   const session = useEditorSessionOrNull();
   const [, forceRender] = useState(0);
@@ -128,6 +143,7 @@ function BuilderToolbar({
         { kind: 'group', group: { id: 'history', actions: [undoAction, redoAction] } },
         { kind: 'group', group: { id: 'grouping', actions: [groupAction, ungroupAction] } },
         { kind: 'group', group: { id: 'style', actions: [restyleAction] } },
+        { kind: 'group', group: { id: 'file', actions: fileActions } },
         {
           kind: 'modeSwitch',
           modeSwitch: {
@@ -171,7 +187,26 @@ function SandboxEditor({
   // The path tracer shares this renderer's GL context, camera and controls rather than
   // opening a second one — see SceneRenderer.getPathtraceSnapshot().
   const rendererRef = useRef<SceneRenderer | null>(null);
-  const { seed, state: loadState, clearSeed } = useModelLoad(pendingModel);
+  const { seed: modelSeed, state: modelLoadState, clearSeed: clearModelSeed } = useModelLoad(pendingModel);
+  // Restores a `localStorage` autosave once on mount — but only when nothing else is
+  // already claiming the first seed (a bundled model opened from `/models` wins).
+  const {
+    seed: autosaveSeed,
+    state: autosaveState,
+    clearSeed: clearAutosaveSeed,
+  } = useAutosaveRestore(pendingModel === undefined);
+  const seed = modelSeed ?? autosaveSeed;
+  const loadState = modelLoadState ?? autosaveState;
+
+  // "Dirty" tracks commits since the last save/load, per docs/ROADMAP.md's "Save and
+  // load" and the wordmark's unsaved-work guard — see src/features/persist/dirty.ts for
+  // why this reads only EditorSession's public surface rather than editing that file.
+  const dirty = useDirty(session);
+  useBeforeUnload(dirty.dirty);
+  useAutosave(session);
+  const fileActions = useFileActions(session, dirty.markSaved);
+  const { navigate } = useRoute();
+  const [confirmLeave, setConfirmLeave] = useState(false);
 
   // One offscreen renderer for the whole session — see src/scene/thumbnail.ts. Built once
   // via useMemo rather than per render, since it owns a WebGL context.
@@ -202,8 +237,15 @@ function SandboxEditor({
               onHeldConsumed={() => setSelectedPartId(undefined)}
               seed={seed}
               onSeedConsumed={() => {
-                clearSeed();
-                onModelConsumed();
+                // Either source counts as "freshly loaded, nothing unsaved yet" — the
+                // same reasoning `useFileActions` applies after Open/Import.
+                if (modelSeed) {
+                  clearModelSeed();
+                  onModelConsumed();
+                } else {
+                  clearAutosaveSeed();
+                }
+                dirty.markSaved();
               }}
               onSessionReady={setSession}
             />
@@ -241,8 +283,27 @@ function SandboxEditor({
                 )}
               </div>
             )}
+            <StatusToast status={fileActions.status} onDismiss={fileActions.dismissStatus} />
+            {confirmLeave && (
+              <UnsavedChangesDialog
+                onCancel={() => setConfirmLeave(false)}
+                onLeaveWithoutSaving={() => {
+                  setConfirmLeave(false);
+                  navigate('landing');
+                }}
+                onSaveAndLeave={() => {
+                  fileActions.actions[0].onClick();
+                  setConfirmLeave(false);
+                  navigate('landing');
+                }}
+              />
+            )}
           </>
         }
+        onWordmarkClick={() => {
+          if (dirty.dirty) setConfirmLeave(true);
+          else navigate('landing');
+        }}
         toolbar={
           <BuilderToolbar
             mode={mode}
@@ -252,6 +313,7 @@ function SandboxEditor({
             }}
             onToggleRestyle={() => setRestyleOpen((open) => !open)}
             restyleOpen={restyleOpen}
+            fileActions={fileActions.actions}
           />
         }
         chestPanel={

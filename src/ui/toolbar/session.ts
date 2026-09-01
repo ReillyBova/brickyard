@@ -1,12 +1,13 @@
 import type { BrickId } from '../../types';
 import type { SceneDocument, Transaction } from '../../model/types';
+import type { PartDef } from '../../snap/types';
 
 /**
  * The slice of `EditorSession` (`src/scene/interaction/editor.ts`) the toolbar needs.
  * Declared locally rather than importing the class so this module depends on shape, not
  * on scene/interaction internals — the real `EditorSession` satisfies this structurally
  * (confirmed against `canUndo`/`canRedo`/`undoLabel`/`redoLabel`/`undo`/`redo`/`commit`/
- * `selection`/`document`/`subscribe`), and so does a test double.
+ * `selection`/`document`/`subscribe`/`loadDocument`), and so does a test double.
  *
  * Nullable everywhere this is consumed: the toolbar renders before
  * `BuilderCanvas.onSessionReady` fires (see `useEditorSessionOrNull`,
@@ -24,4 +25,6 @@ export interface ToolbarSession {
   redo(): void;
   commit(tx: Transaction): void;
   subscribe(listener: () => void): () => void;
+  /** Replace the whole document — Save/Load and interop import both go through this. */
+  loadDocument(doc: SceneDocument, parts: Iterable<PartDef>): void;
 }
