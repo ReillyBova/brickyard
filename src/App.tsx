@@ -281,9 +281,6 @@ function SandboxEditor({
               lighting={lighting}
               onStats={setPathtraceStats}
             />
-            {restyleOpen && session !== null && (
-              <RestyleContainer session={session} onClose={() => setRestyleOpen(false)} />
-            )}
             {loadState && (
               <div className="by-model-load-overlay">
                 {'error' in loadState ? (
@@ -348,6 +345,11 @@ function SandboxEditor({
               lighting={lighting}
               onLightingChange={setLighting}
             />
+          ) : restyleOpen && session !== null ? (
+            // Restyle replaces the chest rather than floating over it: while remapping
+            // colors there is nothing to place, and the palette below would compete with
+            // the panel's own per-row color targets.
+            <RestyleContainer session={session} onClose={() => setRestyleOpen(false)} />
           ) : (
             <PartsChest
               parts={PART_CATALOG}
@@ -359,7 +361,9 @@ function SandboxEditor({
           )
         }
         colorPanel={
-          <ColorPicker colors={LDRAW_PALETTE} selectedCode={selectedColorCode} onSelect={setSelectedColorCode} />
+          mode !== 'editor' || restyleOpen ? null : (
+            <ColorPicker colors={LDRAW_PALETTE} selectedCode={selectedColorCode} onSelect={setSelectedColorCode} />
+          )
         }
       />
     </EditorSessionProvider>

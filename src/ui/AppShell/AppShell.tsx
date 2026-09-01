@@ -97,17 +97,45 @@ export function AppShell({ chestPanel, colorPanel, toolbar, viewport, onWordmark
           </div>
         </div>
 
-        <div
-          className={`by-shell__rail by-shell__rail--chest${openRail === 'chest' ? '' : ' is-closed'}`}
-        >
-          {chestPanel}
-        </div>
+        {chestPanel !== null && (
 
-        <div
-          className={`by-shell__rail by-shell__rail--color${openRail === 'color' ? '' : ' is-closed'}`}
-        >
-          {colorPanel}
-        </div>
+
+          <div
+
+
+            className={`by-shell__rail by-shell__rail--chest${openRail === 'chest' ? '' : ' is-closed'}`}
+
+
+          >
+
+
+            {chestPanel}
+
+
+          </div>
+
+
+        )}
+
+        {colorPanel !== null && (
+
+
+          <div
+
+
+            className={`by-shell__rail by-shell__rail--color${openRail === 'color' ? '' : ' is-closed'}`}
+
+
+          >
+
+
+            {colorPanel}
+
+
+          </div>
+
+
+        )}
       </div>
     </div>
   );
