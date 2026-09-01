@@ -11,6 +11,9 @@
  *
  * A grounding floor plane, sized to the model and positioned at its lowest point, is added
  * alongside the bricks so it casts and receives real ray-traced shadows from the same scene.
+ * `buildFloorMesh` is exported separately from the bricks-baking path — `PathTracerController`
+ * calls it on its own when only the ground control changed, reusing the already-baked brick
+ * meshes rather than re-flattening the whole model (see its `updateGroundGeometry`).
  */
 
 import * as THREE from 'three';
@@ -19,6 +22,7 @@ import type { ColorLibrary, LDrawColor } from '../../ldraw/types.ts';
 import { ROOT_ROTATION_X } from '../../scene/coords.ts';
 import type { PathtraceBrickInstance } from '../../scene/SceneRenderer.ts';
 
+import type { GroundFinishParams } from './ground.ts';
 import { physicalParamsFor } from './materials.ts';
 import type { PathtraceMaterial } from './materials.ts';
 
@@ -32,21 +36,27 @@ const FALLBACK_COLOR: LDrawColor = {
 
 /** Minimum floor half-extent (world units, same scale as LDU) for an empty or tiny model. */
 const MIN_FLOOR_HALF_SIZE = 400;
-/** How far the floor's edge extends past the model's own footprint. */
-const FLOOR_MARGIN_FACTOR = 2.5;
 /** Nudges the floor a hair below the model's lowest vertex, so coplanar faces don't z-fight. */
 const FLOOR_EPSILON = 0.05;
 
-export interface FloorSpec {
+export interface FloorSpec extends GroundFinishParams {
   readonly color: readonly [number, number, number];
-  readonly roughness: number;
+  /** Half-extent multiplier applied to the model's own footprint — `ground.ts`'s
+   *  `GROUND_SIZE_MARGIN[size]`. Resolved by the caller so this module stays unaware of the
+   *  `GroundSize` enum itself. */
+  readonly sizeMargin: number;
 }
 
 /** The model's world-space (Y-up) footprint, for sizing the floor and placing the key light
- *  at a distance proportional to the model rather than a fixed LDU constant. */
+ *  at a distance proportional to the model rather than a fixed LDU constant. `footprint` and
+ *  `groundLevel` are what a later, floor-only rebuild needs — see `buildFloorMesh`. */
 export interface SceneBounds {
   readonly center: readonly [number, number, number];
   readonly radius: number;
+  /** The larger of the model's X and Z extents — the footprint a floor's size multiplies. */
+  readonly footprint: number;
+  /** World Y (already flipped to Y-up) of the model's lowest point, less `FLOOR_EPSILON`. */
+  readonly groundLevel: number;
 }
 
 export interface BakedPathtraceScene {
@@ -87,6 +97,47 @@ function materialFrom(params: PathtraceMaterial): THREE.MeshPhysicalMaterial {
   (material as THREE.MeshPhysicalMaterial & { castShadow: boolean; matte: boolean }).castShadow = true;
   (material as THREE.MeshPhysicalMaterial & { castShadow: boolean; matte: boolean }).matte = false;
   return material;
+}
+
+/**
+ * Builds the grounding floor mesh alone — a plane sized to `footprint * floor.sizeMargin` (never
+ * smaller than `MIN_FLOOR_HALF_SIZE`), positioned at `(centerX, level, centerZ)` and named
+ * `'pathtrace-floor'` so callers can find it again later (`PathTracerController` does, both for
+ * the cheap material-only update and the geometry rebuild a size/visibility change needs).
+ * Exported on its own so a ground control change never has to re-flatten the model's brick
+ * instances just to get a new floor.
+ */
+export function buildFloorMesh(
+  centerX: number,
+  centerZ: number,
+  level: number,
+  footprint: number,
+  floor: FloorSpec,
+): THREE.Mesh {
+  const halfSize = Math.max(MIN_FLOOR_HALF_SIZE, footprint * floor.sizeMargin);
+
+  const floorGeometry = new THREE.PlaneGeometry(halfSize * 2, halfSize * 2);
+  floorGeometry.rotateX(-Math.PI / 2);
+  const floorMaterial = materialFrom({
+    color: floor.color,
+    roughness: floor.roughness,
+    metalness: 0,
+    clearcoat: floor.clearcoat,
+    clearcoatRoughness: floor.clearcoatRoughness,
+    transmission: 0,
+    ior: 1.5,
+    attenuationColor: [1, 1, 1],
+    attenuationDistance: 1000,
+    opacity: 1,
+    sheen: 0,
+    sheenColor: [1, 1, 1],
+  });
+
+  const floorMesh = new THREE.Mesh(floorGeometry, floorMaterial);
+  floorMesh.position.set(centerX, level, centerZ);
+  floorMesh.receiveShadow = true;
+  floorMesh.name = 'pathtrace-floor';
+  return floorMesh;
 }
 
 interface ColorBucket {
@@ -194,40 +245,19 @@ export function bakePathtraceScene(
       )
     : MIN_FLOOR_HALF_SIZE;
 
+  const footprint = hasGeometry ? Math.max(maxX - minX, maxZ - minZ) : 0;
+  const groundLevel = (hasGeometry ? minY : 0) - FLOOR_EPSILON;
+
   if (floor !== undefined) {
-    const footprint = hasGeometry ? Math.max(maxX - minX, maxZ - minZ) : 0;
-    const halfSize = Math.max(MIN_FLOOR_HALF_SIZE, footprint * FLOOR_MARGIN_FACTOR);
-    const level = (hasGeometry ? minY : 0) - FLOOR_EPSILON;
-
-    const floorGeometry = new THREE.PlaneGeometry(halfSize * 2, halfSize * 2);
-    floorGeometry.rotateX(-Math.PI / 2);
-    const floorMaterial = materialFrom({
-      color: floor.color,
-      roughness: floor.roughness,
-      metalness: 0,
-      clearcoat: 0,
-      clearcoatRoughness: 0.3,
-      transmission: 0,
-      ior: 1.5,
-      attenuationColor: [1, 1, 1],
-      attenuationDistance: 1000,
-      opacity: 1,
-      sheen: 0,
-      sheenColor: [1, 1, 1],
-    });
-    materials.push(floorMaterial);
-
-    const floorMesh = new THREE.Mesh(floorGeometry, floorMaterial);
-    floorMesh.position.set(centerX, level, centerZ);
-    floorMesh.receiveShadow = true;
-    floorMesh.name = 'pathtrace-floor';
+    const floorMesh = buildFloorMesh(centerX, centerZ, groundLevel, footprint, floor);
+    materials.push(floorMesh.material as THREE.Material);
     group.add(floorMesh);
     totalTriangles += 2;
   }
 
   return {
     group,
-    bounds: { center: [centerX, centerY, centerZ], radius },
+    bounds: { center: [centerX, centerY, centerZ], radius, footprint, groundLevel },
     triangleCount: totalTriangles,
     vertexCount: totalVertices,
     materialCount: materials.length,

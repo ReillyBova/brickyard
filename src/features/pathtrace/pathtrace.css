@@ -24,14 +24,6 @@
   box-shadow: var(--by-shadow-md);
 }
 
-/* The render-mode panel's lighting row has four options — one more than the segmented
-   control comfortably fits on the 268px chest rail at once, so it wraps to two lines
-   instead of overflowing or shrinking labels illegibly. */
-.by-seg--wrap {
-  flex-wrap: wrap;
-  height: auto;
-}
-
 /* One dial row's right-hand cell: the slider grows, its live readout stays a fixed,
    non-reflowing width so digits ticking up/down don't shove the thumb sideways. */
 .by-render-dial {
@@ -48,6 +40,74 @@
   color: var(--by-text-muted);
   text-align: right;
 }
+
+/* Environment dropdown (EnvironmentMenu.tsx) — the `.by-menu` popover-list variant with a
+   labelled trigger instead of `CategoryMenu`'s icon-only one, since the current environment is
+   the primary thing on screen here, not a secondary filter. The trigger borrows `.by-input`'s
+   sizing/shape rather than duplicating it, so it reads as one control of the same family. */
+.by-env-menu { display: block; }
+.by-env-menu__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--by-space-2);
+  width: 100%;
+  height: var(--by-control-h);
+  padding: 0 var(--by-space-3) 0 var(--by-space-4);
+  border: 1px solid var(--by-line);
+  border-radius: var(--by-radius-pill);
+  background: var(--by-panel-sunken);
+  color: var(--by-text);
+  font: inherit;
+  font-size: var(--by-text-md);
+  cursor: pointer;
+  transition: border-color var(--by-dur-instant) var(--by-ease-out);
+}
+.by-env-menu__trigger:hover { border-color: var(--by-line-strong); }
+.by-env-menu__trigger[aria-expanded="true"] { border-color: var(--by-accent); }
+.by-env-menu__trigger-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.by-env-menu__trigger-chevron {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--by-text-muted);
+}
+
+/* The panel matches the trigger's own width (set inline from its measured rect — see
+   EnvironmentMenu.tsx) rather than `.by-menu__panel`'s default `min-width`, and each item is
+   two lines: label, then description, so every option's character is visible while comparing
+   them, not just on hover. */
+.by-env-menu__panel { width: max-content; }
+.by-env-menu__item {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding-block: var(--by-space-2);
+}
+.by-env-menu__item-label { font-size: var(--by-text-sm); color: var(--by-text); }
+.by-env-menu__item.is-active .by-env-menu__item-label { color: var(--by-accent-text); font-weight: 600; }
+.by-env-menu__item-desc {
+  font-size: var(--by-text-xs);
+  color: var(--by-text-muted);
+  white-space: normal;
+}
+
+/* Ground controls disable (not hide) while the ground itself is off — size, finish and colour
+   all stay visible for when it's switched back on rather than disappearing and reappearing. */
+.by-panel__section .by-swatch:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.by-panel__section .by-swatch:disabled:hover { transform: none; }
+.by-panel__section .by-seg__opt:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.by-panel__section .by-seg__opt:disabled:hover { color: var(--by-text-muted); }
 
 .by-pathtrace-stats {
   pointer-events: none;

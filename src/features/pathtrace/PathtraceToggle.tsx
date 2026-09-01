@@ -76,6 +76,12 @@ export function PathtraceToggle({
 }: PathtraceToggleProps) {
   const controllerRef = useRef<PathTracerController | null>(null);
   const [stats, setStats] = useState<PathtraceStats | null>(null);
+  // `build()` below already bakes the floor for the ground settings active at that moment, so
+  // the ground-geometry effect further down needs to know not to immediately redo that as a
+  // second, redundant `setScene()` call the instant activation flips `active` to true — the same
+  // key `updateGroundGeometry` would otherwise recompute from `visible`/`size` is stashed here
+  // whenever either the build or that effect actually applies it, and skipped when unchanged.
+  const lastGroundGeometryKey = useRef<string | null>(null);
 
   useEffect(() => {
     onStats?.(stats);
@@ -85,12 +91,15 @@ export function PathtraceToggle({
   }, [stats]);
 
   // Builds the traced scene once per activation — a real BVH build, so it must not re-run on
-  // every lighting-dial tick. Environment and lighting changes while active are handled by the
-  // two effects below via the controller's cheap `update*` calls instead of re-running this one.
+  // every lighting-dial tick. Environment, lighting and ground changes while active are handled
+  // by the effects below via the controller's cheap `update*` calls instead of re-running this
+  // one — except a ground visibility/size change, which is its own `setScene()` rebuild, just a
+  // narrower one (see `PathTracerController.updateGroundGeometry`).
   useEffect(() => {
     if (!active) {
       controllerRef.current?.dispose();
       controllerRef.current = null;
+      lastGroundGeometryKey.current = null;
       setStats(null);
       rendererRef.current?.start();
       return;
@@ -113,6 +122,7 @@ export function PathtraceToggle({
       renderRaster: () => sceneRenderer.renderOnce(),
     });
     controllerRef.current = controller;
+    lastGroundGeometryKey.current = `${lighting.ground.visible}|${lighting.ground.size}`;
     setStats({ status: 'building', samples: 0, fps: 0, triangleCount: 0 });
 
     controller
@@ -155,6 +165,29 @@ export function PathtraceToggle({
     controllerRef.current?.updateLighting(lighting);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, lighting]);
+
+  // Ground colour/finish: the same cheap in-place material update as the lighting dials above —
+  // see `PathTracerController.updateGroundMaterial`. Split from the effect above so dragging a
+  // light dial never re-touches the floor material, and vice versa.
+  useEffect(() => {
+    if (!active) return;
+    controllerRef.current?.updateGroundMaterial(lighting.ground);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, lighting.ground.color, lighting.ground.finish]);
+
+  // Ground visibility/size: a real geometry change, so this is the one ground control that
+  // still costs a `setScene()` BVH rebuild — see `PathTracerController.updateGroundGeometry`
+  // for how it avoids re-flattening the model itself to pay for it. Guarded by
+  // `lastGroundGeometryKey` so activating render mode (which just built the floor for the
+  // current ground settings) doesn't immediately rebuild it again for the same values.
+  useEffect(() => {
+    if (!active) return;
+    const key = `${lighting.ground.visible}|${lighting.ground.size}`;
+    if (lastGroundGeometryKey.current === key) return;
+    lastGroundGeometryKey.current = key;
+    controllerRef.current?.updateGroundGeometry(lighting.ground);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, lighting.ground.visible, lighting.ground.size]);
 
   const label = active ? 'Exit path-traced render' : 'Path-traced render';
 
