@@ -55,9 +55,21 @@ export interface SceneStats {
  */
 const MAX_CONCURRENT_ARRIVALS = 48;
 
-/** However many arrivals land in a burst, the click reads as one seat, not a machine gun —
- *  see the arrival-sound note in `addBrick`. */
-const ARRIVAL_CLICK_MIN_INTERVAL_MS = 220;
+/** Fastest a click is allowed to repeat, however fast the admission cadence — the floor
+ *  that keeps an extremely large model's clicks from blurring into white noise (a
+ *  20,000-brick load's ~1ms cadence, run through the multiplier below with nothing to
+ *  stop it, would ask for a click every couple of milliseconds). */
+const ARRIVAL_CLICK_MIN_INTERVAL_FLOOR_MS = 45;
+
+/** How the click's own minimum repeat interval derives from the arrival cadence — the
+ *  same relationship `arrivalPacing()` already uses for flight duration (see
+ *  `ARRIVAL_TARGET_CONCURRENCY`). Ties the clicking's pace to the stream's pace so a
+ *  load reads as the same "rush of bricks landing" at every model size, rather than
+ *  sounding sparse for a small one and hitting a fixed ceiling for a large one. Carried
+ *  on each `Arrival` rather than read from shared state, for the same reason cadence
+ *  and flight duration already are — two overlapping loads keep the pacing they were
+ *  each computed for. */
+const ARRIVAL_CLICK_CADENCE_MULTIPLIER = 2.2;
 
 /**
  * Target wall-clock time for an entire load's arrival stream, once the batch is big
@@ -75,9 +87,7 @@ const ARRIVAL_STREAM_TOTAL_MS = 1_800;
 /**
  * Slowest allowed gap between one brick starting its flight and the next — the floor
  * that keeps a small model's stream from crawling (`ARRIVAL_STREAM_TOTAL_MS / batchSize`
- * would otherwise stretch a 5-brick load over 4 seconds *per brick*) and, not
- * incidentally, comfortably above `ARRIVAL_CLICK_MIN_INTERVAL_MS` — a small model's
- * clicks land far enough apart that the limiter has nothing to do.
+ * would otherwise stretch a 5-brick load over 4 seconds *per brick*).
  */
 const ARRIVAL_MAX_CADENCE_MS = 24;
 
@@ -134,22 +144,31 @@ interface Arrival {
   toPosition: THREE.Vector3;
   startTime: number;
   duration: number;
+  /** This arrival's own admission cadence, carried through so its settle click can pace
+   *  itself off it — see `ARRIVAL_CLICK_CADENCE_MULTIPLIER`. */
+  cadenceMs: number;
 }
 
 /**
  * An arrival waiting to be admitted, one at a time, at the cadence `arrivalPacing()`
- * computed for it. Its brick is already placed in the batch (at `from`, off-screen) so
- * it exists for picking/removal purposes the instant `addBrick` resolves — only the
- * flight itself is deferred. Carries its own `cadenceMs`/`flightMs` rather than reading
- * shared instance fields so two loads that happen to overlap (a merge fired mid-load,
- * say) each keep the pacing they were computed for.
+ * computed for it. Its brick is already placed in the batch — at its *final* rotation
+ * and position, but zero-scaled — the instant `addBrick` resolves, so it exists for
+ * picking/removal purposes without being visible: `updateArrivals` swaps in a real,
+ * freshly-computed start transform only at the moment of admission (see
+ * `computeArrivalStart`). Deferring that computation, rather than baking a start point
+ * in at queue time, is what keeps a brick from flashing into view at a stale parking
+ * position if the camera moves — reframes, or an orbit — while thousands of bricks
+ * behind it are still waiting their turn. Carries its own `cadenceMs`/`flightMs` rather
+ * than reading shared instance fields so two loads that happen to overlap (a merge
+ * fired mid-load, say) each keep the pacing they were computed for.
  */
 interface PendingArrival {
   id: BrickId;
   batchKey: string;
-  from: THREE.Vector3;
   to: THREE.Matrix4;
   toPosition: THREE.Vector3;
+  toQuaternion: THREE.Quaternion;
+  toScale: THREE.Vector3;
   cadenceMs: number;
   flightMs: number;
 }
@@ -251,6 +270,16 @@ export class SceneRenderer {
    *  wakes up (catching up in one tick rather than drifting slower forever) instead of
    *  the stream's speed depending on the display's refresh rate. */
   private nextAdmitAt = 0;
+  /** Running bounds (local/LDU space) of every animated brick's *target* position seen
+   *  in the current stream — reset alongside `nextAdmitAt` when a fresh stream starts.
+   *  `computeArrivalStart` uses its horizontal footprint to scale the fall height and
+   *  the horizontal scatter to the model, so "the heavens" reads proportionally the
+   *  same for a 29-brick model and a 21,000-brick one. Grows as the stream progresses
+   *  rather than being known up front — `addBrick` only ever sees one brick's target at
+   *  a time — so early admissions in a very large load work off a smaller estimate than
+   *  later ones; `computeArrivalStart`'s own frustum check (not this estimate) is what
+   *  actually guarantees the start point is off-screen. */
+  private readonly arrivalBounds = new THREE.Box3();
   private readonly arrivalSound = new SnapSound();
   private lastArrivalClickTime = -Infinity;
   private missingGeometryCount = 0;
@@ -348,7 +377,8 @@ export class SceneRenderer {
    *
    * A brick that resolves as part of a model load (`options.animate === true`, set only
    * by `EditorSession.loadDocument`/`mergeDocument` — see `AddBrickOptions` in
-   * `editor.ts`) becomes visible by flying in from off-screen and settling with
+   * `editor.ts`) stays hidden until admitted, then becomes visible by falling in from
+   * high above (see `computeArrivalStart`) and settling with
    * `--by-ease-snap`'s overshoot (see `updateArrivals`, driven from the frame loop in
    * `start()`) rather than popping in — that flight *is* the load's progress indicator,
    * per the roadmap: "make the wait the product" rather than a numeric bar. Every such
@@ -409,48 +439,95 @@ export class SceneRenderer {
     const scale = new THREE.Vector3();
     finalMatrix.decompose(position, quaternion, scale);
 
-    const from = this.computeArrivalStart(position);
-    const startMatrix = new THREE.Matrix4().compose(from, quaternion, scale);
-    batch.add(brick.id, startMatrix);
+    // Not visible yet: parked at its own final position and rotation but zero-scaled, so
+    // it exists in the batch for picking/removal the instant this resolves without being
+    // on screen — an `InstancedMesh` has no per-instance visibility flag, so a squashed
+    // matrix is what stands in for "hidden". `updateArrivals` swaps in a real, freshly
+    // computed start transform only at the moment this brick is actually admitted.
+    const hiddenMatrix = new THREE.Matrix4().compose(position, quaternion, new THREE.Vector3());
+    batch.add(brick.id, hiddenMatrix);
 
     // Every animated brick queues, even the very first of a load — admission (not the
     // concurrency cap) is what paces the stream now, so the first brick gets exactly the
     // same one-at-a-time treatment as the four-thousandth. See `updateArrivals`.
     if (this.pendingArrivals.length === 0 && this.arrivals.size === 0) {
       // Starting a fresh stream: let the first brick fly on the very next tick rather
-      // than waiting out a full cadence gap it never had a reason to wait for.
+      // than waiting out a full cadence gap it never had a reason to wait for, and reset
+      // the running footprint `computeArrivalStart` scales the descent to.
       this.nextAdmitAt = performance.now();
+      this.arrivalBounds.makeEmpty();
     }
+    this.arrivalBounds.expandByPoint(position);
     const { cadenceMs, flightMs } = arrivalPacing(options?.batchSize ?? 1, this.arrivalDurationMs);
-    this.pendingArrivals.push({ id: brick.id, batchKey: key, from, to: finalMatrix, toPosition: position, cadenceMs, flightMs });
+    this.pendingArrivals.push({
+      id: brick.id,
+      batchKey: key,
+      to: finalMatrix,
+      toPosition: position,
+      toQuaternion: quaternion,
+      toScale: scale,
+      cadenceMs,
+      flightMs,
+    });
   }
 
   /**
-   * A point off-screen, roughly matching the target's distance from the camera, so the
-   * flight reads as coming from the edge of the viewport rather than from an arbitrary
-   * direction. Picks a random point just outside the camera frustum (NDC radius > 1),
-   * casts a ray through it, and finds where that ray crosses the target's own
-   * camera-relative depth.
+   * A point high above the target — bricks fall into place rather than slide in from the
+   * frame edge, which reads as building (it matches the snap overshoot every piece lands
+   * with) and stays off-screen regardless of the camera's azimuth: this app's orbit
+   * camera sits above the baseplate looking down, so "up" is reliably outside its
+   * frustum no matter which way it's been spun around the model, in a way an edge-of-
+   * frame point isn't. A little horizontal scatter — scaled to `arrivalBounds`, the
+   * running footprint of the current stream — keeps a big load from reading as one
+   * vertical column of bricks landing in sequence, without diluting the fall.
+   *
+   * The scene root's `rotation.x = π` means LDraw's Y-down convention has "up" as
+   * *negative* local Y — get that backwards and every brick fires up from beneath the
+   * baseplate instead of down from the sky. World space doesn't have that twist (the
+   * camera's `up` is a plain world +Y — see `SceneCamera`), so this works in world space
+   * and converts back to local only at the end.
+   *
+   * The fall height is seeded from the model's own scale (via `arrivalBounds` and the
+   * target's distance from the camera) rather than a fixed constant — "the heavens" for
+   * a 29-brick model and for a 21,000-brick one are different heights — but the seed is
+   * then verified, not trusted: it grows until the point's own projection is confirmed
+   * off the top of the frustum, so correctness doesn't depend on the seed guessing
+   * right.
    */
   private computeArrivalStart(targetLocal: THREE.Vector3): THREE.Vector3 {
     const camera = this.sceneCamera.camera;
     const targetWorld = this.root.localToWorld(targetLocal.clone());
 
-    const forward = new THREE.Vector3();
-    camera.getWorldDirection(forward);
-    const depth = targetWorld.clone().sub(camera.position).dot(forward);
+    // Screen "up": always world +Y here (OrbitControls is constrained to camera.up,
+    // which SceneCamera fixes at (0, 1, 0)), independent of azimuth or model rotation.
+    const worldUp = new THREE.Vector3(0, 1, 0);
 
-    const angle = Math.random() * Math.PI * 2;
-    const edgeRadius = 1.35 + Math.random() * 0.35; // safely outside the -1..1 NDC frustum
-    this.raycaster.setFromCamera(
-      new THREE.Vector2(Math.cos(angle) * edgeRadius, Math.sin(angle) * edgeRadius),
-      camera,
+    const footprint = new THREE.Vector3();
+    this.arrivalBounds.getSize(footprint);
+    const footprintRadius = Math.max(footprint.x, footprint.z, 40) / 2;
+    const depth = Math.max(targetWorld.distanceTo(camera.position), 1);
+
+    // A little horizontal scatter, well inside the footprint, so bricks fall from a
+    // loose cluster above the model rather than a single point directly overhead.
+    const jitterAngle = Math.random() * Math.PI * 2;
+    const jitterRadius = footprintRadius * (0.15 + Math.random() * 0.35);
+    const horizontalJitter = new THREE.Vector3(Math.cos(jitterAngle), 0, Math.sin(jitterAngle)).multiplyScalar(
+      jitterRadius,
     );
-    const rayDir = this.raycaster.ray.direction;
-    const denom = rayDir.dot(forward);
-    const t = Math.abs(denom) > 1e-6 ? depth / denom : depth;
 
-    const worldStart = camera.position.clone().addScaledVector(rayDir, t);
+    let height = Math.max(footprintRadius * 1.5, depth * 0.6, 120);
+    let worldStart = targetWorld.clone().addScaledVector(worldUp, height).add(horizontalJitter);
+
+    // Grow the height until the point's own projection lands comfortably above the top
+    // of the frustum (NDC y past a margin) and still in front of the camera — verified
+    // against the real camera on every call, not assumed from the seed above.
+    for (let i = 0; i < 14; i++) {
+      const ndc = worldStart.clone().project(camera);
+      if (ndc.y > 1.2 && ndc.z < 1) break;
+      height *= 1.7;
+      worldStart = targetWorld.clone().addScaledVector(worldUp, height).add(horizontalJitter);
+    }
+
     return this.root.worldToLocal(worldStart);
   }
 
@@ -475,7 +552,7 @@ export class SceneRenderer {
         if (elapsed >= arrival.duration) {
           batch.setTransform(id, arrival.to);
           this.arrivals.delete(id);
-          this.playArrivalClick();
+          this.playArrivalClick(arrival.cadenceMs);
           continue;
         }
 
@@ -496,26 +573,46 @@ export class SceneRenderer {
     ) {
       const next = this.pendingArrivals.shift();
       if (next === undefined) break;
+      const batch = this.batches.batchForKey(next.batchKey);
+      if (batch === undefined) {
+        // Batch (and brick) removed while still queued — nothing to reveal or animate.
+        this.nextAdmitAt += next.cadenceMs;
+        continue;
+      }
+
+      // Computed fresh, right now, against the live camera — not at queue time — so a
+      // reframe or an orbit mid-load can't leave this brick's start point stale. This is
+      // also the moment the brick stops being hidden: `setTransform` replaces the
+      // zero-scaled matrix `addBrick` parked it at with its real start transform.
+      const from = this.computeArrivalStart(next.toPosition);
+      const startMatrix = new THREE.Matrix4().compose(from, next.toQuaternion, next.toScale);
+      batch.setTransform(next.id, startMatrix);
+
       this.arrivals.set(next.id, {
         batchKey: next.batchKey,
-        from: next.from,
+        from,
         to: next.to,
         toPosition: next.toPosition,
         startTime: now,
         duration: next.flightMs,
+        cadenceMs: next.cadenceMs,
       });
       this.nextAdmitAt += next.cadenceMs;
     }
   }
 
-  /** At most one click per `ARRIVAL_CLICK_MIN_INTERVAL_MS`, regardless of how many
-   *  arrivals settle in that window — see the module doc: 1,845 individual clicks would
-   *  be unbearable, and step-boundary data isn't threaded through `BrickInstance`. */
-  private playArrivalClick(): void {
+  /** A click per settling arrival, rate-limited to a floor derived from that arrival's
+   *  own admission cadence (`ARRIVAL_CLICK_CADENCE_MULTIPLIER`) rather than a fixed gap —
+   *  a rush of bricks landing in quick succession, paced with the stream instead of
+   *  metered against it. `strength` gets a small random jitter each time so a fast run
+   *  of clicks varies in tone rather than repeating identically, which reads as
+   *  mechanical — see `SnapSound.play`'s own note on `strength`. */
+  private playArrivalClick(cadenceMs: number): void {
     const now = performance.now();
-    if (now - this.lastArrivalClickTime < ARRIVAL_CLICK_MIN_INTERVAL_MS) return;
+    const minInterval = Math.max(cadenceMs * ARRIVAL_CLICK_CADENCE_MULTIPLIER, ARRIVAL_CLICK_MIN_INTERVAL_FLOOR_MS);
+    if (now - this.lastArrivalClickTime < minInterval) return;
     this.lastArrivalClickTime = now;
-    this.arrivalSound.play(1);
+    this.arrivalSound.play(0.6 + Math.random() * 0.8);
   }
 
   removeBrick(id: BrickId): void {
