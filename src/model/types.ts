@@ -4,8 +4,8 @@
  * Pure: no three.js imports, no DOM.
  */
 
-import type { BrickId, EdgeId, GroupId, Mat4 } from '../types';
-import type { Mate } from '../snap/types';
+import type { BrickId, EdgeId, GroupId, Mat4 } from '../types.ts';
+import type { Mate } from '../snap/types.ts';
 
 export interface BrickInstance {
   id: BrickId;

@@ -10,8 +10,8 @@
  * Pure: no three.js imports, no DOM.
  */
 
-import { applyOperation, invertOperation } from './operations';
-import type { Operation, SceneDocument, Transaction } from './types';
+import { applyOperation, invertOperation } from './operations.ts';
+import type { Operation, SceneDocument, Transaction } from './types.ts';
 
 export interface History {
   doc: SceneDocument;

@@ -8,12 +8,12 @@
  * says so.
  */
 
-import { boundsFromTriangles, partTriangles } from '../../../ldraw/bounds';
-import { buildOccupancy } from '../../../snap/collision';
-import { fixtureReader } from '../../../snap/__fixtures__/reader';
-import { resolvePart } from '../../../snap/resolvePart';
-import type { PartDef } from '../../../snap/types';
-import type { PartSource } from '../session';
+import { boundsFromTriangles, partTriangles } from '../../../ldraw/bounds.ts';
+import { buildOccupancy } from '../../../snap/collision.ts';
+import { fixtureReader } from '../../../snap/__fixtures__/reader.ts';
+import { resolvePart } from '../../../snap/resolvePart.ts';
+import type { PartDef } from '../../../snap/types.ts';
+import type { PartSource } from '../session.ts';
 
 /** Titles the corpus does not carry, so handles read the way they would in the app. */
 const TITLES: Readonly<Record<string, string>> = {

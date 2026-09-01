@@ -14,7 +14,7 @@ import {
   getGroup,
   groupDescendants,
   requireBrick,
-} from './document';
+} from './document.ts';
 import {
   brick,
   edge,
@@ -25,7 +25,7 @@ import {
   testBrickId as bid,
   testEdgeId as edgeId,
   testGroupId as gid,
-} from './testing';
+} from './testing.ts';
 
 const doc = () =>
   createDocument(

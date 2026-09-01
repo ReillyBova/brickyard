@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { Graph, buildGraph, emptyGraph, flipMate } from './graph';
-import { edge, link, mate, testBrickId as bid, testEdgeId as edgeId } from './testing';
+import { Graph, buildGraph, emptyGraph, flipMate } from './graph.ts';
+import { edge, link, mate, testBrickId as bid, testEdgeId as edgeId } from './testing.ts';
 
 /**
  * Every edge appears in exactly two nodes' adjacency lists, and the sum of node

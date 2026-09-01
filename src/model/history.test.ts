@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createDocument, emptyDocument } from './document';
+import { createDocument, emptyDocument } from './document.ts';
 import {
   applyTransaction,
   canRedo,
@@ -13,8 +13,8 @@ import {
   redoLabel,
   undo,
   undoLabel,
-} from './history';
-import { IDENTITY, fromTranslation } from '../math';
+} from './history.ts';
+import { IDENTITY, fromTranslation } from '../math.ts';
 import {
   brick,
   edge,
@@ -24,8 +24,8 @@ import {
   testBrickId as bid,
   testEdgeId as edgeId,
   testGroupId as gid,
-} from './testing';
-import type { BrickInstance, ConnectionEdge, SceneDocument, Transaction } from './types';
+} from './testing.ts';
+import type { BrickInstance, ConnectionEdge, SceneDocument, Transaction } from './types.ts';
 
 /** Whole-document comparison: bricks, groups, graph nodes, edges, and their mates. */
 const snapshot = (doc: SceneDocument) => ({

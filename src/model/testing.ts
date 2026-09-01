@@ -13,12 +13,12 @@
  * their own cast.
  */
 
-import type { BrickId, EdgeId, GroupId, Mat4 } from '../types';
-import type { Mate, SnapKind } from '../snap/types';
-import type { MateLink } from './graph';
-import { edgeIdFor } from './graph';
-import { fromTranslation } from '../math';
-import type { BrickInstance, ConnectionEdge, GroupDef } from './types';
+import type { BrickId, EdgeId, GroupId, Mat4 } from '../types.ts';
+import type { Mate, SnapKind } from '../snap/types.ts';
+import type { MateLink } from './graph.ts';
+import { edgeIdFor } from './graph.ts';
+import { fromTranslation } from '../math.ts';
+import type { BrickInstance, ConnectionEdge, GroupDef } from './types.ts';
 
 export const testBrickId = (label: string): BrickId => label as BrickId;
 export const testGroupId = (label: string): GroupId => label as GroupId;

@@ -9,10 +9,10 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { IDENTITY, fromTranslation } from '../../math';
-import type { ColorLibrary } from '../../ldraw/types';
-import { Session, SessionError } from './session';
-import { fixtureParts } from './__fixtures__/parts';
+import { IDENTITY, fromTranslation } from '../../math.ts';
+import type { ColorLibrary } from '../../ldraw/types.ts';
+import { Session, SessionError } from './session.ts';
+import { fixtureParts } from './__fixtures__/parts.ts';
 
 /** A male stud on the top face of a 2x4. */
 const STUD = 'p/stud.dat#0';

@@ -15,7 +15,7 @@
  * Pure: no three.js imports, no DOM.
  */
 
-import type { BrickId } from '../../types';
+import type { BrickId } from '../../types.ts';
 
 /** `'Brick  2 x  4'` -> `'brick-2x4'`. Falls back to the part number. */
 export function slugFor(partId: string, title?: string): string {

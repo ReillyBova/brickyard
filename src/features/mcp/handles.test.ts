@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { mintBrickId } from '../../model/ids';
-import { HandleTable, slugFor } from './handles';
+import { mintBrickId } from '../../model/ids.ts';
+import { HandleTable, slugFor } from './handles.ts';
 
 describe('slugFor', () => {
   it('collapses LDraw dimension spacing into one token', () => {

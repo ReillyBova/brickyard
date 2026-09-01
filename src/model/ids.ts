@@ -12,7 +12,7 @@
  * may assume an id survives being saved.
  */
 
-import type { BrickId, EdgeId, GroupId } from '../types';
+import type { BrickId, EdgeId, GroupId } from '../types.ts';
 
 /** 64 characters, so each draws exactly 6 bits with no modulo bias. */
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';

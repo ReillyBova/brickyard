@@ -8,10 +8,10 @@
  * Pure: no three.js imports, no DOM.
  */
 
-import type { BrickId, GroupId } from '../types';
-import type { MateLink } from './graph';
-import { Graph, buildGraph, emptyGraph } from './graph';
-import type { BrickInstance, ConnectionEdge, GroupDef, SceneDocument } from './types';
+import type { BrickId, GroupId } from '../types.ts';
+import type { MateLink } from './graph.ts';
+import { Graph, buildGraph, emptyGraph } from './graph.ts';
+import type { BrickInstance, ConnectionEdge, GroupDef, SceneDocument } from './types.ts';
 
 export const emptyDocument = (): SceneDocument => ({
   bricks: new Map(),

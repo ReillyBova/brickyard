@@ -8,11 +8,11 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { createReference } from './reference';
-import { DEFAULT_PROTOCOL_VERSION, handleFrame, handleRequest } from './protocol';
-import { Session } from './session';
-import type { ToolContext } from './tools';
-import { fixtureParts } from './__fixtures__/parts';
+import { createReference } from './reference.ts';
+import { DEFAULT_PROTOCOL_VERSION, handleFrame, handleRequest } from './protocol.ts';
+import { Session } from './session.ts';
+import type { ToolContext } from './tools.ts';
+import { fixtureParts } from './__fixtures__/parts.ts';
 
 const context = (over: Partial<ToolContext> = {}): ToolContext => ({
   session: new Session(fixtureParts),
