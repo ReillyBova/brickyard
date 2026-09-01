@@ -85,7 +85,7 @@ a:hover { color: var(--by-accent-hover); }
 .by-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .by-btn--primary { background: var(--by-accent); color: var(--by-text-on-accent); }
-.by-btn--primary:hover:not(:disabled) { background: var(--by-accent-hover); }
+.by-btn--primary:hover:not(:disabled) { background: var(--by-accent-hover); color: var(--by-text-on-accent-hover); }
 .by-btn--primary:active:not(:disabled) { background: var(--by-accent-press); }
 
 .by-btn--secondary { border-color: var(--by-line); }

@@ -98,6 +98,7 @@
   --by-accent-press:  var(--color-accent-700);
   --by-accent-text:   var(--color-accent-700);   /* accent at paragraph size */
   --by-accent-wash:   color-mix(in srgb, var(--color-accent-500) 12%, transparent);
+  --by-text-on-accent-hover: var(--by-text-on-accent); /* same as normal state in light mode */
   --by-hover-wash:    color-mix(in srgb, var(--color-ink) 6%, transparent);
   --by-press-wash:    color-mix(in srgb, var(--color-ink) 12%, transparent);
 
@@ -166,6 +167,7 @@
   --by-accent-press:  var(--color-accent-200);
   --by-accent-text:   var(--color-accent-300);
   --by-accent-wash:   color-mix(in srgb, var(--color-accent-400) 16%, transparent);
+  --by-text-on-accent-hover: var(--color-neutral-900); /* darker text for contrast against lighter hover background */
   --by-hover-wash:    color-mix(in srgb, var(--color-neutral-100) 8%, transparent);
   --by-press-wash:    color-mix(in srgb, var(--color-neutral-100) 14%, transparent);
 
