@@ -86,6 +86,15 @@ interface BuilderCanvasProps {
    * restyle, graph view) needs this same instance; without it, each invents its own.
    */
   onSessionReady?: (session: EditorSession | null) => void;
+  /**
+   * pathtrace mount point — see src/features/pathtrace/. Hands the composition root the
+   * live SceneRenderer instance (and null on teardown) without scene/ importing anything
+   * from features/; the root wires the two together. Optional so every other caller of
+   * this component is unaffected.
+   */
+  onRendererReady?: (renderer: SceneRenderer | null) => void;
+  /** True while another render mode owns the canvas — placement input is ignored. */
+  suspended?: boolean;
 }
 
 export function BuilderCanvas({
@@ -95,12 +104,16 @@ export function BuilderCanvas({
   seed,
   onSeedConsumed,
   onSessionReady,
+  onRendererReady,
+  suspended = false,
 }: BuilderCanvasProps): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [status, setStatus] = useState('');
   const [count, setCount] = useState(0);
   const [selectedCount, setSelectedCount] = useState(0);
   const [blocked, setBlocked] = useState(false);
+  const suspendedRef = useRef(suspended);
+  suspendedRef.current = suspended;
 
   // Reached into from the props-driven effects below, which run outside the mount
   // effect's own closure.
@@ -116,6 +129,8 @@ export function BuilderCanvas({
   onSeedConsumedRef.current = onSeedConsumed;
   const onSessionReadyRef = useRef(onSessionReady);
   onSessionReadyRef.current = onSessionReady;
+  const onRendererReadyRef = useRef(onRendererReady);
+  onRendererReadyRef.current = onRendererReady;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -149,6 +164,7 @@ export function BuilderCanvas({
     const placement = new PlacementController(renderer);
 
     rendererRef.current = renderer;
+    onRendererReadyRef.current?.(renderer);
     placementRef.current = placement;
     sessionRef.current = session;
     catalogRef.current = catalog;
@@ -177,6 +193,7 @@ export function BuilderCanvas({
       dragging = false;
     };
     const onMove = (event: PointerEvent): void => {
+      if (suspendedRef.current) return;
       if (event.buttons !== 0) {
         dragging = true;
         return;
@@ -186,6 +203,7 @@ export function BuilderCanvas({
       setBlocked(placement.current.transform !== null && !placement.current.valid);
     };
     const onUp = (event: PointerEvent): void => {
+      if (suspendedRef.current) return;
       if (dragging) return;
       const pos = ndc(canvas, event);
 
@@ -261,6 +279,7 @@ export function BuilderCanvas({
     // Selection transforms use neither: arrows and Page Up/Down are self-describing —
     // no mnemonic to reject.
     const onKey = (event: KeyboardEvent): void => {
+      if (suspendedRef.current) return;
       if (isUndo(event)) {
         session.undo();
         return;
@@ -363,6 +382,7 @@ export function BuilderCanvas({
       placementRef.current = null;
       sessionRef.current = null;
       catalogRef.current = null;
+      onRendererReadyRef.current?.(null);
       onSessionReadyRef.current?.(null);
     };
   }, []);

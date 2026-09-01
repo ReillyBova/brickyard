@@ -1,8 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { importModel, RESOLVE_SHARE } from './features/omr/importModel';
 import { createNetworkReader } from './features/omr/network';
 import type { BundledModelEntry } from './features/omr/types';
+// pathtrace mount point — see src/features/pathtrace/. Mounted here, not inside
+// src/scene/, so scene/ never depends on features/: BuilderCanvas only hands this root
+// its live SceneRenderer instance via a plain callback prop.
+import { PathtraceToggle } from './features/pathtrace/PathtraceToggle.tsx';
 import { AppRouter } from './routes/AppRouter';
 import { MODELS_BASE } from './routes/ModelPicker';
 import { RouteProvider } from './routes/router';
@@ -10,6 +14,7 @@ import type { DocumentSeed } from './scene/interaction/BuilderCanvas.tsx';
 import { BuilderCanvas } from './scene/interaction/BuilderCanvas.tsx';
 import type { EditorSession } from './scene/interaction/editor.ts';
 import { EditorSessionProvider } from './scene/interaction/sessionContext.tsx';
+import type { SceneRenderer } from './scene/SceneRenderer.ts';
 import { RuntimeThumbnailRenderer } from './scene/thumbnail.ts';
 import { AppShell } from './ui/AppShell/AppShell';
 import { ColorPicker } from './ui/ColorPicker/ColorPicker';
@@ -98,6 +103,10 @@ function SandboxEditor({
   const [session, setSession] = useState<EditorSession | null>(null);
   const { seed, state: loadState, clearSeed } = useModelLoad(pendingModel);
 
+  // pathtrace mount point — see src/features/pathtrace/.
+  const sceneRendererRef = useRef<SceneRenderer | null>(null);
+  const [pathtraceActive, setPathtraceActive] = useState(false);
+
   // One offscreen renderer for the whole session — see src/scene/thumbnail.ts. Built once
   // via useMemo rather than per render, since it owns a WebGL context.
   const thumbnailSource = useMemo(() => new RuntimeThumbnailRenderer(), []);
@@ -122,6 +131,15 @@ function SandboxEditor({
               onModelConsumed();
             }}
             onSessionReady={setSession}
+            onRendererReady={(renderer) => {
+              sceneRendererRef.current = renderer;
+            }}
+            suspended={pathtraceActive}
+          />
+          <PathtraceToggle
+            rendererRef={sceneRendererRef}
+            active={pathtraceActive}
+            onActiveChange={setPathtraceActive}
           />
           {loadState && (
             <div className="by-model-load-overlay">
