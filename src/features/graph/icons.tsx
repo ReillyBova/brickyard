@@ -22,7 +22,11 @@ function Icon({ children, ...props }: SVGProps<SVGSVGElement> & { children: Reac
   );
 }
 
-/** The entry button: three connected nodes reads literally as "the connection graph". */
+/**
+ * Three connected nodes reads literally as "the connection graph" — for the toolbar's
+ * `graph` mode option once the mode switch is wired (see `index.ts`); not used
+ * standalone any more now that the floating entry button is gone.
+ */
 export function GraphIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <Icon data-lucide="share-2" {...props}>
@@ -31,15 +35,6 @@ export function GraphIcon(props: SVGProps<SVGSVGElement>) {
       <circle cx="18" cy="19" r="3" />
       <line x1="8.59" x2="15.42" y1="13.51" y2="17.49" />
       <line x1="15.41" x2="8.59" y1="6.51" y2="10.49" />
-    </Icon>
-  );
-}
-
-export function CloseIcon(props: SVGProps<SVGSVGElement>) {
-  return (
-    <Icon data-lucide="x" {...props}>
-      <path d="M18 6 6 18" />
-      <path d="m6 6 12 12" />
     </Icon>
   );
 }
