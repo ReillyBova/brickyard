@@ -56,8 +56,12 @@ export type { ReadFile };
  */
 const PLACEHOLDER_OCCUPANCY: OccupancyMask = { dims: [1, 1, 1], bits: new Uint8Array(1) };
 
-/** Everything resolving one part id costs, reused across every brick that references it. */
-async function resolveFullPart(partId: string, read: ReadFile): Promise<PartDef> {
+/**
+ * Everything resolving one part id costs, reused across every brick that references it.
+ * Exported so `src/features/persist/` can resolve the same way when restoring a saved
+ * `SceneDocument`, which carries part ids but no geometry — see `partResolve.ts`.
+ */
+export async function resolveFullPart(partId: string, read: ReadFile): Promise<PartDef> {
   const [connections, triangles] = await Promise.all([
     resolvePart(partId, read),
     partTriangles(partId, read),
