@@ -213,9 +213,42 @@ The bake is a pure function of the mirror contents. `tools/prebake.ts` writes a 
 the source library version, the shadow library commit, and a content hash of each output, so a stale
 or partial bake is detectable rather than mysterious.
 
-Baked masks pin the voxel size and fill semantics into shipped bytes, so the manifest also records
-the occupancy format version. Changing `OCC_CELL` or what the mask counts as solid is a re-bake and a
-version bump, not a code-only change.
+## Staleness guard: format versus semantics
+
+Every baked binary (`connections.bin`, `occupancy.bin`, `geometry.bin`) carries two independent
+version numbers in its header:
+
+- **Format version** (`BAKED_FORMAT_VERSION` for connections/occupancy in `src/snap/baked.ts`,
+  `GEOMETRY_FORMAT_VERSION` in `src/ldraw/geometryBaked.ts`) — whether a reader can find the bytes at
+  all: field sizes, offsets, which bytes exist.
+- **Semantics version** (`SEMANTICS_VERSION`, `GEOMETRY_SEMANTICS_VERSION`, same two files) — whether
+  the bytes still mean what the reader thinks: `packKey`'s bit assignments, which section
+  `matingSection` picks, connection id composition, occupancy's cell size and fill rules, and
+  geometry's attribute conventions.
+
+The distinction exists because the format can stay byte-identical while its meaning quietly changes
+underneath it — `matingSection`'s selection rule and the `symmetric` key bit have both moved without
+touching a single offset, and each silently invalidated every committed bake. A reader cannot detect
+that kind of drift on its own, which is exactly what a version number is for.
+
+Both readers (`unpackConnections`, `unpackOccupancy`, `unpackGeometry`) reject a mismatch on *either*
+version exactly like a truncated file: null, not a throw, so a stale bake degrades to source
+resolution instead of shipping wrong snapping or shading behaviour with no signal.
+
+**The bump is not something to remember by inspection.** `src/snap/fixtureDigest.ts` packs
+`connections.bin`/`occupancy.bin`-shaped output for the committed fixture corpus
+(`src/snap/__fixtures__/`) and hashes the bytes — not the source text, so a comment-only edit to
+`packKey` leaves the digest untouched while a real behaviour change moves it.
+`src/snap/fixtureDigest.test.ts` pins that hash; when it fails, it names the fix: bump
+`SEMANTICS_VERSION`, replace the pinned digest with the value the failure prints, re-bake against a
+synced mirror, and commit the result. This test needs no mirror, so it runs in ordinary CI.
+
+`manifest.json` records `bakedFormatVersion`, `semanticsVersion`, `geometryFormatVersion`,
+`geometrySemanticsVersion` and `fixtureDigest` alongside the library and shadow revisions.
+`src/snap/manifestVersions.test.ts` recomputes every one of those from the current code — including
+the fixture digest — and fails if the *committed* manifest disagrees. That catches the other half of
+the failure mode: a semantics bump whose author updated the pinned test digest but forgot to actually
+re-run `npm run prebake` and commit `public/baked/`. Also needs no mirror.
 
 ## The output is committed
 
@@ -227,7 +260,8 @@ Re-bake and commit the result when one of three things changes:
 
 - the mirror, after `npm run sync-mirror` reports anything other than a 304;
 - the meaning of a baked field — the packed compatibility key, mating-section selection, connection
-  id composition, occupancy cell size or fill rules;
+  id composition, occupancy cell size or fill rules, or geometry's attribute conventions — which also
+  means bumping the relevant `SEMANTICS_VERSION` constant, per the guard above;
 - the set of parts baked, which today is the shadow library's coverage plus the chest.
 
 A bake is a few seconds, so the cost of re-baking when unsure is nil, and the artifacts are a pure

@@ -16,6 +16,18 @@ import type { PartGeometry } from './types.ts';
 /** Bumped when the layout changes in a way a reader cannot detect on its own. */
 export const GEOMETRY_FORMAT_VERSION = 1;
 
+/**
+ * Bumped when what a packed attribute MEANS changes, independent of the byte layout — e.g.
+ * a change to which vertex attributes are carried, what a colour code index means, or how
+ * `bakePartGeometry` (`tools/bakeGeometry.ts`) merges and welds vertices.
+ *
+ * Distinct from `GEOMETRY_FORMAT_VERSION` for the same reason `SEMANTICS_VERSION` is
+ * distinct from `BAKED_FORMAT_VERSION` in `src/snap/baked.ts` — duplicated rather than
+ * shared, since `ldraw/` does not depend on `snap/` (see `docs/ARCHITECTURE.md`). A
+ * mismatch is read exactly like a truncated file: null, not a throw.
+ */
+export const GEOMETRY_SEMANTICS_VERSION = 1;
+
 const GEOMETRY_MAGIC = 0x4547_5942; // 'BYGE', little-endian
 
 /** Flag bits packed beside the counts in one part record. */
@@ -94,7 +106,7 @@ function concat(chunks: readonly Uint8Array[]): Uint8Array {
  * `geometry.bin`:
  *
  * ```
- * magic u32 'BYGE' | version u16 | reserved u16 | partCount u32 | stringCount u32
+ * magic u32 'BYGE' | version u16 | semantics u16 | partCount u32 | stringCount u32
  * string table:  [ length u16, utf8 bytes ] * stringCount, padded to 4
  * parts:         [ idIndex u32, vertexCount u32, indexCount u32,
  *                   flags u8, reserved u8 * 3,
@@ -128,7 +140,7 @@ export function packGeometry(parts: readonly PartGeometry[]): Uint8Array {
   const view = new DataView(out.buffer);
   view.setUint32(0, GEOMETRY_MAGIC, true);
   view.setUint16(4, GEOMETRY_FORMAT_VERSION, true);
-  view.setUint16(6, 0, true);
+  view.setUint16(6, GEOMETRY_SEMANTICS_VERSION, true);
   view.setUint32(8, parts.length, true);
   view.setUint32(12, table.count, true);
   out.set(strings, 16);
@@ -159,12 +171,17 @@ export function packGeometry(parts: readonly PartGeometry[]): Uint8Array {
   return out;
 }
 
-/** Reads `geometry.bin`. Returns null when the bytes are not a readable version. */
+/**
+ * Reads `geometry.bin`. Returns null when the bytes are not a readable version — either
+ * `GEOMETRY_FORMAT_VERSION` (the layout) or `GEOMETRY_SEMANTICS_VERSION` (what the
+ * attributes mean).
+ */
 function readGeometry(buffer: ArrayBuffer): Map<string, PartGeometry> | null {
   if (buffer.byteLength < 16) return null;
   const view = new DataView(buffer);
   if (view.getUint32(0, true) !== GEOMETRY_MAGIC) return null;
   if (view.getUint16(4, true) !== GEOMETRY_FORMAT_VERSION) return null;
+  if (view.getUint16(6, true) !== GEOMETRY_SEMANTICS_VERSION) return null;
 
   const partCount = view.getUint32(8, true);
   const { strings, end } = readStringTable(view, 16, view.getUint32(12, true));

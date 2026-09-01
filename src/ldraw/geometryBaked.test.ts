@@ -17,6 +17,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   GEOMETRY_FORMAT_VERSION,
+  GEOMETRY_SEMANTICS_VERSION,
   packGeometry,
   unpackGeometry,
 } from './geometryBaked.ts';
@@ -91,6 +92,15 @@ describe('geometry.bin', () => {
     const packed = packGeometry([TRIANGLE]);
     const view = new DataView(bytesOf(packed));
     view.setUint16(4, GEOMETRY_FORMAT_VERSION + 1, true);
+    expect(unpackGeometry(view.buffer)).toBeNull();
+  });
+
+  it('returns null for a semantics version this build no longer shares', () => {
+    // Layout is unaffected — the reserved header field just now carries a meaning. A file
+    // baked before this field existed reads as semantics 0, which never matches.
+    const packed = packGeometry([TRIANGLE]);
+    const view = new DataView(bytesOf(packed));
+    view.setUint16(6, GEOMETRY_SEMANTICS_VERSION + 1, true);
     expect(unpackGeometry(view.buffer)).toBeNull();
   });
 
