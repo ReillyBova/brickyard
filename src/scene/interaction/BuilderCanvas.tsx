@@ -24,7 +24,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-import { basisOf, fromTranslation, fromYRotation, multiplyAll, positionOf } from '../../math';
+import { axisOf, basisOf, fromAxisAngle, fromTranslation, multiplyAll, positionOf } from '../../math';
 import { mintBrickId } from '../../model/ids.ts';
 import type { BrickInstance, SceneDocument } from '../../model/types';
 import type { PartDef } from '../../snap/types';
@@ -416,16 +416,34 @@ export function BuilderCanvas({
       setIsHolding(true);
     };
 
-    /** Rotation about the vertical axis, pivoting on the centroid of `positions`. */
-    const rotationAbout = (positions: readonly Vec3[], angleRadians: number): Mat4 => {
-      const n = Math.max(positions.length, 1);
-      const centroid: Vec3 = [
-        positions.reduce((s, p) => s + p[0], 0) / n,
-        positions.reduce((s, p) => s + p[1], 0) / n,
-        positions.reduce((s, p) => s + p[2], 0) / n,
-      ];
-      const negCentroid: Vec3 = [-centroid[0], -centroid[1], -centroid[2]];
-      return multiplyAll(fromTranslation(centroid), fromYRotation(angleRadians), fromTranslation(negCentroid));
+    /**
+     * Rotation by `angleRadians`, pivoting on `anchor`'s connector — its position, about
+     * its own axis — so the mated connector stays fixed and the rest of the piece turns
+     * around it, the way a brick actually turns on the stud holding it. Per the bug this
+     * fixes: pivoting on the selection centroid instead swings that connector off the
+     * lattice whenever it isn't at the centroid, which is true of most parts, breaking
+     * the mate and reading as a collision.
+     *
+     * No anchor (nothing mated) falls back to the previous behaviour — world Y through
+     * the centroid of `positions` — since there is no connector to pivot on instead.
+     */
+    const rotationAbout = (anchor: Mat4 | null, positions: readonly Vec3[], angleRadians: number): Mat4 => {
+      let pivot: Vec3;
+      let axis: Vec3;
+      if (anchor) {
+        pivot = positionOf(anchor);
+        axis = axisOf(anchor);
+      } else {
+        const n = Math.max(positions.length, 1);
+        pivot = [
+          positions.reduce((s, p) => s + p[0], 0) / n,
+          positions.reduce((s, p) => s + p[1], 0) / n,
+          positions.reduce((s, p) => s + p[2], 0) / n,
+        ];
+        axis = [0, 1, 0];
+      }
+      const negPivot: Vec3 = [-pivot[0], -pivot[1], -pivot[2]];
+      return multiplyAll(fromTranslation(pivot), fromAxisAngle(axis, angleRadians), fromTranslation(negPivot));
     };
 
     // Candidate cycling deliberately does NOT use Tab. Tab is the browser's own
@@ -524,11 +542,11 @@ export function BuilderCanvas({
 
       switch (event.key) {
         case 'ArrowLeft':
-          if (event.shiftKey) session.transformSelection(selection, rotationAbout(positions, (-deg * Math.PI) / 180), rotateLabel);
+          if (event.shiftKey) session.transformSelection(selection, rotationAbout(anchor, positions, (-deg * Math.PI) / 180), rotateLabel);
           else session.transformSelection(selection, anchorStep(anchor, false, negate(ground.right), xz), label);
           break;
         case 'ArrowRight':
-          if (event.shiftKey) session.transformSelection(selection, rotationAbout(positions, (deg * Math.PI) / 180), rotateLabel);
+          if (event.shiftKey) session.transformSelection(selection, rotationAbout(anchor, positions, (deg * Math.PI) / 180), rotateLabel);
           else session.transformSelection(selection, anchorStep(anchor, false, ground.right, xz), label);
           break;
         case 'ArrowUp':
