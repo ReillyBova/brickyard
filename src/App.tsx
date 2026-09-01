@@ -54,8 +54,11 @@ const DEFAULT_COLOR_CODE = 4;
  * steady width is the whole point.
  */
 function formatSamples(samples: number): string {
-  if (samples < 1000) return `${samples}`;
-  return `${Math.round(samples / 1000)}k`;
+  // The tracer reports accumulated sample *weight*, which is fractional — printing it
+  // raw gave readings like "20.1111111 samples".
+  const whole = Math.round(samples);
+  if (whole < 1000) return `${whole}`;
+  return `${Math.round(whole / 1000)}k`;
 }
 
 type ModelLoadState = { progress: number; phase: string } | { error: string } | null;
@@ -381,6 +384,10 @@ function SandboxEditor({
             mode={mode}
             onModeChange={(next) => {
               setMode(next);
+              // Selection is an editor concept. Leaving it behind meant returning to
+              // find bricks still highlighted, and the graph and render views reading a
+              // selection they cannot act on.
+              if (next !== 'editor') session?.setSelection([]);
               if (next !== 'editor') {
                 setRestyleOpen(false);
                 setLoadModelOpen(false);
