@@ -170,15 +170,27 @@ async function resolveInParallel(
 
   await new Promise<void>((resolve, reject) => {
     let live = jobs
+    const workers: Worker[] = []
+    /** Stops the whole pool, so one worker's failure does not leave the rest baking. */
+    const stopAll = (error: Error): void => {
+      for (const w of workers) void w.terminate()
+      reject(error)
+    }
+
     for (let i = 0; i < jobs; i++) {
       const worker = new Worker(workerPath, { workerData: { mirror } })
+      workers.push(worker)
+      /** The part this worker is currently resolving, so a death can be attributed. */
+      let inFlight: string | undefined
 
       const dispatch = (): void => {
         if (next >= partIds.length) {
+          inFlight = undefined
           worker.postMessage(null)
           return
         }
-        worker.postMessage({ partId: partIds[next++] })
+        inFlight = partIds[next++]
+        worker.postMessage({ partId: inFlight })
       }
 
       worker.on('message', (result: BakeResult) => {
@@ -191,8 +203,21 @@ async function resolveInParallel(
         }
         dispatch()
       })
-      worker.on('error', reject)
-      worker.on('exit', () => {
+      worker.on('error', stopAll)
+      worker.on('exit', (code) => {
+        // A worker can die without ever emitting `error` — an OOM kill, or a bug that
+        // calls process.exit mid-part. Left unchecked that silently drops whatever it
+        // was resolving: absent from the output, absent from `failures`, and the bake
+        // still exits 0. A part is missing from the catalog and nothing says so.
+        if (code !== 0) {
+          stopAll(
+            new Error(
+              `bake worker exited with code ${code}` +
+                (inFlight === undefined ? '' : ` while resolving ${inFlight}`),
+            ),
+          )
+          return
+        }
         live--
         if (live === 0) resolve()
       })
