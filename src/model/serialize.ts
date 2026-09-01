@@ -77,11 +77,14 @@ export function fromJSON(input: unknown): SceneDocument {
   if (raw.version !== DOCUMENT_FORMAT_VERSION) {
     fail(`unsupported format version ${String(raw.version)}`);
   }
-  if (!Array.isArray(raw.bricks) || !Array.isArray(raw.groups) || !Array.isArray(raw.edges)) {
-    fail('missing bricks, groups or edges');
+
+  // Read into locals so `Array.isArray` narrows them for the rest of the function.
+  const { bricks: rawBricks, groups: rawGroups, edges: rawEdges } = raw;
+  if (!Array.isArray(rawBricks) || !Array.isArray(rawGroups) || !Array.isArray(rawEdges)) {
+    throw new Error('serialize: missing bricks, groups or edges');
   }
 
-  const bricks: BrickInstance[] = raw.bricks.map((brick) => {
+  const bricks: BrickInstance[] = rawBricks.map((brick) => {
     if (!Array.isArray(brick.transform) || brick.transform.length !== 16) {
       fail(`brick ${String(brick.id)} has no 16-element transform`);
     }
@@ -100,7 +103,7 @@ export function fromJSON(input: unknown): SceneDocument {
     };
   });
 
-  const groups: GroupDef[] = raw.groups.map((group) => {
+  const groups: GroupDef[] = rawGroups.map((group) => {
     if (typeof group.name !== 'string') fail(`group ${String(group.id)} has no name`);
     return {
       id: asGroupId(String(group.id)),
@@ -110,7 +113,7 @@ export function fromJSON(input: unknown): SceneDocument {
   });
 
   const known = new Set<BrickId>(bricks.map((b) => b.id));
-  const edges: ConnectionEdge[] = raw.edges.map((edge) => {
+  const edges: ConnectionEdge[] = rawEdges.map((edge) => {
     const a = asBrickId(String(edge.a));
     const b = asBrickId(String(edge.b));
     for (const id of [a, b]) {
