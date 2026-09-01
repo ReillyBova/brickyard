@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 
 import { MoonIcon, SunIcon } from '../icons';
+import { useTooltip } from '../tooltip';
 import { useTheme } from '../useTheme';
 import './AppShell.css';
 
@@ -38,6 +39,8 @@ interface AppShellProps {
 export function AppShell({ chestPanel, colorPanel, toolbar, viewport }: AppShellProps) {
   const [openRail, setOpenRail] = useState<'chest' | 'color' | null>(null);
   const [theme, toggleTheme] = useTheme();
+  const themeLabel = theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
+  const themeTip = useTooltip({ id: 'theme-toggle', label: themeLabel });
 
   return (
     <div className="by-viewport">
@@ -54,9 +57,9 @@ export function AppShell({ chestPanel, colorPanel, toolbar, viewport }: AppShell
           <button
             type="button"
             className="by-icon-btn"
-            aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-            title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+            aria-label={themeLabel}
             onClick={toggleTheme}
+            {...themeTip}
           >
             {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
           </button>

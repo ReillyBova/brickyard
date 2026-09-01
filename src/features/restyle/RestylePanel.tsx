@@ -9,6 +9,7 @@
  * mapping it's given.
  */
 import { ArrowRightIcon, PaintbrushIcon, Undo2Icon, XIcon } from '../../ui/icons';
+import { useTooltip } from '../../ui/tooltip';
 import type { Swatch } from '../../ui/ColorPicker/types';
 import { ColorTargetPicker } from './ColorTargetPicker';
 import type { ColorUsage } from './colorUsage';
@@ -37,6 +38,56 @@ function nameFor(palette: readonly Swatch[], code: number): string {
   return swatchFor(palette, code)?.name ?? `Color ${code}`;
 }
 
+interface RestyleRowProps {
+  code: number;
+  count: number;
+  palette: readonly Swatch[];
+  mapping: ColorMapping;
+  onMap: (from: number, to: number) => void;
+  onResetRow: (from: number) => void;
+}
+
+/**
+ * Split out from `RestylePanel`'s `usage.map()` so the reset button's `useTooltip` call
+ * — one per row — is a hook call in a real component, not inside a loop callback.
+ */
+function RestyleRow({ code, count, palette, mapping, onMap, onResetRow }: RestyleRowProps) {
+  const target = mapping.get(code) ?? code;
+  const changed = target !== code;
+  const from = swatchFor(palette, code);
+  const name = nameFor(palette, code);
+  const resetTip = useTooltip({ id: `restyle-reset-${code}`, label: 'Reset to original color' });
+
+  return (
+    <div className="by-restyle-row">
+      <span
+        className="by-swatch by-restyle-row__from"
+        style={{ backgroundColor: from?.hex, borderColor: from?.edgeHex }}
+        aria-hidden="true"
+      />
+      <span className="by-restyle-row__name">{name}</span>
+      <span className="by-tag by-tag--neutral by-mono">{count}</span>
+      <ArrowRightIcon className="by-restyle-row__arrow" aria-hidden="true" />
+      <ColorTargetPicker
+        palette={palette}
+        value={target}
+        onSelect={(next) => onMap(code, next)}
+        label={`Replacement for ${name}`}
+      />
+      <button
+        type="button"
+        className="by-icon-btn by-restyle-row__reset"
+        aria-label={`Reset ${name} to its original color`}
+        onClick={() => onResetRow(code)}
+        disabled={!changed}
+        {...resetTip}
+      >
+        <Undo2Icon />
+      </button>
+    </div>
+  );
+}
+
 export function RestylePanel({
   usage,
   palette,
@@ -50,6 +101,7 @@ export function RestylePanel({
   applying = false,
 }: RestylePanelProps) {
   const hasChanges = mapping.size > 0;
+  const closeTip = useTooltip({ id: 'restyle-close', label: 'Close restyle panel' });
 
   return (
     <div className="by-panel by-restyle-panel">
@@ -60,8 +112,8 @@ export function RestylePanel({
           type="button"
           className="by-icon-btn"
           aria-label="Close restyle panel"
-          title="Close restyle panel"
           onClick={onClose}
+          {...closeTip}
         >
           <XIcon />
         </button>
@@ -75,39 +127,17 @@ export function RestylePanel({
           </div>
         ) : (
           <div className="by-restyle-rows">
-            {usage.map(({ code, count }) => {
-              const target = mapping.get(code) ?? code;
-              const changed = target !== code;
-              const from = swatchFor(palette, code);
-              return (
-                <div className="by-restyle-row" key={code}>
-                  <span
-                    className="by-swatch by-restyle-row__from"
-                    style={{ backgroundColor: from?.hex, borderColor: from?.edgeHex }}
-                    aria-hidden="true"
-                  />
-                  <span className="by-restyle-row__name">{nameFor(palette, code)}</span>
-                  <span className="by-tag by-tag--neutral by-mono">{count}</span>
-                  <ArrowRightIcon className="by-restyle-row__arrow" aria-hidden="true" />
-                  <ColorTargetPicker
-                    palette={palette}
-                    value={target}
-                    onSelect={(next) => onMap(code, next)}
-                    label={`Replacement for ${nameFor(palette, code)}`}
-                  />
-                  <button
-                    type="button"
-                    className="by-icon-btn by-restyle-row__reset"
-                    aria-label={`Reset ${nameFor(palette, code)} to its original color`}
-                    title="Reset to original color"
-                    onClick={() => onResetRow(code)}
-                    disabled={!changed}
-                  >
-                    <Undo2Icon />
-                  </button>
-                </div>
-              );
-            })}
+            {usage.map(({ code, count }) => (
+              <RestyleRow
+                key={code}
+                code={code}
+                count={count}
+                palette={palette}
+                mapping={mapping}
+                onMap={onMap}
+                onResetRow={onResetRow}
+              />
+            ))}
           </div>
         )}
       </div>

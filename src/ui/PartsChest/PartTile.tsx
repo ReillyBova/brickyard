@@ -44,7 +44,8 @@ export function PartTile({
       aria-pressed={isSelected}
       className={`by-tile${isSelected ? ' is-selected' : ''}`}
       data-index={index}
-      title={part.title}
+      data-tooltip-id={`tile-${part.id}`}
+      data-tooltip-label={`${displayTitle(part.title)} · ${part.id}`}
       onClick={() => onSelect(part.id)}
       onKeyDown={(event) => onKeyDown(event, index)}
     >

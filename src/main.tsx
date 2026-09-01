@@ -4,9 +4,12 @@ import { createRoot } from 'react-dom/client'
 import './styles/tokens.css'
 import './styles/components.css'
 import App from './App.tsx'
+import { TooltipProvider } from './ui/tooltip'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <TooltipProvider>
+      <App />
+    </TooltipProvider>
   </StrictMode>,
 )

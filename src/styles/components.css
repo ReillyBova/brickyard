@@ -725,6 +725,24 @@ a:hover { color: var(--by-accent-hover); }
   white-space: nowrap;
 }
 
+/* App-wide tooltip host (`src/ui/tooltip/`) — a single `.by-tooltip` bubble portaled to
+   `document.body` and positioned `fixed` from the trigger's rect, so it isn't clipped by
+   a scrolling ancestor (the parts chest, the color palette). Same fade and reduced-motion
+   treatment as the toolbar's own `.by-toolbar__tip`. */
+.by-tooltip-float {
+  position: fixed;
+  z-index: var(--by-z-popover);
+  pointer-events: none;
+  animation: by-tooltip-float-in var(--by-dur-fast) var(--by-ease-out);
+}
+@keyframes by-tooltip-float-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .by-tooltip-float { animation: none; }
+}
+
 /* ── Status bar ─────────────────────────────────────────────────────────────
    The quiet readout: brick count, selection count, current mode hint. Not a
    place for warnings — those are toasts.

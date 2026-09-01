@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 
 import { ChevronDownIcon } from '../icons';
+import { useTooltipDelegate } from '../tooltip';
 import { useRovingGrid } from '../useRovingGrid';
 import type { Swatch } from './types';
 
@@ -83,16 +84,24 @@ function Swatches({
         // actually reaches it, but the index still has to be a number to render.
         const index = indexOf.get(color.code) ?? -1;
         const isSelected = color.code === selectedCode;
+        // Tooltip content isn't just the aria-label restated: a swatch shows no text of
+        // its own at all, so name + code carries the identifying information, and the
+        // material is appended only when it isn't the (unmarked) default finish.
+        const tooltipLabel =
+          color.material === 'solid'
+            ? `${color.name} · ${color.code}`
+            : `${color.name} · ${color.code} · ${MATERIAL_LABEL[color.material]}`;
         return (
           <button
             key={color.code}
             type="button"
             aria-pressed={isSelected}
             aria-label={`${color.name}, LDraw color ${color.code}, ${MATERIAL_LABEL[color.material]}`}
-            title={`${color.name} · ${color.code}`}
             className={`by-swatch ${MATERIAL_MARK[color.material]}${isSelected ? ' is-selected' : ''}`}
             style={{ backgroundColor: color.hex, borderColor: color.edgeHex }}
             data-index={index}
+            data-tooltip-id={`swatch-${color.code}`}
+            data-tooltip-label={tooltipLabel}
             onClick={() => onSelect(color.code)}
             onKeyDown={(event) => onKeyDown(event, index)}
           />
@@ -138,6 +147,9 @@ export function ColorPicker({ colors, selectedCode, onSelect }: ColorPickerProps
     [othersOpen, colors, solids],
   );
   const { containerRef, onKeyDown } = useRovingGrid(visibleColors.length);
+  // One delegated listener for the whole palette rather than a tooltip hook per swatch —
+  // there can be hundreds across the solid ramp plus every "more finishes" group.
+  useTooltipDelegate(containerRef, 'color-palette');
   const indexOf = useMemo(() => {
     const map = new Map<number, number>();
     visibleColors.forEach((color, i) => map.set(color.code, i));

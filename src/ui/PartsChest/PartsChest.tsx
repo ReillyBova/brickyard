@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 
 import { SearchIcon } from '../icons';
+import { useTooltipDelegate } from '../tooltip';
 import { useRovingGrid } from '../useRovingGrid';
 import { CategoryMenu } from './CategoryMenu';
 import { PartTile } from './PartTile';
@@ -73,6 +74,9 @@ export function PartsChest({
 
   const groups = useMemo(() => groupByCategory(filtered), [filtered]);
   const { containerRef, onKeyDown } = useRovingGrid(filtered.length);
+  // One delegated listener for the whole chest rather than a tooltip hook per tile — the
+  // catalog runs into the hundreds of parts.
+  useTooltipDelegate(containerRef, 'parts-chest');
 
   const flatIndexById = useMemo(() => {
     const map = new Map<string, number>();
