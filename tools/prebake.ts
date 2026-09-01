@@ -18,8 +18,10 @@ import { fileURLToPath } from 'node:url'
 import { Worker } from 'node:worker_threads'
 
 import type { BakeResult } from './bakeWorker.ts'
+import { bakeChestGeometry } from './bakeGeometry.ts'
 
 import { boundsFromTriangles, partTriangles } from '../src/ldraw/bounds.ts'
+import { packGeometry } from '../src/ldraw/geometryBaked.ts'
 import type { CatalogEntry } from '../src/ldraw/types.ts'
 import {
   DEFAULT_MIRROR_ROOT,
@@ -405,6 +407,19 @@ async function bake(options: BakeOptions): Promise<void> {
   const writer = new Writer(options.out, options.pretty)
   console.log(`Writing ${path.resolve(options.out)}`)
 
+  // Geometry — the curated chest only, see docs/PREBAKE.md. Sequential and separate from
+  // the worker pool above: the chest is a couple dozen parts, not thousands, and the
+  // three.js LDrawLoader this leans on (see tools/bakeGeometry.ts) keeps mutable state
+  // that isn't worth duplicating per worker.
+  console.log(`Baking geometry for ${options.chest.length} chest parts`)
+  const colorLibraryText = await readLibrary('LDConfig.ldr')
+  if (colorLibraryText === null) {
+    throw new Error('LDConfig.ldr missing from the mirror')
+  }
+  const geometryStarted = Date.now()
+  const geometry = await bakeChestGeometry(options.chest, readLibrary, colorLibraryText)
+  const geometrySeconds = (Date.now() - geometryStarted) / 1000
+
   await writer.writeJson('colors.json', {
     version,
     colors: [...colors.values()].sort((a, b) => a.code - b.code),
@@ -412,6 +427,7 @@ async function bake(options: BakeOptions): Promise<void> {
   await writer.writeJson('catalog.json', catalog)
   await writer.write('connections.bin', Buffer.from(packConnections(resolved.connections)))
   await writer.write('occupancy.bin', Buffer.from(packOccupancy(resolved.occupancy)))
+  await writer.write('geometry.bin', Buffer.from(packGeometry(geometry)))
   await writer.write('LICENSE.txt', LICENSE_TEXT)
 
   /**
@@ -435,8 +451,10 @@ async function bake(options: BakeOptions): Promise<void> {
   console.log(`catalog entries   ${catalog.length}`)
   console.log(`connections       ${resolved.connections.length.toLocaleString()} parts`)
   console.log(`occupancy         ${resolved.occupancy.length.toLocaleString()} parts`)
+  console.log(`geometry          ${geometry.length.toLocaleString()} parts`)
   console.log(`unreadable        ${resolved.failures.length.toLocaleString()} parts`)
   console.log(`resolve time      ${resolved.seconds.toFixed(0)}s`)
+  console.log(`geometry time     ${geometrySeconds.toFixed(1)}s`)
   for (const { partId, seconds } of resolved.slow.slice(0, 10)) {
     console.log(`  slowest: ${partId.padEnd(16)} ${seconds.toFixed(1)}s`)
   }
