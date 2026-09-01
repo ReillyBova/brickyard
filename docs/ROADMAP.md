@@ -112,15 +112,19 @@ Published models retain `0 STEP` metadata, so build order is recoverable from th
 keeps it already. Pieces flying into place, step by step, is then an animation over data we have
 rather than a feature needing new data.
 
-### Claude integration
+### Agent-to-app interaction
 
-An MCP server exposing the document and the operation set, so a model can build and restyle through
-the same transactions a person uses — and therefore cannot produce an invalid model, because the
-connection graph validates every placement. The deployed app stands alone without it; MCP is a second
-channel, demonstrated rather than required.
-
-The tool surface, the transports and the guidance the server carries are in
+An MCP server exposing the document and the operation set ships today, so a model builds and restyles
+through the same transactions a person uses — and cannot produce an invalid model, because the
+connection graph validates every placement. It drives a document of its own, over stdio, and the
+deployed app stands alone without it. The tool surface and the guidance it carries are in
 [`MCP.md`](MCP.md).
+
+The ambition is richer: an agent and a person working the same model in one live tab, bricks landing
+where they can be watched, undo shared across both. The tool layer is already shaped for it, and its
+capability hooks are the seams a page adapter fills. Reaching a browser tab is the unsolved part, and
+it is a platform problem rather than a design one — `MCP.md` records the constraints and the shapes
+that survive them.
 
 ### Physics
 

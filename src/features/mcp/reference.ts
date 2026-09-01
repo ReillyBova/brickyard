@@ -36,6 +36,8 @@ export interface ReferenceCorpus {
 export interface ReferenceLookup {
   searchParts(query: string, limit: number): readonly CatalogEntry[];
   lookup(query: string, limit: number): Promise<readonly ReferenceExample[]>;
+  /** Whether a corpus is attached. Without one, `lookup` has nothing to answer from. */
+  readonly hasCorpus: boolean;
 }
 
 /**
@@ -61,6 +63,8 @@ export function createReference(
   corpus?: ReferenceCorpus,
 ): ReferenceLookup {
   return {
+    hasCorpus: corpus !== undefined,
+
     searchParts(query, limit) {
       const terms = query
         .toLowerCase()

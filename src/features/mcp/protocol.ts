@@ -10,7 +10,7 @@
  */
 
 import { PROMPTS, SERVER_INSTRUCTIONS } from './instructions.ts';
-import { TOOLS, callTool, type ToolContext } from './tools.ts';
+import { availableTools, callTool, type ToolContext } from './tools.ts';
 
 /** Used when a client does not name one. */
 export const DEFAULT_PROTOCOL_VERSION = '2025-06-18';
@@ -84,7 +84,7 @@ export async function handleRequest(
 
       case 'tools/list':
         return ok(id, {
-          tools: TOOLS.map((tool) => ({
+          tools: availableTools(ctx).map((tool) => ({
             name: tool.name,
             description: tool.description,
             inputSchema: tool.inputSchema,
