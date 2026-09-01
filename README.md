@@ -55,6 +55,7 @@ Group.
 | [three-gpu-pathtracer](https://github.com/gkjohnson/three-gpu-pathtracer) | MIT |
 | [three.js](https://threejs.org/) | MIT |
 | [Poly Haven HDRIs](https://polyhaven.com/hdris) — seven of render mode's eight environment maps | CC0 |
+| [Space Spheremaps](https://www.spacespheremaps.com/galactic-plane-spheremaps/) — TonyS, render mode's `space` environment map | CC BY 4.0 (attribution not required, but given) |
 
 ## License
 

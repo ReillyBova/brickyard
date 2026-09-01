@@ -6,14 +6,18 @@
  * every specular reflection, so these read as real places: a window throws a real highlight
  * across glossy ABS, the studio floor grounds the model in a real horizon line.
  *
- * Six of the seven are real photographs (Poly Haven, CC0, 1k). The seventh, `space`, is
- * procedurally generated — Poly Haven's "night" HDRIs are all Earth landscapes under a starry
+ * Seven of the eight are real photographs (Poly Haven, CC0, 1k). The eighth, `space`, is a real
+ * galactic-plane render — Poly Haven's "night" HDRIs are all Earth landscapes under a starry
  * sky, not a clean starfield, and no CC0 nebula/starfield photograph fits a floating spaceship
- * shot. `space_nebula.hdr` is a small (512×256, ~0.5 MB, uncompressed) generated equirectangular
- * map: soft colour-blob nebulae plus scattered point stars, built by
- * `tools/gen-space-hdr.py` — never fully black, so the environment still contributes real
- * image-based fill light rather than leaving the model a silhouette (see that script's own doc
- * for the RGBE format details).
+ * shot. `galactic_plane_1k.hdr` is sourced from spacespheremaps.com (CC BY 4.0, no attribution
+ * required though credited anyway — see README.md), downsampled from its native 10000×5000 PNG
+ * to 1024×512 and converted to RGBE. The source render is otherwise very dark (mean linear
+ * radiance ~0.0017 — almost entirely void between the galactic band and a few stars), so a flat
+ * 0.02 floor is added everywhere and the galaxy's own signal is boosted ×20 before encoding,
+ * bringing the mean radiance to ~0.055 — close to Low-key's contrast without leaving the model a
+ * silhouette against pure black. Plain (uncompressed) RGBE, like three.js's own path-tracer
+ * example uses as a fallback — `RGBELoader`/`HDRLoader` reads this layout directly, no RLE
+ * encoder needed.
  *
  * Fetched from our own origin rather than a third party — GitHub Pages serves `public/` with
  * its own headers, so a Poly Haven URL would risk CORS trouble a same-origin file never does.
@@ -82,10 +86,10 @@ export const ENVIRONMENTS: readonly PathtraceEnvironment[] = [
     id: 'space',
     label: 'Space',
     description:
-      'A dark starfield with drifting colour nebulae — for minifigs, spaceships and anything that ' +
-      'should look like it belongs off-world. Dim by design: push the key light toward Low-key\'s ' +
-      'settings and consider hiding the ground.',
-    file: 'space_nebula.hdr',
+      'A real galactic-plane starfield — for minifigs, spaceships and anything that should look ' +
+      'like it belongs off-world. Dim by design: push the key light toward Low-key\'s settings ' +
+      'and consider hiding the ground.',
+    file: 'galactic_plane_1k.hdr',
   },
 ];
 
