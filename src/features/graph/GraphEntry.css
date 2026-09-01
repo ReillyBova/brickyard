@@ -1,0 +1,14 @@
+/*
+ * Placeholder entry point — a floating raft, positioned by tokens only. A toolbar with
+ * a reserved slot for this button is being built elsewhere; this mounts independently
+ * of it for now and moves into that slot at merge (see index.ts).
+ */
+.by-graph-entry {
+  position: fixed;
+  left: var(--by-space-3);
+  bottom: var(--by-space-3);
+  z-index: var(--by-z-popover);
+  border-radius: var(--by-radius-pill);
+  background: var(--by-panel);
+  box-shadow: var(--by-shadow-md);
+}

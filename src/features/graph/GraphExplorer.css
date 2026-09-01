@@ -1,0 +1,143 @@
+/*
+ * Layout glue only — every color, size, radius and duration below is a token or a
+ * class from `src/styles/components.css`. This positions a full-screen takeover: the
+ * canvas is edge-to-edge (the one square-cornered surface, per docs/DESIGN.md), and
+ * the controls float over it as rafts, the same idiom `AppShell.css` uses for the
+ * chest and color panels.
+ */
+
+.by-graph-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--by-z-dialog);
+  background: var(--by-canvas);
+}
+
+.by-graph-overlay__bar {
+  position: absolute;
+  top: var(--by-space-3);
+  left: var(--by-space-3);
+  right: var(--by-space-3);
+  z-index: var(--by-z-chrome);
+  display: flex;
+  align-items: center;
+  gap: var(--by-space-2);
+  height: var(--by-toolbar-h);
+  padding: 0 var(--by-space-2) 0 var(--by-space-3);
+  border-radius: var(--by-radius-pill);
+  background: var(--by-panel);
+  box-shadow: var(--by-shadow-md);
+}
+
+.by-graph-overlay__title {
+  font-family: var(--by-font-display);
+  font-weight: var(--by-font-display-weight);
+  font-size: var(--by-text-lg);
+  letter-spacing: var(--by-tracking-display);
+  margin-right: auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.by-graph-overlay__body {
+  position: absolute;
+  inset: 0;
+}
+
+/* ── Model picker ──────────────────────────────────────────────────────── */
+
+.by-graph-picker {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--by-space-6);
+}
+
+.by-graph-picker__panel {
+  width: min(480px, 100%);
+  max-height: min(70vh, 640px);
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--by-radius-lg);
+  background: var(--by-popover);
+  box-shadow: var(--by-shadow-lg);
+  padding: var(--by-space-6);
+  gap: var(--by-space-3);
+  overflow-y: auto;
+}
+
+.by-graph-picker__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--by-space-2);
+}
+
+.by-graph-model {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: var(--by-space-3) var(--by-space-4);
+  border: 1px solid var(--by-line);
+  border-radius: var(--by-radius-md);
+  background: var(--by-panel-sunken);
+  color: var(--by-text);
+  font-family: var(--by-font-ui);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--by-dur-instant) var(--by-ease-out), border-color var(--by-dur-instant) var(--by-ease-out);
+}
+.by-graph-model:hover { background: var(--by-hover-wash); border-color: var(--by-line-strong); }
+.by-graph-model:active { background: var(--by-press-wash); }
+.by-graph-model__name { font-family: var(--by-font-display); font-weight: var(--by-font-display-weight); font-size: var(--by-text-md); }
+.by-graph-model__stats { font-family: var(--by-font-mono); font-size: var(--by-text-xs); color: var(--by-text-muted); }
+
+/* ── Viewer ────────────────────────────────────────────────────────────── */
+
+.by-graph-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  border-radius: var(--by-radius-none);
+}
+
+.by-graph-viewer__overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--by-space-3);
+  background: var(--by-canvas);
+}
+
+.by-graph-viewer__progress {
+  width: min(320px, 80%);
+}
+
+.by-graph-toolbar {
+  position: absolute;
+  bottom: var(--by-space-3);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--by-z-chrome);
+  display: flex;
+  align-items: center;
+  gap: var(--by-space-3);
+}
+
+.by-graph-legend {
+  display: flex;
+  align-items: center;
+  gap: var(--by-space-2);
+}
