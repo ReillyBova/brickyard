@@ -100,12 +100,22 @@ export function FilterMenu({ sections, activeCount, onClearAll, subject }: Filte
         close();
       }
     }
-    document.addEventListener('scroll', close, true);
+    // `capture: true` sees scroll from any scrollable ancestor of the *trigger*, which
+    // should close this — the anchor moved out from under it. But it equally sees this
+    // panel's own scrolling body, and with 200 models the theme list genuinely overflows.
+    // Closing there made the menu un-scrollable: the first wheel tick closed it before
+    // the browser had moved `scrollTop`. Same fix as ColorTargetPicker.
+    function onScroll(event: Event) {
+      const node = event.target as Node;
+      if (panelRef.current?.contains(node)) return;
+      close();
+    }
+    document.addEventListener('scroll', onScroll, true);
     document.addEventListener('pointerdown', onPointerDown);
     document.addEventListener('keydown', onKeyDown);
     window.addEventListener('resize', reposition);
     return () => {
-      document.removeEventListener('scroll', close, true);
+      document.removeEventListener('scroll', onScroll, true);
       document.removeEventListener('pointerdown', onPointerDown);
       document.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('resize', reposition);
