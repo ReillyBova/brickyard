@@ -46,6 +46,22 @@ describe('physicalParamsFor', () => {
     expect(params.sheenColor[0]).toBeGreaterThan(0x99 / 255);
   });
 
+  it('solid ABS is glossy, not matte, at a real-plastic IOR', () => {
+    const params = physicalParamsFor(color({ material: 'solid', value: 0x1a1a1a }));
+    expect(params.roughness).toBeLessThan(0.3);
+    expect(params.clearcoat).toBeGreaterThan(0);
+    expect(params.ior).toBeCloseTo(1.53, 1);
+  });
+
+  it('transparent parts absorb strongly over an ordinary brick thickness', () => {
+    const params = physicalParamsFor(color({ material: 'transparent', value: 0xc4281c, alpha: 128 }));
+    // Beer-Lambert: remaining transmittance at `attenuationDistance` equals `attenuationColor`
+    // exactly, so a short distance relative to typical part size (tens of LDU) is what makes
+    // the tint read as strong rather than pale — see shaders.ts.
+    expect(params.attenuationDistance).toBeLessThan(30);
+    expect(params.transmission).toBeGreaterThan(0.9);
+  });
+
   it('every finish returns colors and scalars in range', () => {
     const finishes: LDrawColor['material'][] = [
       'solid',
