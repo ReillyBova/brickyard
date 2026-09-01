@@ -517,11 +517,27 @@ export function BuilderCanvas({
       }
     };
 
-    canvas.addEventListener('pointerdown', onDown);
-    canvas.addEventListener('pointermove', onMove);
-    canvas.addEventListener('pointerup', onUp);
-    canvas.addEventListener('dblclick', onDoubleClick);
-    canvas.addEventListener('keydown', onKey);
+    // Suspended means another mode owns the canvas — graph, or the path tracer sharing
+    // this GL context. Editing gestures must be inert there: `suspended` previously only
+    // stopped the render loop, so a click still selected a brick behind a rendered image.
+    const whenActive =
+      <E extends Event>(handler: (event: E) => void) =>
+      (event: E): void => {
+        if (suspendedRef.current) return;
+        handler(event);
+      };
+
+    const onDownGated = whenActive(onDown);
+    const onMoveGated = whenActive(onMove);
+    const onUpGated = whenActive(onUp);
+    const onDoubleClickGated = whenActive(onDoubleClick);
+    const onKeyGated = whenActive(onKey);
+
+    canvas.addEventListener('pointerdown', onDownGated);
+    canvas.addEventListener('pointermove', onMoveGated);
+    canvas.addEventListener('pointerup', onUpGated);
+    canvas.addEventListener('dblclick', onDoubleClickGated);
+    canvas.addEventListener('keydown', onKeyGated);
 
     const resize = (): void => {
       const rect = canvas.getBoundingClientRect();
@@ -532,11 +548,11 @@ export function BuilderCanvas({
     observer.observe(canvas);
 
     return () => {
-      canvas.removeEventListener('pointerdown', onDown);
-      canvas.removeEventListener('pointermove', onMove);
-      canvas.removeEventListener('pointerup', onUp);
-      canvas.removeEventListener('dblclick', onDoubleClick);
-      canvas.removeEventListener('keydown', onKey);
+      canvas.removeEventListener('pointerdown', onDownGated);
+      canvas.removeEventListener('pointermove', onMoveGated);
+      canvas.removeEventListener('pointerup', onUpGated);
+      canvas.removeEventListener('dblclick', onDoubleClickGated);
+      canvas.removeEventListener('keydown', onKeyGated);
       observer.disconnect();
       unsubscribe();
       sound.dispose();
@@ -611,7 +627,7 @@ export function BuilderCanvas({
     <>
       {/* Focusable so it can receive keys without a window-level listener. */}
       <canvas ref={canvasRef} tabIndex={0} aria-label="Building canvas" />
-      {(selectedCount > 0 || isHolding) && (
+      {!suspended && (selectedCount > 0 || isHolding) && (
         // Nothing else names these keys — there's no toolbar button or drag gesture
         // for any of them, so the legend appears the moment they start doing
         // something, and it's the same legend whether the piece is selected or still
