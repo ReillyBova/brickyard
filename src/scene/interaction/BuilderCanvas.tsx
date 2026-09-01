@@ -172,10 +172,12 @@ export function BuilderCanvas({
     // undo/redo or a keyboard nudge is exactly as reachable for the next ghost as one
     // that arrived by a fresh placement).
     const sceneSync: SceneSync = {
-      addBrick: async (brick: BrickInstance) => {
+      addBrick: async (brick: BrickInstance, options) => {
         const part = session.partFor(brick.partId);
         if (part) placement.add({ id: brick.id, partId: brick.partId, colorCode: brick.colorCode, transform: brick.transform, part });
-        await renderer.addBrick(brick);
+        // Forwarded verbatim: `EditorSession` decides whether this add is part of a
+        // model load (animate) or ordinary editing (instant) — see `AddBrickOptions`.
+        await renderer.addBrick(brick, options);
       },
       removeBrick: (id) => {
         placement.remove(id);
