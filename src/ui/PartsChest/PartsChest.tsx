@@ -45,6 +45,15 @@ const CATEGORY_ORDER = [
   'Minifigure',
 ];
 
+/** Rank for `CATEGORY_ORDER`; anything unlisted sorts alphabetically after it. */
+const CATEGORY_RANK = new Map(CATEGORY_ORDER.map((name, i) => [name, i]));
+
+function byCategoryOrder(a: string, b: string): number {
+  const ra = CATEGORY_RANK.get(a) ?? Number.MAX_SAFE_INTEGER;
+  const rb = CATEGORY_RANK.get(b) ?? Number.MAX_SAFE_INTEGER;
+  return ra === rb ? a.localeCompare(b) : ra - rb;
+}
+
 interface Group {
   category: string;
   parts: ChestPart[];
@@ -57,7 +66,11 @@ function groupByCategory(parts: readonly ChestPart[]): Group[] {
     if (bucket === undefined) byCategory.set(part.category, [part]);
     else bucket.push(part);
   }
-  return Array.from(byCategory, ([category, group]) => ({ category, parts: group }));
+  // Sorted, not insertion-ordered: the Map follows catalog order, which is not the
+  // order a builder wants to read. Same ranking the filter list uses.
+  return Array.from(byCategory, ([category, group]) => ({ category, parts: group })).sort((a, b) =>
+    byCategoryOrder(a.category, b.category),
+  );
 }
 
 /**
@@ -82,12 +95,7 @@ export function PartsChest({
     // Ordered by how often a builder reaches for them, not alphabetically — bricks and
     // plates are most of any model, minifigure and decorative parts are the long tail.
     // Anything not listed sorts alphabetically after these.
-    const rank = new Map(CATEGORY_ORDER.map((name, i) => [name, i]));
-    return Array.from(present).sort((a, b) => {
-      const ra = rank.get(a) ?? Number.MAX_SAFE_INTEGER;
-      const rb = rank.get(b) ?? Number.MAX_SAFE_INTEGER;
-      return ra === rb ? a.localeCompare(b) : ra - rb;
-    });
+    return Array.from(present).sort(byCategoryOrder);
   }, [parts]);
 
   const filtered = useMemo(() => {
