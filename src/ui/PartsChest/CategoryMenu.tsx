@@ -112,12 +112,22 @@ export function CategoryMenu({ categories, value, onChange, allLabel }: Category
     // panel__body` included) — scroll doesn't bubble, but it does propagate on capture.
     // A resize re-measures and re-flips instead of closing — the trigger itself may have
     // moved (a reflow), so the fix is the same placement pass, not a dismissal.
-    document.addEventListener('scroll', close, true);
+    // Capture sees scroll from any scrollable ancestor of the trigger, which should
+    // close this — the anchor moved. It equally sees this panel's own body, and with 15
+    // categories the list overflows: closing there made it unscrollable, since the first
+    // wheel tick closed it before scrollTop moved. Same fix as FilterMenu and
+    // ColorTargetPicker.
+    function onScroll(event: Event) {
+      const node = event.target as Node;
+      if (panelRef.current?.contains(node)) return;
+      close();
+    }
+    document.addEventListener('scroll', onScroll, true);
     document.addEventListener('pointerdown', onPointerDown);
     document.addEventListener('keydown', onKeyDown);
     window.addEventListener('resize', reposition);
     return () => {
-      document.removeEventListener('scroll', close, true);
+      document.removeEventListener('scroll', onScroll, true);
       document.removeEventListener('pointerdown', onPointerDown);
       document.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('resize', reposition);
