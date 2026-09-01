@@ -38,7 +38,11 @@ h1, h2, h3, h4 {
 }
 p { margin: 0 0 var(--by-space-3); line-height: var(--by-leading-body); }
 a { color: var(--by-accent-text); text-underline-offset: 3px; }
-a:hover { color: var(--by-accent-hover); }
+/* A .by-btn rendered as a link keeps its own variant color. Without the exclusion this
+   generic rule outranks .by-btn--primary (0,1,1 beats 0,1,0), and in dark mode
+   --by-accent-hover is the same ramp step as the primary button's hover fill — so the
+   label turned peach on peach and vanished. */
+a:hover:not(.by-btn) { color: var(--by-accent-hover); }
 
 :focus { outline: none; }
 :focus-visible { outline: var(--by-focus-ring); outline-offset: var(--by-focus-offset); }
@@ -85,8 +89,8 @@ a:hover { color: var(--by-accent-hover); }
 .by-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .by-btn--primary { background: var(--by-accent-solid); color: var(--by-text-on-accent); }
-.by-btn--primary:hover:not(:disabled) { background: var(--by-accent-solid-hover); }
-.by-btn--primary:active:not(:disabled) { background: var(--by-accent-solid-press); }
+.by-btn--primary:hover:not(:disabled) { background: var(--by-accent-solid-hover); color: var(--by-text-on-accent); }
+.by-btn--primary:active:not(:disabled) { background: var(--by-accent-solid-press); color: var(--by-text-on-accent); }
 
 .by-btn--secondary { border-color: var(--by-line); }
 .by-btn--secondary:hover:not(:disabled) { background: var(--by-hover-wash); border-color: var(--by-line-strong); }
