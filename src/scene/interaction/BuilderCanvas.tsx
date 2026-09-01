@@ -34,6 +34,7 @@ import type { SelectionEntry } from '../selectionOverlay.ts';
 import { SnapSound } from './click.ts';
 import { EditorSession, type SceneSync } from './editor.ts';
 import { PlacementController, createPartCatalog } from './placement.ts';
+import { makeRaceSafeSceneSync } from './raceSafeSceneSync.ts';
 
 /** Ground-plane and vertical lattice, per CLAUDE.md. */
 const STEP_XZ = 20;
@@ -212,6 +213,17 @@ export function BuilderCanvas({
     const sound = new SnapSound();
     const catalog = createPartCatalog();
 
+    // `renderer.addBrick` is async (it awaits geometry resolution) but
+    // `EditorSession.reconcile` fires it without awaiting — so a brick removed (delete,
+    // or an undo) before its add lands would otherwise leave an orphaned instance in the
+    // renderer forever, since `removeBrick` is a synchronous "remove if present" no-op
+    // for a brick the renderer hasn't tracked yet. See `raceSafeSceneSync.ts`.
+    const rendererSync: SceneSync = makeRaceSafeSceneSync({
+      addBrick: (brick) => renderer.addBrick(brick),
+      removeBrick: (id) => renderer.removeBrick(id),
+      setBrickTransform: (id, transform) => renderer.setBrickTransform(id, transform),
+    });
+
     // The bridge between the one writer and everything that renders it: the visible
     // scene, and the placement lookahead's own index (so a brick that arrives via
     // undo/redo or a keyboard nudge is exactly as reachable for the next ghost as one
@@ -222,15 +234,17 @@ export function BuilderCanvas({
         if (part) placement.add({ id: brick.id, partId: brick.partId, colorCode: brick.colorCode, transform: brick.transform, part });
         // Forwarded verbatim: `EditorSession` decides whether this add is part of a
         // model load (animate) or ordinary editing (instant) — see `AddBrickOptions`.
-        await renderer.addBrick(brick, options);
+        // Routed through the race-safe wrapper so a remove landing mid-fetch cannot
+        // leave an orphan instance behind.
+        await rendererSync.addBrick(brick, options);
       },
       removeBrick: (id) => {
         placement.remove(id);
-        renderer.removeBrick(id);
+        rendererSync.removeBrick(id);
       },
       setBrickTransform: (id, transform) => {
         placement.updateTransform(id, transform);
-        renderer.setBrickTransform(id, transform);
+        rendererSync.setBrickTransform(id, transform);
       },
     };
 
