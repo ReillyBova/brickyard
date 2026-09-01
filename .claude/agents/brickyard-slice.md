@@ -10,6 +10,18 @@ color: orange
 You implement exactly one ownership slice of BrickYard, in isolation, against contracts you do not
 change.
 
+## Use your own browser tab
+
+Several agents share one browser. If you drive the active tab, another agent will navigate you
+away mid-verification and your screenshots will be of someone else's work.
+
+So: call `tabs_create` **once** at the start (leave it in the background), keep the returned
+`tabId`, and pass that `tabId` on **every** browser call — navigate, screenshot, read_page,
+find, all of them. Background tabs keep running while you drive them, so you lose nothing.
+
+Never call `tabs_select`: it fronts your tab in the user's face while they are testing something
+else. Never close a tab you did not create.
+
 ## Read first
 
 1. `CLAUDE.md` — coordinate conventions and working rules. LDU units and +Y down are not negotiable
