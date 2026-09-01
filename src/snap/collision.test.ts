@@ -465,7 +465,7 @@ describe('isExemptOverlap', () => {
 
   it('does not excuse two compatible, co-directional connectors that are not the same joint', async () => {
     // The reviewed hole: a compatible, co-directional, but unrelated connector pair
-    // pulled 8 LDU apart — far outside MATE_TOLERANCE (0.35 LDU) — was being waved
+    // pulled 8 LDU apart — far outside MATE_TOLERANCE — was being waved
     // through because nothing checked the two connectors' own centers coincided.
     //
     // A single-match `connectorAt` made this test pass for the wrong reason: querying

@@ -18,11 +18,23 @@ import { keysCompatible, polarityOf, unpackKey } from './compat.ts';
 import type { ConnectionPoint, Mate, MateGroup, PartDef, SpatialIndex } from './types.ts';
 
 /**
- * How close two connection points must be to count as mated, in LDU. Generous enough to
- * absorb float drift down a deep reference chain, far tighter than the 20 LDU stud pitch
- * so neighbouring studs can never be confused.
+ * How close two connection points must be to count as mated, in LDU. Far tighter than
+ * the 20 LDU stud pitch so neighbouring studs can never be confused, but generous enough
+ * to absorb the real precision loss down a deep, angled reference chain — not just
+ * float drift from our own arithmetic, but the coordinates published models actually
+ * ship with.
+ *
+ * Measured directly: minifig limb joints sit at 45 degrees (arms, hips), and every
+ * shipped `.mpd` writes their transforms to six decimal places. That truncation, carried
+ * through a rotated multi-level reference chain, lands a limb's connector consistently
+ * about 0.496 LDU from its true position — confirmed by comparing the arm-to-hand wrist
+ * joint's *axis* (correct to 15 significant digits on both sides, proving the maths
+ * itself is exact) against its *position* (off by exactly the amount the source file's
+ * truncated coordinates predict). 0.35 rejected every minifig arm and hand in the
+ * bundled models for this reason alone; 0.6 clears the measured case with real headroom
+ * while staying two orders of magnitude under the stud pitch.
  */
-export const MATE_TOLERANCE = 0.35;
+export const MATE_TOLERANCE = 0.6;
 
 /**
  * How far a slide connector's centred point may sit from a mate's, measured *along*
