@@ -30,9 +30,9 @@
  *   const appModeSwitch: ToolbarModeSwitch = {
  *     id: 'app-mode',
  *     options: [
- *       { id: 'editor', label: 'Editor' },
- *       { id: 'graph', label: 'Graph' },
- *       { id: 'render', label: 'Render' },
+ *       { id: 'editor', label: 'Editor', icon: <EditorIcon /> },
+ *       { id: 'graph', label: 'Graph', icon: <GraphModeIcon /> },
+ *       { id: 'render', label: 'Render', icon: <ApertureIcon /> },
  *     ],
  *     value: mode,                       // 'editor' | 'graph' | 'render'
  *     onChange: setMode,
@@ -41,6 +41,8 @@
  * Hand either shape to `<Toolbar items={[...]} />` (see `Toolbar.tsx`) wrapped as a
  * `ToolbarItem`. The toolbar owns layout, spacing, tooltip behaviour, and disabled/active
  * styling; a contributing slice owns only the meaning of its own actions or modes.
+ * `ToolbarModeSwitchView` (used internally by `Toolbar`) renders the switch icon-only —
+ * see `ToolbarModeOption.label`'s own doc for why.
  *
  * Rules for a conforming action (per docs/DESIGN.md):
  * - `label` is the *undo-label vocabulary* where one applies — "Rotate assembly", not
@@ -89,9 +91,14 @@ export interface ToolbarGroup {
 export interface ToolbarModeOption {
   /** Stable, unique within the switch. Also the value passed to `onChange`. */
   id: string;
-  /** Visible text — `.by-seg__opt` shows a label, not just an icon. */
+  /**
+   * Accessible name and tooltip text. `ToolbarModeSwitchView` renders `.by-seg__opt`
+   * icon-only — three options plus the wordmark and theme toggle otherwise crowd the
+   * bar at narrow widths — so this never appears as visible text, only as the button's
+   * `aria-label` and its hover/focus tooltip. Always supply `icon` too: with neither a
+   * visible label nor an icon the option renders blank.
+   */
   label: string;
-  /** Optional — `.by-seg__opt` can carry a small leading icon alongside its label. */
   icon?: ReactNode;
 }
 
