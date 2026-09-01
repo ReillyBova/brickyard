@@ -108,6 +108,16 @@ export function Undo2Icon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+/** Toolbar: undo. */
+export function UndoIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon data-lucide="undo-2" {...props}>
+      <path d="M9 14 4 9l5-5" />
+      <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5 5.5 5.5 0 0 1-5.5 5.5H11" />
+    </Icon>
+  );
+}
+
 /** Redoes a restyle after an undo. */
 export function Redo2Icon(props: SVGProps<SVGSVGElement>) {
   return (
@@ -118,12 +128,92 @@ export function Redo2Icon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+/** Toolbar: redo. */
+export function RedoIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon data-lucide="redo-2" {...props}>
+      <path d="m15 14 5-5-5-5" />
+      <path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5 5.5 5.5 0 0 0 9.5 20H13" />
+    </Icon>
+  );
+}
+
 /** Closes a popover or panel. */
 export function XIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <Icon data-lucide="x" {...props}>
       <path d="M18 6 6 18" />
       <path d="m6 6 12 12" />
+    </Icon>
+  );
+}
+
+/**
+ * Toolbar: group and ungroup both. `design-language.html`'s reference render reuses
+ * this same glyph for its "Ungroup" example rather than introducing a second one —
+ * followed here for consistency; the two actions are told apart by label and state,
+ * not by icon.
+ */
+export function GroupIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon data-lucide="group" {...props}>
+      <path d="M3 7V5a2 2 0 0 1 2-2h2" />
+      <path d="M17 3h2a2 2 0 0 1 2 2v2" />
+      <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
+      <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
+      <rect width="7" height="5" x="7" y="7" rx="1" />
+      <rect width="7" height="5" x="10" y="12" rx="1" />
+    </Icon>
+  );
+}
+
+/**
+ * Toolbar mode switch: editor. A stack of distinct blocks reads as direct manipulation
+ * of pieces — the thing every other mode is a view *onto*.
+ */
+export function EditorIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon data-lucide="blocks" {...props}>
+      <path d="M10 22V7a1 1 0 0 0-1-1H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5a1 1 0 0 0-1-1H2" />
+      <rect x="14" y="2" width="8" height="8" rx="1" />
+    </Icon>
+  );
+}
+
+/**
+ * Toolbar mode switch: graph. Same glyph as `src/features/graph/icons.tsx`'s
+ * `GraphIcon` (its own doc comment: "three connected nodes reads literally as 'the
+ * connection graph'") — lifted rather than re-derived so the mode option and that
+ * feature's own entry point read as the same idea.
+ */
+export function GraphModeIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon data-lucide="share-2" {...props}>
+      <circle cx="18" cy="5" r="3" />
+      <circle cx="6" cy="12" r="3" />
+      <circle cx="18" cy="19" r="3" />
+      <line x1="8.59" x2="15.42" y1="13.51" y2="17.49" />
+      <line x1="15.41" x2="8.59" y1="6.51" y2="10.49" />
+    </Icon>
+  );
+}
+
+/**
+ * Toolbar mode switch: render. `src/features/pathtrace/PathtraceToggle.tsx` already
+ * inlines this exact glyph for the same action — lifted from there rather than
+ * re-derived, per the coordinator's direction, so the control the user has already seen
+ * is the one they click here too.
+ */
+export function ApertureIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon data-lucide="aperture" {...props}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="m14.31 8 5.74 9.94" />
+      <path d="M9.69 8h11.48" />
+      <path d="m7.38 12 5.74-9.94" />
+      <path d="M9.69 16 3.95 6.06" />
+      <path d="M14.31 16H2.83" />
+      <path d="m16.62 12-5.74 9.94" />
     </Icon>
   );
 }

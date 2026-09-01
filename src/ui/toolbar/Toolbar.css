@@ -1,0 +1,51 @@
+/*
+ * Layout glue for the toolbar only — the pressable surfaces themselves are
+ * `.by-tool-group` / `.by-icon-btn` / `.by-tooltip` from components.css. Every value
+ * here is a token; nothing here restyles a shared class.
+ */
+
+/*
+ * `flex: 1` so this fills the space between the theme toggle and the narrow-width
+ * panel switch in `.by-shell__bar` — that's what makes `.by-toolbar__mode`'s own
+ * `margin-left: auto` below land the mode switch at the bar's right corner rather than
+ * snug against the icon groups. `min-width: 0` lets it shrink below its content's
+ * natural width instead of forcing the bar to overflow at narrow widths.
+ */
+.by-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--by-space-2);
+  flex: 1;
+  min-width: 0;
+}
+
+/* The app's one mode switch rides the far right of the bar, distinct from the
+   command groups — see the placement note in `Toolbar.tsx`. */
+.by-toolbar__mode {
+  margin-left: auto;
+}
+
+/* Positions the hover tooltip under its button without affecting toolbar layout. */
+.by-toolbar__item {
+  position: relative;
+  display: inline-flex;
+}
+
+.by-toolbar__tip {
+  position: absolute;
+  top: calc(100% + var(--by-space-2));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--by-z-popover);
+  pointer-events: none;
+  animation: by-toolbar-tip-in var(--by-dur-fast) var(--by-ease-out);
+}
+
+@keyframes by-toolbar-tip-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .by-toolbar__tip { animation: none; }
+}

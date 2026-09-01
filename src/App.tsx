@@ -9,17 +9,20 @@ import { RouteProvider } from './routes/router';
 import type { DocumentSeed } from './scene/interaction/BuilderCanvas.tsx';
 import { BuilderCanvas } from './scene/interaction/BuilderCanvas.tsx';
 import type { EditorSession } from './scene/interaction/editor.ts';
+import { useEditorSessionOrNull } from './scene/interaction/session-context.ts';
 import { EditorSessionProvider } from './scene/interaction/sessionContext.tsx';
 import { RuntimeThumbnailRenderer } from './scene/thumbnail.ts';
 import { AppShell } from './ui/AppShell/AppShell';
 import { ColorPicker } from './ui/ColorPicker/ColorPicker';
 import { LDRAW_PALETTE } from './ui/ColorPicker/palette';
+import { ApertureIcon, EditorIcon, GraphModeIcon } from './ui/icons';
 import { PartsChest } from './ui/PartsChest/PartsChest';
 import { PART_CATALOG } from './ui/PartsChest/catalog';
 // GRAPH FEATURE MOUNT POINT — src/features/graph/ owns everything the entry control
 // opens. A toolbar with a reserved slot for this button is being built in parallel;
 // this floating control is the placeholder until the two are wired together at merge.
 import { GraphEntry } from './features/graph';
+import { Toolbar, useGrouping, useUndoRedo } from './ui/toolbar';
 
 /** LDraw 4 — classic brick red — so the chest always has a real active color to preview. */
 const DEFAULT_COLOR_CODE = 4;
@@ -77,6 +80,53 @@ function useModelLoad(
 }
 
 /**
+ * The top toolbar, split out so it can call `useEditorSessionOrNull` — it has to render
+ * as a child of `EditorSessionProvider` to see the session at all, and `SandboxEditor`
+ * itself renders before that provider has one (the canvas reports it asynchronously via
+ * `onSessionReady`). `useUndoRedo`/`useGrouping` both accept `null` and degrade to
+ * disabled actions for exactly that first frame.
+ */
+function BuilderToolbar() {
+  const session = useEditorSessionOrNull();
+  const [, forceRender] = useState(0);
+  useEffect(() => {
+    if (!session) return;
+    return session.subscribe(() => forceRender((n) => n + 1));
+  }, [session]);
+
+  const [undoAction, redoAction] = useUndoRedo(session);
+  const [groupAction, ungroupAction] = useGrouping(session);
+
+  // The app's one persistent mode — editor, graph, or render — per the architecture
+  // note this toolbar's contract was built against. Only "editor" actually renders
+  // anything today; graph and render are the other two slices' routes, not this one's,
+  // so switching here doesn't yet change the view.
+  const [mode, setMode] = useState<'editor' | 'graph' | 'render'>('editor');
+
+  return (
+    <Toolbar
+      items={[
+        { kind: 'group', group: { id: 'history', actions: [undoAction, redoAction] } },
+        { kind: 'group', group: { id: 'grouping', actions: [groupAction, ungroupAction] } },
+        {
+          kind: 'modeSwitch',
+          modeSwitch: {
+            id: 'app-mode',
+            options: [
+              { id: 'editor', label: 'Editor', icon: <EditorIcon /> },
+              { id: 'graph', label: 'Graph', icon: <GraphModeIcon /> },
+              { id: 'render', label: 'Render', icon: <ApertureIcon /> },
+            ],
+            value: mode,
+            onChange: (id) => setMode(id as typeof mode),
+          },
+        },
+      ]}
+    />
+  );
+}
+
+/**
  * The `/sandbox` route. Owns the only state in the UI slice — which part and color are
  * selected — as plain `useState`; the document store connects here once it exists.
  * Everything below is built and verified against mock data, per docs/AGENTS.md: this
@@ -109,55 +159,59 @@ function SandboxEditor({
 
   return (
     <EditorSessionProvider session={session}>
-    <AppShell
-      viewport={
-        <>
-          <BuilderCanvas
-            heldPartId={selectedPartId}
-            heldColorCode={selectedColorCode}
-            onHeldConsumed={() => setSelectedPartId(undefined)}
-            seed={seed}
-            onSeedConsumed={() => {
-              clearSeed();
-              onModelConsumed();
-            }}
-            onSessionReady={setSession}
+      <AppShell
+        viewport={
+          <>
+            <BuilderCanvas
+              heldPartId={selectedPartId}
+              heldColorCode={selectedColorCode}
+              onHeldConsumed={() => setSelectedPartId(undefined)}
+              seed={seed}
+              onSeedConsumed={() => {
+                clearSeed();
+                onModelConsumed();
+              }}
+              onSessionReady={setSession}
+            />
+            {loadState && (
+              <div className="by-model-load-overlay">
+                {'error' in loadState ? (
+                  <p className="by-mono by-faint">Failed to load model: {loadState.error}</p>
+                ) : (
+                  <>
+                    <div
+                      className="by-progress"
+                      role="progressbar"
+                      aria-valuenow={Math.round(loadState.progress * 100)}
+                    >
+                      <div
+                        className="by-progress__fill"
+                        style={{ width: `${Math.round(loadState.progress * 100)}%` }}
+                      />
+                    </div>
+                    <p className="by-mono by-faint">
+                      {Math.round(loadState.progress * 100)}% · {loadState.phase}
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
+          </>
+        }
+        toolbar={<BuilderToolbar />}
+        chestPanel={
+          <PartsChest
+            parts={PART_CATALOG}
+            selectedId={selectedPartId}
+            onSelect={setSelectedPartId}
+            activeColorHex={activeColor.hex}
+            thumbnailSource={thumbnailSource}
           />
-          {loadState && (
-            <div className="by-model-load-overlay">
-              {'error' in loadState ? (
-                <p className="by-mono by-faint">Failed to load model: {loadState.error}</p>
-              ) : (
-                <>
-                  <div
-                    className="by-progress"
-                    role="progressbar"
-                    aria-valuenow={Math.round(loadState.progress * 100)}
-                  >
-                    <div className="by-progress__fill" style={{ width: `${Math.round(loadState.progress * 100)}%` }} />
-                  </div>
-                  <p className="by-mono by-faint">
-                    {Math.round(loadState.progress * 100)}% · {loadState.phase}
-                  </p>
-                </>
-              )}
-            </div>
-          )}
-        </>
-      }
-      chestPanel={
-        <PartsChest
-          parts={PART_CATALOG}
-          selectedId={selectedPartId}
-          onSelect={setSelectedPartId}
-          activeColorHex={activeColor.hex}
-          thumbnailSource={thumbnailSource}
-        />
-      }
-      colorPanel={
-        <ColorPicker colors={LDRAW_PALETTE} selectedCode={selectedColorCode} onSelect={setSelectedColorCode} />
-      }
-    />
+        }
+        colorPanel={
+          <ColorPicker colors={LDRAW_PALETTE} selectedCode={selectedColorCode} onSelect={setSelectedColorCode} />
+        }
+      />
     </EditorSessionProvider>
   );
 }
@@ -178,9 +232,7 @@ function App() {
   return (
     <RouteProvider>
       <AppRouter
-        sandbox={
-          <SandboxEditor pendingModel={pendingModel} onModelConsumed={() => setPendingModel(undefined)} />
-        }
+        sandbox={<SandboxEditor pendingModel={pendingModel} onModelConsumed={() => setPendingModel(undefined)} />}
         onOpenModel={setPendingModel}
       />
       {/* GRAPH FEATURE MOUNT POINT — see src/features/graph/. Floats over every route

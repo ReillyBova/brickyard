@@ -8,6 +8,13 @@ interface AppShellProps {
   chestPanel: ReactNode;
   colorPanel: ReactNode;
   /**
+   * The edit-action toolbar (undo/redo, grouping, and whatever else lands in
+   * `src/ui/toolbar/`), rendered inside the top bar between the theme toggle and the
+   * narrow-width panel switch. Passed in as a node for the same reason `viewport` is:
+   * this slice owns the bar's chrome, not what a feature puts inside it.
+   */
+  toolbar?: ReactNode;
+  /**
    * Fills the viewport. Passed in as a node so this slice never imports from
    * `src/scene/` — the composition root decides what renders there. Omitted, the
    * empty state shows instead.
@@ -28,7 +35,7 @@ interface AppShellProps {
  * At narrow widths both panels collapse into on-demand overlays opened from a compact
  * bar, so the viewport always keeps the full window.
  */
-export function AppShell({ chestPanel, colorPanel, viewport }: AppShellProps) {
+export function AppShell({ chestPanel, colorPanel, toolbar, viewport }: AppShellProps) {
   const [openRail, setOpenRail] = useState<'chest' | 'color' | null>(null);
   const [theme, toggleTheme] = useTheme();
 
@@ -53,6 +60,7 @@ export function AppShell({ chestPanel, colorPanel, viewport }: AppShellProps) {
           >
             {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
           </button>
+          {toolbar}
           <div className="by-seg by-shell__panels" role="group" aria-label="Panels">
             <button
               type="button"
