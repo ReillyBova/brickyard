@@ -1,0 +1,143 @@
+/* The `/restyle` route: a model picker (mirrors the shape of `by-model-picker` in
+   `src/routes/ModelPicker.css`, but this feature owns its own classes rather than
+   depending on another slice's CSS) and a full-bleed viewer with the restyle panel
+   floating over it, per docs/DESIGN.md ("panels are rafts over the viewport"). */
+
+.by-restyle-picker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100%;
+  padding: var(--by-space-8) var(--by-space-4);
+  background: var(--by-chrome);
+  gap: var(--by-space-6);
+}
+
+.by-restyle-picker__header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--by-space-2);
+  max-width: 56ch;
+  text-align: center;
+  color: var(--by-accent);
+}
+.by-restyle-picker__header > svg { width: 28px; height: 28px; }
+
+.by-restyle-picker__heading {
+  font-family: var(--by-font-display);
+  font-weight: var(--by-font-display-weight);
+  font-size: var(--by-text-2xl);
+  letter-spacing: var(--by-tracking-display);
+  color: var(--by-text);
+  margin: 0;
+}
+
+.by-restyle-picker__subheading {
+  color: var(--by-text-muted);
+  font-size: var(--by-text-lg);
+  margin: 0;
+}
+
+.by-restyle-picker__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--by-space-3);
+  width: 100%;
+  max-width: 900px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.by-restyle-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--by-space-2);
+  width: 100%;
+  padding: var(--by-space-4);
+  border: 1px solid var(--by-line);
+  border-radius: var(--by-radius-lg);
+  background: var(--by-panel);
+  color: var(--by-text);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--by-dur-fast) var(--by-ease-out), border-color var(--by-dur-fast) var(--by-ease-out);
+}
+.by-restyle-card:hover { background: var(--by-hover-wash); border-color: var(--by-line-strong); }
+.by-restyle-card:active { background: var(--by-press-wash); }
+
+.by-restyle-card__name {
+  font-family: var(--by-font-display);
+  font-weight: var(--by-font-display-weight);
+  font-size: var(--by-text-lg);
+}
+
+.by-restyle-card__stats {
+  color: var(--by-text-muted);
+  font-size: var(--by-text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Studio ─────────────────────────────────────────────────────────────── */
+
+.by-restyle-studio {
+  position: absolute;
+  inset: 0;
+  background: var(--by-canvas);
+}
+
+.by-restyle-studio__canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.by-restyle-studio__overlay {
+  position: absolute;
+  inset: 0;
+  z-index: var(--by-z-canvas-overlay);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--by-space-3);
+  padding: var(--by-space-4);
+  background: color-mix(in srgb, var(--by-canvas) 70%, transparent);
+  pointer-events: none;
+}
+.by-restyle-studio__overlay .by-progress { width: min(320px, 80%); }
+.by-restyle-studio__overlay-text {
+  color: var(--by-text);
+  font-size: var(--by-text-sm);
+  font-variant-numeric: tabular-nums;
+  margin: 0;
+}
+
+.by-restyle-studio__toolbar {
+  position: absolute;
+  top: var(--by-space-3);
+  left: var(--by-space-3);
+  z-index: var(--by-z-chrome);
+  display: flex;
+  align-items: center;
+  gap: var(--by-space-2);
+}
+
+.by-restyle-studio__panel {
+  position: absolute;
+  top: var(--by-space-3);
+  right: var(--by-space-3);
+  bottom: var(--by-space-3);
+  z-index: var(--by-z-chrome);
+  width: min(360px, calc(100vw - var(--by-space-6)));
+}
+
+.by-restyle-studio__status {
+  position: absolute;
+  left: var(--by-space-3);
+  bottom: var(--by-space-3);
+  z-index: var(--by-z-chrome);
+  width: max-content;
+}
