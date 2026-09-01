@@ -202,8 +202,13 @@ export async function partTriangles(
     files: new Map(),
     maxDepth: options.maxDepth ?? DEFAULT_MAX_DEPTH,
   };
-  const rel = /\.(dat|ldr)$/i.test(partId) ? normalise(partId) : `parts/${normalise(partId)}.dat`;
-  const entry = (await resolveReference(ctx, rel)) ?? rel;
+  // Unprefixed on purpose, so `referenceCandidates` runs LDraw's real search order over
+  // it: `parts/`, then `p/`, then `models/`. Naming `parts/` here instead would make that
+  // function return early with a single candidate, and a model that places a primitive
+  // directly — `8\1-4ndis.dat` appears in several bundled models — would resolve to
+  // nothing at all: no triangles, no bounds, an invisible brick.
+  const rel = /\.(dat|ldr)$/i.test(partId) ? normalise(partId) : `${normalise(partId)}.dat`;
+  const entry = (await resolveReference(ctx, rel)) ?? `parts/${rel}`;
   const out: Triangle[] = [];
   await walk(ctx, entry, IDENTITY, 0, new Set(), out);
   return out;

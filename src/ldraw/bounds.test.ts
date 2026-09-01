@@ -54,3 +54,26 @@ describe('partTriangles + boundsFromTriangles, real fixture geometry', () => {
     expect(triangles.length).toBeGreaterThan(50);
   });
 });
+
+describe('a part id that names a primitive', () => {
+  /**
+   * Models are allowed to place a primitive directly, and several bundled ones do —
+   * `8\1-4ndis.dat` appears in the Vespa, the Titanic and the Bugatti. Resolving the root
+   * id under `parts/` alone returns nothing for those, and nothing is indistinguishable
+   * from a part with no geometry: the brick loads invisible, bounds collapse to a point,
+   * and it connects to nothing. So the root has to walk LDraw's whole search order.
+   */
+  it('resolves under p/ and yields real geometry', async () => {
+    const triangles = await partTriangles('1-4ndis', fixtureReader);
+    expect(triangles.length).toBeGreaterThan(0);
+
+    const bounds = boundsFromTriangles(triangles);
+    expect(bounds.max[0]).toBeGreaterThan(bounds.min[0]);
+  });
+
+  it('still prefers parts/ for an id that exists in both', async () => {
+    // 3001 is a part; nothing under p/ should shadow it.
+    const triangles = await partTriangles('3001', fixtureReader);
+    expect(triangles.length).toBe(700);
+  });
+});
