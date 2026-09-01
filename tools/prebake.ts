@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url'
 import { Worker } from 'node:worker_threads'
 
 import type { BakeResult } from './bakeWorker.ts'
-import { bakeChestGeometry } from './bakeGeometry.ts'
+import { bakeChestGeometry, bakePartGeometry } from './bakeGeometry.ts'
 
 import { boundsFromTriangles, partTriangles } from '../src/ldraw/bounds.ts'
 import { GEOMETRY_FORMAT_VERSION, GEOMETRY_SEMANTICS_VERSION } from '../src/ldraw/geometryBaked.ts'
@@ -377,11 +377,130 @@ interface BakeOptions {
   out: string
   chest: readonly string[]
   pretty: boolean
+  /** Bundled models, whose parts define the hosted tier's set. */
+  models: string
+  /**
+   * Size ceiling for the hosted tier, in MB. These bytes are committed and shipped, so
+   * the tier is capped rather than allowed to track the corpus: see `docs/PREBAKE.md` for
+   * the measurements behind the default.
+   */
+  hostedBudgetMb: number
   /** Caps the corpus, for a fast bake while working on the pipeline itself. */
   limit?: number
   /** Worker threads to resolve on. 1 runs in-process, which is the readable path to debug. */
   jobs?: number
   help?: boolean
+}
+
+/**
+ * The hosted tier's part set: every part the bundled models actually use, minus the chest
+ * parts already bundled in `geometry.bin`.
+ *
+ * Scoped to the bundled models rather than the whole annotated corpus because the whole
+ * corpus measures 3,304 files and 224 MB — the flattened median is 33 KB per part against
+ * `docs/PREBAKE.md`'s pending ~17 KB estimate, so the doc's own fallback applies and the
+ * set narrows. Narrowing to what ships buys a property worth having: opening any bundled
+ * model needs nothing from upstream. Anything outside still resolves over the network,
+ * which is the fetched tier working as designed.
+ *
+ * Read from the model manifests rather than a hand-kept list, so adding a model to
+ * `public/models/` widens the hosted set on the next bake instead of silently leaving that
+ * model's parts on the slow path.
+ */
+async function hostedParts(modelsDir: string, chest: readonly string[]): Promise<string[]> {
+  let names: string[]
+  try {
+    names = await fsp.readdir(modelsDir)
+  } catch {
+    return []
+  }
+  const bundled = new Set(chest)
+  const uses = new Map<string, number>()
+  for (const name of names.filter((n) => n.endsWith('.manifest.json'))) {
+    const text = await fsp.readFile(path.join(modelsDir, name), 'utf8')
+    const manifest = JSON.parse(text) as { partIds?: string[] }
+    for (const partId of manifest.partIds ?? []) {
+      if (!bundled.has(partId)) uses.set(partId, (uses.get(partId) ?? 0) + 1)
+    }
+  }
+  // Most-used first, ties by id: the budget below cuts the tail, so the order decides what
+  // survives, and it has to be a pure function of the manifests for the bake to be one too.
+  return [...uses.keys()].sort((a, b) => (uses.get(b) ?? 0) - (uses.get(a) ?? 0) || a.localeCompare(b))
+}
+
+interface HostedResult {
+  written: number
+  failures: string[]
+  /** Parts left out because the budget ran out, not because they failed. */
+  skipped: number
+  bytes: number
+  /** One hash over every hosted file, so the manifest can detect drift without 800 entries. */
+  digest: string
+  seconds: number
+}
+
+/**
+ * Writes one flattened geometry file per hosted part, as `geometry/<partId>.bin`.
+ *
+ * Each file is a complete `geometry.bin` payload holding a single part, so the reader that
+ * decodes the bundled file decodes these unchanged — one format, one code path, and a
+ * per-part file that can be validated on its own.
+ *
+ * Parts the mirror cannot supply are counted and skipped. A model referencing one still
+ * works: the runtime falls through to the network exactly as it does for any uncovered
+ * part.
+ */
+async function bakeHostedGeometry(
+  partIds: readonly string[],
+  outDir: string,
+  readLibrary: MirrorReader,
+  colorLibraryText: string,
+  budgetBytes: number,
+): Promise<HostedResult> {
+  const started = Date.now()
+  const directory = path.join(outDir, 'geometry')
+  // Cleared, not merged: a shrinking set would otherwise leave orphans that ship forever
+  // and never appear in the digest.
+  await fsp.rm(directory, { recursive: true, force: true })
+  await fsp.mkdir(directory, { recursive: true })
+
+  const failures: string[] = []
+  const perFile = createHash('sha256')
+  let written = 0
+  let bytes = 0
+
+  let skipped = 0
+  for (const [index, partId] of partIds.entries()) {
+    if (bytes >= budgetBytes) {
+      skipped = partIds.length - index
+      break
+    }
+    let packed: Buffer
+    try {
+      packed = Buffer.from(packGeometry([await bakePartGeometry(partId, readLibrary, colorLibraryText)]))
+    } catch {
+      failures.push(partId)
+      continue
+    }
+    await fsp.writeFile(path.join(directory, `${partId}.bin`), packed)
+    // Hashed in the caller's sorted order, so the digest is a pure function of the set.
+    perFile.update(partId)
+    perFile.update(createHash('sha256').update(packed).digest())
+    written++
+    bytes += packed.length
+    if ((index + 1) % 200 === 0) {
+      console.log(`  ${index + 1}/${partIds.length} hosted parts  ${((Date.now() - started) / 1000).toFixed(0)}s`)
+    }
+  }
+
+  return {
+    written,
+    failures,
+    skipped,
+    bytes,
+    digest: `sha256:${perFile.digest('hex')}`,
+    seconds: (Date.now() - started) / 1000,
+  }
 }
 
 async function bake(options: BakeOptions): Promise<void> {
@@ -453,6 +572,23 @@ async function bake(options: BakeOptions): Promise<void> {
   await writer.write('connections.bin', Buffer.from(packConnections(resolved.connections)))
   await writer.write('occupancy.bin', Buffer.from(packOccupancy(resolved.occupancy)))
   await writer.write('geometry.bin', Buffer.from(packGeometry(geometry)))
+
+  // The hosted tier: one file per part, fetched on demand from our own origin. Written
+  // outside `writer` because a per-file hash for each of hundreds of parts would bloat the
+  // manifest past usefulness; `hostedGeometryDigest` covers the whole set in one line.
+  const hostedSet = await hostedParts(options.models, options.chest)
+  console.log(
+    `Baking hosted geometry for up to ${hostedSet.length.toLocaleString()} parts used by bundled models, ` +
+      `budget ${options.hostedBudgetMb} MB`,
+  )
+  const hosted = await bakeHostedGeometry(
+    hostedSet,
+    options.out,
+    readLibrary,
+    colorLibraryText,
+    options.hostedBudgetMb * 1e6,
+  )
+
   await writer.write('LICENSE.txt', LICENSE_TEXT)
 
   /**
@@ -470,6 +606,8 @@ async function bake(options: BakeOptions): Promise<void> {
     geometryFormatVersion: GEOMETRY_FORMAT_VERSION,
     geometrySemanticsVersion: GEOMETRY_SEMANTICS_VERSION,
     fixtureDigest,
+    hostedGeometryParts: hosted.written,
+    hostedGeometryDigest: hosted.digest,
     outputs: writer.outputs,
   }
   await writer.writeJson('manifest.json', manifest)
@@ -486,10 +624,15 @@ async function bake(options: BakeOptions): Promise<void> {
   console.log(`catalog entries   ${catalog.length}`)
   console.log(`connections       ${resolved.connections.length.toLocaleString()} parts`)
   console.log(`occupancy         ${resolved.occupancy.length.toLocaleString()} parts`)
-  console.log(`geometry          ${geometry.length.toLocaleString()} parts`)
+  console.log(`geometry          ${geometry.length.toLocaleString()} parts (bundled)`)
+  console.log(
+    `hosted geometry   ${hosted.written.toLocaleString()} parts, ${(hosted.bytes / 1e6).toFixed(1)} MB, ` +
+      `${hosted.failures.length} unavailable, ${hosted.skipped} past budget`,
+  )
   console.log(`unreadable        ${resolved.failures.length.toLocaleString()} parts`)
   console.log(`resolve time      ${resolved.seconds.toFixed(0)}s`)
   console.log(`geometry time     ${geometrySeconds.toFixed(1)}s`)
+  console.log(`hosted time       ${hosted.seconds.toFixed(0)}s`)
   for (const { partId, seconds } of resolved.slow.slice(0, 10)) {
     console.log(`  slowest: ${partId.padEnd(16)} ${seconds.toFixed(1)}s`)
   }
@@ -499,6 +642,8 @@ const USAGE = `Usage: node tools/prebake.ts [options]
 
   --mirror <dir>  local mirror (default ${DEFAULT_MIRROR_ROOT})
   --out <dir>     output directory (default public/baked)
+  --models <dir>  bundled models whose parts define the hosted set (default public/models)
+  --hosted-budget-mb <n>  size ceiling for the hosted tier (default 40)
   --chest <ids>   comma-separated part ids to bake into the chest
   --limit <n>     cap the resolved corpus, for a fast bake while iterating
   --jobs <n>      worker threads (default: cores, capped at 12; 1 runs in-process)
@@ -512,6 +657,8 @@ function parseArgs(argv: string[]): BakeOptions {
   const options: BakeOptions = {
     mirror: DEFAULT_MIRROR_ROOT,
     out: 'public/baked',
+    models: 'public/models',
+    hostedBudgetMb: 40,
     chest: DEFAULT_CHEST,
     pretty: false,
   }
@@ -519,6 +666,8 @@ function parseArgs(argv: string[]): BakeOptions {
     const arg = argv[i]
     if (arg === '--mirror') options.mirror = argv[++i]
     else if (arg === '--out') options.out = argv[++i]
+    else if (arg === '--models') options.models = argv[++i]
+    else if (arg === '--hosted-budget-mb') options.hostedBudgetMb = Number(argv[++i])
     else if (arg === '--chest') options.chest = argv[++i].split(',').map((id) => id.trim())
     else if (arg === '--limit') options.limit = Number(argv[++i])
     else if (arg === '--jobs') options.jobs = Math.max(1, Number(argv[++i]))

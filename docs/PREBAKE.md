@@ -94,9 +94,19 @@ HTTP/2 connection, and cache independently, so the second model a user opens reu
 first one pulled. Geometry streams in and parts render as they arrive rather than blocking on the
 full set.
 
-Per-part size is estimated at ~17 KB pending the first full bake. If flattening proves materially
-larger, the hosted set narrows to the most-used parts rather than growing the deploy — deploy time is
-the binding constraint, since Pages times out at 10 minutes.
+Flattened parts measure larger than the ~17 KB the estimate assumed: median **33 KB**, p95 232 KB,
+and the whole covered corpus is 3,304 files totalling **224 MB**. Those bytes are committed and
+shipped, so the set narrows to the most-used parts, as planned for exactly this case.
+
+The hosted set is therefore the parts the bundled models use, ordered by how many models use them and
+cut at a **40 MB budget** (`--hosted-budget-mb`): 824 files covering 67% of all part instances across
+the bundled models. Spending the full 66.6 MB those models could use would buy 6 more points, which
+is not what that size is worth — and it would not buy self-contained models either, since 450 of the
+1,826 distinct parts they reference are not in the mirror at all and always fall through to upstream.
+
+The budget is a ceiling on shipped bytes, not a target. Raising it widens coverage along the usage
+curve; lowering it narrows from the tail, and nothing breaks either way, because a part with no
+hosted file simply resolves one tier down.
 
 GitHub Pages serves its own cache headers and we cannot override them, so a service worker handles
 long-lived caching of part geometry, which also makes previously-opened models work offline.

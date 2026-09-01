@@ -80,6 +80,17 @@ export interface BakedManifest {
    * the build instead of shipping.
    */
   fixtureDigest: string;
+  /**
+   * Parts written to the hosted tier — `baked/geometry/<partId>.bin`, one file each,
+   * fetched on demand. Scoped to what the bundled models use; see `docs/PREBAKE.md`.
+   */
+  hostedGeometryParts: number;
+  /**
+   * One sha256 over every hosted file, in part-id order. A per-file entry in `outputs`
+   * for each of hundreds of parts would bury the handful of entries a person reads, so
+   * the set is covered by a single hash instead.
+   */
+  hostedGeometryDigest: string;
   /** Content hash per output file, so a stale or partial bake is detectable. */
   outputs: Readonly<Record<string, string>>;
 }
