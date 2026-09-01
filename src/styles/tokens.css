@@ -96,6 +96,12 @@
   --by-accent:        var(--color-accent-500);
   --by-accent-hover:  var(--color-accent-600);
   --by-accent-press:  var(--color-accent-700);
+  /* Accent as a *filled surface with text on it*, which needs more contrast than the
+     same accent used as a line or focus ring. Light theme carries light text, so the
+     fill sits deeper in the ramp: 5.72:1 at rest, 8.72:1 hovered. */
+  --by-accent-solid:       var(--color-accent-700);
+  --by-accent-solid-hover: var(--color-accent-800);
+  --by-accent-solid-press: var(--color-accent-900);
   --by-accent-text:   var(--color-accent-700);   /* accent at paragraph size */
   --by-accent-wash:   color-mix(in srgb, var(--color-accent-500) 12%, transparent);
   --by-hover-wash:    color-mix(in srgb, var(--color-ink) 6%, transparent);
@@ -164,6 +170,10 @@
   --by-accent:        var(--color-accent-400);
   --by-accent-hover:  var(--color-accent-300);
   --by-accent-press:  var(--color-accent-200);
+  /* Dark theme puts dark text on a light accent, which already clears AA comfortably. */
+  --by-accent-solid:       var(--color-accent-400);
+  --by-accent-solid-hover: var(--color-accent-300);
+  --by-accent-solid-press: var(--color-accent-200);
   --by-accent-text:   var(--color-accent-300);
   --by-accent-wash:   color-mix(in srgb, var(--color-accent-400) 16%, transparent);
   --by-hover-wash:    color-mix(in srgb, var(--color-neutral-100) 8%, transparent);

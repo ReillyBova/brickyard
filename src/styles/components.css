@@ -84,9 +84,9 @@ a:hover { color: var(--by-accent-hover); }
 .by-btn > svg { display: block; flex: none; width: 16px; height: 16px; }
 .by-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
-.by-btn--primary { background: var(--by-accent); color: var(--by-text-on-accent); }
-.by-btn--primary:hover:not(:disabled) { background: var(--by-accent-hover); }
-.by-btn--primary:active:not(:disabled) { background: var(--by-accent-press); }
+.by-btn--primary { background: var(--by-accent-solid); color: var(--by-text-on-accent); }
+.by-btn--primary:hover:not(:disabled) { background: var(--by-accent-solid-hover); }
+.by-btn--primary:active:not(:disabled) { background: var(--by-accent-solid-press); }
 
 .by-btn--secondary { border-color: var(--by-line); }
 .by-btn--secondary:hover:not(:disabled) { background: var(--by-hover-wash); border-color: var(--by-line-strong); }
@@ -122,7 +122,7 @@ a:hover { color: var(--by-accent-hover); }
 .by-icon-btn > svg { width: 18px; height: 18px; display: block; }
 .by-icon-btn:hover:not(:disabled) { background: var(--by-hover-wash); color: var(--by-text); }
 .by-icon-btn:active:not(:disabled) { background: var(--by-press-wash); }
-.by-icon-btn.is-active { background: var(--by-accent); color: var(--by-text-on-accent); }
+.by-icon-btn.is-active { background: var(--by-accent-solid); color: var(--by-text-on-accent); }
 .by-icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
 /* Tool group — related tools ride in one pill-shaped raft, the way a toolbar
