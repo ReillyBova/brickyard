@@ -7,7 +7,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  min-height: 100%;
+  height: 100%;
+  overflow-y: auto;
   padding: var(--by-space-8) var(--by-space-4);
   background: var(--by-chrome);
   gap: var(--by-space-6);

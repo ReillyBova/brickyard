@@ -53,4 +53,32 @@ describe('flattenPathtraceInstances', () => {
     const instances = flattenPathtraceInstances([mesh]);
     expect(instances).toHaveLength(0);
   });
+
+  it('skips a batch caught mid-construction instead of throwing, with several models loaded', () => {
+    const manager = new InstancedBatchManager();
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    const material = new THREE.MeshBasicMaterial();
+
+    const readyBatch = manager.getOrCreate('3001', 4, geometry, material);
+    const id = mintBrickId();
+    manager.trackBrick(id, batchKey('3001', 4));
+    readyBatch.add(id, new THREE.Matrix4());
+
+    // A second model's batch whose geometry hasn't resolved a `position` attribute yet —
+    // e.g. still mid-load — plus an entry that is missing outright (disposed batch whose
+    // mesh reference never got cleaned up). Neither should crash the flatten.
+    const unreadyGeometry = new THREE.BufferGeometry();
+    const unreadyMesh = new THREE.InstancedMesh(unreadyGeometry, material, 1);
+    unreadyMesh.count = 1;
+    unreadyMesh.userData.colorCode = 1;
+
+    const instances = flattenPathtraceInstances([
+      ...manager.meshes,
+      unreadyMesh,
+      undefined as unknown as THREE.InstancedMesh,
+    ]);
+
+    expect(instances).toHaveLength(1);
+    expect(instances[0].colorCode).toBe(4);
+  });
 });
