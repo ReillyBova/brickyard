@@ -1,0 +1,37 @@
+/*
+ * Positioning only — the toggle button and stats readout are built from the shared
+ * component classes (`.by-icon-btn`, `.by-tool-group`) and tokens per docs/DESIGN.md. This
+ * is a standalone mount raft until the real toolbar's render-mode slot exists (see
+ * docs/ROADMAP.md, "Ray-traced render mode") — no color, size or duration here that isn't
+ * a token reference.
+ */
+
+.by-pathtrace-toggle {
+  position: absolute;
+  top: var(--by-space-4);
+  right: var(--by-space-4);
+  z-index: var(--by-z-canvas-overlay);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--by-space-2);
+  pointer-events: none;
+}
+
+.by-pathtrace-toggle .by-tool-group {
+  pointer-events: auto;
+  background: var(--by-panel);
+  box-shadow: var(--by-shadow-md);
+}
+
+.by-pathtrace-stats {
+  pointer-events: none;
+  padding: var(--by-space-1) var(--by-space-3);
+  border-radius: var(--by-radius-pill);
+  background: var(--by-panel);
+  box-shadow: var(--by-shadow-sm);
+  color: var(--by-text-muted);
+  font-family: var(--by-font-mono);
+  font-size: var(--by-text-sm);
+  white-space: nowrap;
+}
