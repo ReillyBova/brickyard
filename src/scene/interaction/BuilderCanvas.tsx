@@ -38,6 +38,16 @@ function ndc(canvas: HTMLCanvasElement, event: PointerEvent): [number, number] {
   return [((event.clientX - r.left) / r.width) * 2 - 1, -((event.clientY - r.top) / r.height) * 2 + 1];
 }
 
+/**
+ * Undo/redo, scoped to the canvas so the mouse hand's most common shortcut doesn't need
+ * window focus plumbing. `src/ui/toolbar/useUndoRedo.tsx` binds the same combination at
+ * `window` level for everywhere else (toolbar, chest, color panel) and explicitly skips
+ * when the keydown target is this `<canvas>` — so the split, not a single owner, is what
+ * keeps one keystroke from firing undo twice now that both bind the *same* session
+ * (via `onSessionReady`/`EditorSessionProvider`). Never stop this keydown event from
+ * bubbling: the toolbar's listener relies on it still reaching `window` to see the
+ * target and skip it — target-filtering, not propagation, is what dedupes here.
+ */
 const isUndo = (e: KeyboardEvent): boolean =>
   (e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'z';
 const isRedo = (e: KeyboardEvent): boolean =>

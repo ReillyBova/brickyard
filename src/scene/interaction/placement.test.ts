@@ -309,6 +309,20 @@ describe('keyboard', () => {
     expect(source).not.toMatch(/['"]Tab['"]/);
     expect(source).not.toMatch(/preventDefault/);
   });
+
+  it('never stops propagation on its keydown handler', async () => {
+    // src/ui/toolbar/useUndoRedo.tsx binds Cmd/Ctrl+Z and friends at `window` level for
+    // everywhere except this canvas, and skips exactly by checking
+    // `event.target.tagName === 'CANVAS'` — it relies on the event still reaching
+    // `window` to see that. Now that both bind the same EditorSession
+    // (onSessionReady/EditorSessionProvider), stopping propagation here would make that
+    // guard unreachable and undo would silently stop working everywhere except the
+    // canvas — the same class of bug as the Tab trap above, just for a different key.
+    const source = await import('node:fs').then((fs) =>
+      fs.readFileSync(new URL('./BuilderCanvas.tsx', import.meta.url), 'utf8'),
+    );
+    expect(source).not.toMatch(/stopPropagation/);
+  });
 });
 
 describe('the part catalog', () => {
