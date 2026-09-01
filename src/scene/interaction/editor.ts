@@ -57,6 +57,15 @@ import type { BrickId, Bounds, Mat4 } from '../../types';
  */
 export interface AddBrickOptions {
   animate?: boolean;
+  /**
+   * How many bricks this call is one of, when `animate` is true — the total size of the
+   * load `reconcile` is currently dispatching. `SceneRenderer` uses it to pace the
+   * arrival stream (a fixed cadence would either crawl for a 20k-brick model or blur
+   * into a burst for a 20-brick one): the same value on every call in one `reconcile`
+   * pass, computed once up front since the count of *new* bricks is known before the
+   * loop that adds them starts. Meaningless, and omitted, when `animate` is false.
+   */
+  batchSize?: number;
 }
 
 /** What the renderer must do to match a document change. */
@@ -464,6 +473,16 @@ export class EditorSession {
     const after = this.document;
     const animateArrivals = options?.animateArrivals ?? false;
 
+    // Counted up front, before the loop below fires a single `addBrick`: the renderer
+    // paces the arrival stream off the total it should expect, and the first call needs
+    // that number just as much as the last. Skipped when nothing will animate anyway.
+    let newBrickCount = 0;
+    if (animateArrivals) {
+      for (const [id] of after.bricks) {
+        if (!before.bricks.has(id)) newBrickCount++;
+      }
+    }
+
     for (const [id] of before.bricks) {
       if (!after.bricks.has(id)) {
         this.index.remove(id);
@@ -476,7 +495,7 @@ export class EditorSession {
       const prior = before.bricks.get(id);
       if (!prior) {
         this.index.insert(id, part, brick.transform);
-        void this.scene.addBrick(brick, { animate: animateArrivals });
+        void this.scene.addBrick(brick, { animate: animateArrivals, batchSize: newBrickCount });
       } else if (prior.transform !== brick.transform) {
         this.index.insert(id, part, brick.transform);
         this.scene.setBrickTransform(id, brick.transform);
