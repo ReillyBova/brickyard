@@ -1,26 +1,48 @@
 import { useEffect, useState } from 'react';
 
 import { RedoIcon, UndoIcon } from '../icons';
+import type { ToolbarSession } from './session';
 import type { ToolbarAction } from './types';
-
-/**
- * The read-only slice of `EditorSession` (`src/scene/interaction/editor.ts`) this hook
- * needs. Declared locally rather than importing the class so this file only depends on
- * shape, not on scene/interaction internals — any object satisfying this (the real
- * session, a test double) works.
- */
-export interface UndoRedoSession {
-  readonly canUndo: boolean;
-  readonly canRedo: boolean;
-  readonly undoLabel: string | undefined;
-  readonly redoLabel: string | undefined;
-  undo(): void;
-  redo(): void;
-  subscribe(listener: () => void): () => void;
-}
 
 const isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform);
 const MOD = isMac ? '⌘' : 'Ctrl';
+
+/** The bits of a keyboard event this module reads — kept minimal so it's easy to fake in a test. */
+export interface UndoRedoKeyEvent {
+  target: unknown;
+  metaKey: boolean;
+  ctrlKey: boolean;
+  shiftKey: boolean;
+  key: string;
+  preventDefault(): void;
+}
+
+/**
+ * The window-level ⌘Z/⌘⇧Z/⌘Y decision, extracted from the effect below so it's testable
+ * without mounting React or a DOM — see `useUndoRedo.test.ts`.
+ *
+ * `BuilderCanvas.tsx` binds the same combo scoped to its own `<canvas>` element (its
+ * "Focusable so it can receive keys without a window-level listener" comment) and never
+ * calls `stopPropagation` (asserted by `placement.test.ts`'s "never stops propagation on
+ * its keydown handler"), so an event with the canvas as `target` still reaches this
+ * window listener too. Skipping it here — rather than skipping in `BuilderCanvas` — is
+ * what keeps one keystroke from undoing twice once both sides share one `EditorSession`
+ * (`onSessionReady`/`EditorSessionProvider`): the canvas's own handler fires once, and
+ * this one declines to fire a second time for the same keystroke.
+ */
+export function handleGlobalUndoRedoKeydown(event: UndoRedoKeyEvent, session: Pick<ToolbarSession, 'undo' | 'redo'>): void {
+  if ((event.target as { tagName?: string } | null)?.tagName === 'CANVAS') return;
+  const mod = isMac ? event.metaKey : event.ctrlKey;
+  if (!mod) return;
+  const key = event.key.toLowerCase();
+  if (key === 'z' && !event.shiftKey) {
+    event.preventDefault();
+    session.undo();
+  } else if ((key === 'z' && event.shiftKey) || key === 'y') {
+    event.preventDefault();
+    session.redo();
+  }
+}
 
 /**
  * Undo/redo actions bound to `session`, plus the standard shortcuts (⌘Z / ⌘⇧Z, and
@@ -29,33 +51,22 @@ const MOD = isMac ? '⌘' : 'Ctrl';
  * this hook, and `EditorSession`'s existing `undo()`/`redo()`/`canUndo`/`undoLabel`
  * wrapper around it, are that interface.
  *
- * `BuilderCanvas.tsx` also binds ⌘Z/⌘⇧Z/⌘Y, scoped to its own `<canvas>` element (see
- * its "Focusable so it can receive keys without a window-level listener" comment) — a
- * deliberate choice so the mouse hand's most common shortcut doesn't need window focus
- * plumbing. This window-level binding covers everywhere else (the toolbar itself, the
- * chest, the color panel) per docs/DESIGN.md's "keyboard control is a real mode, not a
- * fallback" rule, and skips the canvas so the two don't both fire off one keystroke.
+ * `session` is nullable because the toolbar renders before `BuilderCanvas` has reported
+ * a live session (`useEditorSessionOrNull`) — with no session yet, both actions render
+ * disabled rather than throwing.
  */
-export function useUndoRedo(session: UndoRedoSession): readonly [ToolbarAction, ToolbarAction] {
+export function useUndoRedo(session: ToolbarSession | null): readonly [ToolbarAction, ToolbarAction] {
   // Re-render on every history change; the labels and disabled state are read fresh
   // from `session` each render rather than mirrored into local state.
   const [, forceRender] = useState(0);
-  useEffect(() => session.subscribe(() => forceRender((n) => n + 1)), [session]);
+  useEffect(() => {
+    if (!session) return;
+    return session.subscribe(() => forceRender((n) => n + 1));
+  }, [session]);
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if ((event.target as HTMLElement | null)?.tagName === 'CANVAS') return;
-      const mod = isMac ? event.metaKey : event.ctrlKey;
-      if (!mod) return;
-      const key = event.key.toLowerCase();
-      if (key === 'z' && !event.shiftKey) {
-        event.preventDefault();
-        session.undo();
-      } else if ((key === 'z' && event.shiftKey) || key === 'y') {
-        event.preventDefault();
-        session.redo();
-      }
-    };
+    if (!session) return;
+    const onKeyDown = (event: KeyboardEvent): void => handleGlobalUndoRedoKeydown(event, session);
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [session]);
@@ -63,19 +74,19 @@ export function useUndoRedo(session: UndoRedoSession): readonly [ToolbarAction, 
   const undo: ToolbarAction = {
     id: 'undo',
     icon: <UndoIcon />,
-    label: session.undoLabel ? `Undo ${session.undoLabel}` : 'Undo',
+    label: session?.undoLabel ? `Undo ${session.undoLabel}` : 'Undo',
     shortcut: [MOD, 'Z'],
-    disabled: !session.canUndo,
-    onClick: () => session.undo(),
+    disabled: !session?.canUndo,
+    onClick: () => session?.undo(),
   };
 
   const redo: ToolbarAction = {
     id: 'redo',
     icon: <RedoIcon />,
-    label: session.redoLabel ? `Redo ${session.redoLabel}` : 'Redo',
+    label: session?.redoLabel ? `Redo ${session.redoLabel}` : 'Redo',
     shortcut: [MOD, '⇧', 'Z'],
-    disabled: !session.canRedo,
-    onClick: () => session.redo(),
+    disabled: !session?.canRedo,
+    onClick: () => session?.redo(),
   };
 
   return [undo, redo];

@@ -2,37 +2,40 @@ import { useEffect } from 'react';
 
 import { GroupIcon } from '../icons';
 import type { BrickId } from '../../types';
-import type { SceneDocument, Transaction } from '../../model/types';
 import { buildGroupTransaction, buildUngroupTransaction, canGroup, canUngroup } from './grouping';
+import type { ToolbarSession } from './session';
 import type { ToolbarAction } from './types';
 
 const isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform);
 const MOD = isMac ? '⌘' : 'Ctrl';
 
+const EMPTY_SELECTION: ReadonlySet<BrickId> = new Set();
+
 /**
- * Group / ungroup actions for the current selection. Deliberately not bound to
- * `EditorSession` — that class (owned by the concurrent selection slice, in
- * `src/scene/interaction/`) has no selection state and no generic way to commit an
- * arbitrary `Transaction` yet. This hook instead takes the three things grouping
- * actually needs — `selection`, `document`, and a `commit` callback — so it works
- * against today's `EditorSession` (via a thin adapter), a future one that grows a
- * `selection` getter and a `commit` method, or a test double. See the toolbar plan's
- * escalation note for the gap this papers over.
+ * Group / ungroup actions for `session`'s current selection, built as `Transaction`s
+ * from `src/model/operations.ts` (see `grouping.ts`) and applied through
+ * `session.commit` — the one writer, not a parallel mutation path.
+ *
+ * `session` is nullable because the toolbar renders before `BuilderCanvas` has reported
+ * a live session (`useEditorSessionOrNull`) — with no session yet, both actions render
+ * disabled rather than throwing.
  */
-export function useGrouping(
-  selection: ReadonlySet<BrickId>,
-  document: SceneDocument,
-  commit: (tx: Transaction) => void,
-): readonly [ToolbarAction, ToolbarAction] {
+export function useGrouping(session: ToolbarSession | null): readonly [ToolbarAction, ToolbarAction] {
+  const selection = session?.selection ?? EMPTY_SELECTION;
+  const document = session?.document;
+
   const doGroup = (): void => {
-    if (canGroup(selection)) commit(buildGroupTransaction(selection, document));
+    if (!session || !document) return;
+    if (canGroup(selection)) session.commit(buildGroupTransaction(selection, document));
   };
   const doUngroup = (): void => {
+    if (!session || !document) return;
     const tx = canUngroup(selection, document) ? buildUngroupTransaction(selection, document) : undefined;
-    if (tx) commit(tx);
+    if (tx) session.commit(tx);
   };
 
   useEffect(() => {
+    if (!session) return;
     const onKeyDown = (event: KeyboardEvent): void => {
       const mod = isMac ? event.metaKey : event.ctrlKey;
       if (!mod || event.key.toLowerCase() !== 'g') return;
@@ -43,14 +46,14 @@ export function useGrouping(
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selection, document, commit]);
+  }, [session, selection, document]);
 
   const group: ToolbarAction = {
     id: 'group',
     icon: <GroupIcon />,
     label: 'Group',
     shortcut: [MOD, 'G'],
-    disabled: !canGroup(selection),
+    disabled: !document || !canGroup(selection),
     onClick: doGroup,
   };
 
@@ -59,7 +62,7 @@ export function useGrouping(
     icon: <GroupIcon />,
     label: 'Ungroup',
     shortcut: [MOD, '⇧', 'G'],
-    disabled: !canUngroup(selection, document),
+    disabled: !document || !canUngroup(selection, document),
     onClick: doUngroup,
   };
 

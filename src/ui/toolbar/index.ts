@@ -1,7 +1,8 @@
 export { Toolbar } from './Toolbar';
 export type { ToolbarAction, ToolbarGroup, ToolbarItem, ToolbarModeOption, ToolbarModeSwitch } from './types';
-export { useUndoRedo } from './useUndoRedo';
-export type { UndoRedoSession } from './useUndoRedo';
+export type { ToolbarSession } from './session';
+export { useUndoRedo, handleGlobalUndoRedoKeydown } from './useUndoRedo';
+export type { UndoRedoKeyEvent } from './useUndoRedo';
 export { useGrouping } from './useGrouping';
 export {
   buildGroupTransaction,
