@@ -7,7 +7,15 @@
  * Pure — no three.js, no DOM — so the math (colour temperature, spherical-to-Cartesian
  * direction) is unit-testable on its own. `PathTracerController` is what turns these into an
  * actual `ShapedAreaLight` and renderer/scene settings.
+ *
+ * Carries `ground` (see `ground.ts`) too, purely as a matter of plumbing: `App.tsx` already
+ * threads one `LightingSettings` value down to `RenderPanel`, `PathtraceToggle` and
+ * `PathTracerController` via a single `useState`, and the ground controls need exactly that same
+ * path, so they ride along here rather than opening a second prop/state pair for one more
+ * feature-owned settings object.
  */
+
+import { DEFAULT_GROUND, type GroundSettings } from './ground.ts';
 
 export interface LightingSettings {
   /** Compass direction the key light shines from, degrees. 0 = +Z, 90 = +X — see
@@ -29,6 +37,8 @@ export interface LightingSettings {
    *  environment but shows a plain background instead, matching the chrome around the
    *  viewport. */
   readonly showBackground: boolean;
+  /** The grounding floor's own size/colour/finish — see `ground.ts`. */
+  readonly ground: GroundSettings;
 }
 
 export const DEFAULT_LIGHTING: LightingSettings = {
@@ -40,6 +50,7 @@ export const DEFAULT_LIGHTING: LightingSettings = {
   envRotationDeg: 0,
   exposure: 1,
   showBackground: true,
+  ground: DEFAULT_GROUND,
 };
 
 const MIN_KELVIN = 1500;

@@ -34,11 +34,20 @@ import { BUNDLED_COLOR_LIBRARY } from '../../ldraw/bundledLibrary.ts';
 
 import type { PathtraceSnapshot } from '../../scene/SceneRenderer.ts';
 
-import { bakePathtraceScene } from './sceneBake.ts';
+import { bakePathtraceScene, buildFloorMesh } from './sceneBake.ts';
+import type { FloorSpec } from './sceneBake.ts';
 import { DEFAULT_ENVIRONMENT, loadEnvironmentTexture } from './environments.ts';
 import type { PathtraceEnvironment } from './environments.ts';
+import { GROUND_FINISH_PARAMS, GROUND_SIZE_MARGIN } from './ground.ts';
+import type { GroundSettings } from './ground.ts';
 import { DEFAULT_LIGHTING, kelvinToRGB, sunDirectionFor } from './lighting.ts';
 import type { LightingSettings } from './lighting.ts';
+
+/** `GroundSettings` to the shape `bakePathtraceScene`/`buildFloorMesh` want — resolves the
+ *  `GroundSize`/`GroundFinish` enums to real numbers so `sceneBake.ts` stays unaware of either. */
+function floorSpecFor(ground: GroundSettings): FloorSpec {
+  return { color: ground.color, sizeMargin: GROUND_SIZE_MARGIN[ground.size], ...GROUND_FINISH_PARAMS[ground.finish] };
+}
 
 /** What `build()` renders: the environment (sky + floor) and the key light. */
 export interface PathtraceRenderSettings {
@@ -139,19 +148,21 @@ export class PathTracerController {
   /**
    * Fetches the LDraw palette, flattens+bakes the live scene (plus a grounding floor sized to
    * it) into real meshes, loads the environment HDRI, and hands both to
-   * `WebGLPathTracer.setScene()` — a full BVH build, but only run when the model changes or the
-   * environment preset (and its baked-in floor colour) changes. See the class doc for why
-   * lighting dials don't come through here.
+   * `WebGLPathTracer.setScene()` — a full BVH build, but only run when the model on the
+   * baseplate changes (entering render mode). See the class doc for why lighting dials don't
+   * come through here, and `updateGroundMaterial`/`updateGroundGeometry` for why ground control
+   * changes don't either.
    */
   async build(snapshot: PathtraceSnapshot, settings: PathtraceRenderSettings = DEFAULT_RENDER_SETTINGS): Promise<void> {
     const colorLibrary = BUNDLED_COLOR_LIBRARY;
     const { environment, lighting } = settings;
 
     this.baked?.dispose();
-    const baked = bakePathtraceScene(snapshot.instances, colorLibrary, {
-      color: environment.floorColor,
-      roughness: environment.floorRoughness,
-    });
+    const baked = bakePathtraceScene(
+      snapshot.instances,
+      colorLibrary,
+      lighting.ground.visible ? floorSpecFor(lighting.ground) : undefined,
+    );
     this.baked = baked;
     this.lightDistance = Math.max(MIN_LIGHT_DISTANCE, baked.bounds.radius * LIGHT_DISTANCE_FACTOR);
     this.lightTarget.set(...baked.bounds.center);
@@ -228,10 +239,11 @@ export class PathTracerController {
     this.lastCameraUpdateAt = performance.now();
   }
 
-  /** Swaps the environment map and the floor's material properties without rebuilding the
-   *  BVH — the floor's own colour/roughness change but its geometry does not. */
+  /** Swaps the environment map without rebuilding the BVH — the environment (and the ground,
+   *  now an independent control — see `updateGroundMaterial`/`updateGroundGeometry`) no longer
+   *  shares any state, so this only ever touches the scene's `environment`/`background`. */
   async updateEnvironment(environment: PathtraceEnvironment, lighting: LightingSettings): Promise<void> {
-    if (this.pathTracer === null || this.scene === null || this.baked === null) return;
+    if (this.pathTracer === null || this.scene === null) return;
 
     const envTexture = await loadEnvironmentTexture(environment);
     this.envTexture = envTexture;
@@ -240,18 +252,66 @@ export class PathTracerController {
     this.scene.environmentRotation.y = THREE.MathUtils.degToRad(lighting.envRotationDeg);
     this.scene.backgroundRotation.y = this.scene.environmentRotation.y;
     this.pathTracer.updateEnvironment();
+    this.pathTracer.reset();
+    this.lastCameraUpdateAt = performance.now();
+  }
 
-    for (const child of this.baked.group.children) {
-      if (child.name === 'pathtrace-floor' && child instanceof THREE.Mesh) {
-        const material = child.material as THREE.MeshPhysicalMaterial;
-        material.color.setRGB(...environment.floorColor);
-        material.roughness = environment.floorRoughness;
-        material.needsUpdate = true;
-      }
-    }
+  /** The cheap ground path: the floor mesh already exists (`ground.visible` was already true),
+   *  and only its `MeshPhysicalMaterial` — colour, roughness, clearcoat — changes. Exactly the
+   *  same shape of update `updateLighting` does for the key light: mutate in place, tell the
+   *  tracer its materials changed, reset accumulation. No-op if the floor is currently hidden —
+   *  that's `updateGroundGeometry`'s job, since making it visible again is a geometry change. */
+  updateGroundMaterial(ground: GroundSettings): void {
+    if (this.pathTracer === null || this.baked === null) return;
+    const floorMesh = this.findFloorMesh();
+    if (floorMesh === undefined) return;
+
+    const finish = GROUND_FINISH_PARAMS[ground.finish];
+    const material = floorMesh.material as THREE.MeshPhysicalMaterial;
+    material.color.setRGB(...ground.color);
+    material.roughness = finish.roughness;
+    material.clearcoat = finish.clearcoat;
+    material.clearcoatRoughness = finish.clearcoatRoughness;
+    material.needsUpdate = true;
+
     this.pathTracer.updateMaterials();
     this.pathTracer.reset();
     this.lastCameraUpdateAt = performance.now();
+  }
+
+  /** The expensive-but-narrowed ground path: `visible` or `size` changed, which changes the
+   *  floor's actual geometry. three-gpu-pathtracer has no incremental BVH update for a geometry
+   *  change (`setScene()` always rebuilds from scratch — see its source), so this still calls
+   *  it — but only after swapping just the floor mesh, reusing every already-baked brick mesh
+   *  untouched. That skips the one genuinely expensive step a ground change never needs to pay
+   *  for: re-flattening every brick instance's geometry (`bakePathtraceScene`'s own vertex
+   *  loop) — the BVH rebuild itself is unavoidable, but it now rebuilds over the same brick
+   *  triangle count either way, not a re-copied one. */
+  updateGroundGeometry(ground: GroundSettings): void {
+    if (this.pathTracer === null || this.scene === null || this.baked === null) return;
+
+    const oldFloor = this.findFloorMesh();
+    if (oldFloor !== undefined) {
+      this.baked.group.remove(oldFloor);
+      oldFloor.geometry.dispose();
+      (oldFloor.material as THREE.Material).dispose();
+    }
+
+    if (ground.visible) {
+      const { bounds } = this.baked;
+      const floorMesh = buildFloorMesh(bounds.center[0], bounds.center[2], bounds.groundLevel, bounds.footprint, floorSpecFor(ground));
+      this.baked.group.add(floorMesh);
+    }
+
+    this.pathTracer.setScene(this.scene, this.camera);
+    this.pathTracer.updateCamera();
+    this.lastCameraUpdateAt = performance.now();
+  }
+
+  private findFloorMesh(): THREE.Mesh | undefined {
+    return this.baked?.group.children.find(
+      (child): child is THREE.Mesh => child.name === 'pathtrace-floor' && child instanceof THREE.Mesh,
+    );
   }
 
   private applyLighting(light: ShapedAreaLight, lighting: LightingSettings): void {

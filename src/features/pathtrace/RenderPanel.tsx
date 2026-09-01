@@ -1,14 +1,28 @@
 /**
  * Render mode's top-left panel — the parts chest is meaningless once nothing is being placed,
  * so this occupies its rail instead of adding new chrome (per the design system's
- * one-panel-per-rail rule). An environment map picker plus continuous dials for the key light:
- * every one of them, including the environment choice, changes the traced image the instant
- * it's touched (see `PathTracerController.updateLighting`/`updateEnvironment` — no dial here
- * waits on a scene rebake).
+ * one-panel-per-rail rule). An environment dropdown (`EnvironmentMenu`), continuous dials for
+ * the key light, and the ground controls (`GroundSection`): every one of them changes the
+ * traced image the instant it's touched, none of them wait on a scene rebake to *show* the
+ * change — see `PathTracerController.updateLighting`/`updateEnvironment` for the light/env
+ * side, and `updateGroundMaterial`/`updateGroundGeometry` for the ground side, where only a
+ * size/visibility change still costs a real (if narrowed) rebuild.
  */
 
-import { useTooltip } from '../../ui/tooltip';
-import { ENVIRONMENTS } from './environments.ts';
+import { useRef } from 'react';
+
+import { useRovingGrid } from '../../ui/useRovingGrid';
+import { useTooltip, useTooltipDelegate } from '../../ui/tooltip';
+
+import { EnvironmentMenu } from './EnvironmentMenu.tsx';
+import {
+  GROUND_FINISH_LABEL,
+  GROUND_FINISH_TOOLTIP,
+  GROUND_SIZE_LABEL,
+  GROUND_SIZE_TOOLTIP,
+  GROUND_SWATCHES,
+} from './ground.ts';
+import type { GroundFinish, GroundSettings, GroundSize } from './ground.ts';
 import type { PathtraceEnvironment } from './environments.ts';
 import type { LightingSettings } from './lighting.ts';
 import './pathtrace.css';
@@ -59,29 +73,140 @@ function DialRow({ id, label, tooltip, min, max, step, value, formatValue, onCha
   );
 }
 
-interface EnvironmentOptionProps {
-  environment: PathtraceEnvironment;
+const GROUND_SIZES: readonly GroundSize[] = ['tight', 'medium', 'broad', 'infinite'];
+const GROUND_FINISHES: readonly GroundFinish[] = ['matte', 'satin', 'glossy', 'mirror'];
+
+interface GroundSectionProps {
+  ground: GroundSettings;
+  onChange: (ground: GroundSettings) => void;
+}
+
+/** The ground controls: visible/hidden, size, finish and colour — all independent of which
+ *  environment is lighting the scene (see `ground.ts`). Split out of `RenderPanel` for the same
+ *  reason `DialRow` is: several of `useTooltip`/`useTooltipDelegate` calls need to live outside
+ *  any loop. */
+function GroundSection({ ground, onChange }: GroundSectionProps) {
+  const swatchGridRef = useRef<HTMLDivElement | null>(null);
+  const { containerRef: rovingRef, onKeyDown: onSwatchKeyDown } = useRovingGrid(GROUND_SWATCHES.length);
+  useTooltipDelegate(swatchGridRef, 'render-ground-swatches');
+
+  const setSwatchRefs = (node: HTMLDivElement | null) => {
+    swatchGridRef.current = node;
+    rovingRef.current = node;
+  };
+
+  const visibleTip = useTooltip({
+    id: 'render-ground-visible',
+    label: 'Show the grounding floor the model sits on',
+  });
+
+  const set = <K extends keyof GroundSettings>(key: K, value: GroundSettings[K]): void => {
+    onChange({ ...ground, [key]: value });
+  };
+
+  return (
+    <div className="by-panel__section">
+      <p className="by-eyebrow">Ground</p>
+      <div className="by-row">
+        <span>Show ground</span>
+        <button
+          type="button"
+          className={`by-switch${ground.visible ? ' is-on' : ''}`}
+          role="switch"
+          aria-checked={ground.visible}
+          aria-label="Show ground"
+          onClick={() => set('visible', !ground.visible)}
+          {...visibleTip}
+        />
+      </div>
+
+      <p className="by-eyebrow">Size</p>
+      <div className="by-seg" role="radiogroup" aria-label="Ground size">
+        {GROUND_SIZES.map((size) => (
+          <GroundSegOption
+            key={size}
+            id={`render-ground-size-${size}`}
+            label={GROUND_SIZE_LABEL[size]}
+            tooltip={GROUND_SIZE_TOOLTIP[size]}
+            active={ground.size === size}
+            disabled={!ground.visible}
+            onSelect={() => set('size', size)}
+          />
+        ))}
+      </div>
+
+      <p className="by-eyebrow">Finish</p>
+      <div className="by-seg" role="radiogroup" aria-label="Ground finish">
+        {GROUND_FINISHES.map((finish) => (
+          <GroundSegOption
+            key={finish}
+            id={`render-ground-finish-${finish}`}
+            label={GROUND_FINISH_LABEL[finish]}
+            tooltip={GROUND_FINISH_TOOLTIP[finish]}
+            active={ground.finish === finish}
+            disabled={!ground.visible}
+            onSelect={() => set('finish', finish)}
+          />
+        ))}
+      </div>
+
+      <p className="by-eyebrow">Colour</p>
+      <div
+        className="by-swatch-grid"
+        ref={setSwatchRefs}
+        role="radiogroup"
+        aria-label="Ground colour"
+      >
+        {GROUND_SWATCHES.map((swatch, index) => {
+          const isSelected = ground.color[0] === swatch.color[0]
+            && ground.color[1] === swatch.color[1]
+            && ground.color[2] === swatch.color[2];
+          return (
+            <button
+              key={swatch.id}
+              type="button"
+              role="radio"
+              aria-checked={isSelected}
+              aria-label={swatch.label}
+              disabled={!ground.visible}
+              className={`by-swatch${isSelected ? ' is-selected' : ''}`}
+              style={{ backgroundColor: `rgb(${swatch.color.map((c) => Math.round(c * 255)).join(',')})` }}
+              data-index={index}
+              data-tooltip-id={`render-ground-swatch-${swatch.id}`}
+              data-tooltip-label={swatch.label}
+              onClick={() => set('color', swatch.color)}
+              onKeyDown={(event) => onSwatchKeyDown(event, index)}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+interface GroundSegOptionProps {
+  id: string;
+  label: string;
+  tooltip: string;
   active: boolean;
+  disabled: boolean;
   onSelect: () => void;
 }
 
-function EnvironmentOption({ environment, active, onSelect }: EnvironmentOptionProps) {
-  const tip = useTooltip({
-    id: `render-env-${environment.id}`,
-    label: environment.description,
-    groupId: 'render-environments',
-  });
+function GroundSegOption({ id, label, tooltip, active, disabled, onSelect }: GroundSegOptionProps) {
+  const tip = useTooltip({ id, label: tooltip, groupId: 'render-ground-seg', disabled });
 
   return (
     <button
       type="button"
       role="radio"
       aria-checked={active}
+      disabled={disabled}
       className={`by-seg__opt${active ? ' is-active' : ''}`}
       onClick={onSelect}
       {...tip}
     >
-      {environment.label}
+      {label}
     </button>
   );
 }
@@ -104,16 +229,7 @@ export function RenderPanel({ environment, onEnvironmentChange, lighting, onLigh
       <div className="by-panel__body">
         <div className="by-panel__section">
           <p className="by-eyebrow">Environment</p>
-          <div className="by-seg by-seg--wrap" role="radiogroup" aria-label="Environment">
-            {ENVIRONMENTS.map((env) => (
-              <EnvironmentOption
-                key={env.id}
-                environment={env}
-                active={env.id === environment.id}
-                onSelect={() => onEnvironmentChange(env)}
-              />
-            ))}
-          </div>
+          <EnvironmentMenu value={environment} onChange={onEnvironmentChange} />
           <div className="by-row">
             <span>Show background</span>
             <button
@@ -212,6 +328,8 @@ export function RenderPanel({ environment, onEnvironmentChange, lighting, onLigh
             onChange={(v) => set('exposure', v)}
           />
         </div>
+
+        <GroundSection ground={lighting.ground} onChange={(ground) => set('ground', ground)} />
       </div>
     </div>
   );
