@@ -14,6 +14,7 @@ import { boundsFromTriangles, partTriangles } from '../ldraw/bounds.ts';
 import { fixtureReader } from './__fixtures__/reader.ts';
 import {
   BAKED_FORMAT_VERSION,
+  SEMANTICS_VERSION,
   packConnections,
   packOccupancy,
   unpackConnections,
@@ -159,6 +160,16 @@ describe('connections.bin', () => {
 
     expect(unpackConnections(new ArrayBuffer(4))).toBeNull();
   });
+
+  it('returns null for a semantics version this build no longer shares', () => {
+    // The same null path as a truncated file or a format-version mismatch: a bake whose
+    // packKey/matingSection meaning has moved on must not be trusted, even though every
+    // byte in it is perfectly well-formed.
+    const packed = packConnections([{ partId: '3001', points: [] }]);
+    const view = new DataView(bytesOf(packed));
+    view.setUint16(6, SEMANTICS_VERSION + 1, true);
+    expect(unpackConnections(view.buffer)).toBeNull();
+  });
 });
 
 describe('occupancy.bin', () => {
@@ -180,6 +191,12 @@ describe('occupancy.bin', () => {
   it('refuses a bake made at a different cell size', async () => {
     const packed = packOccupancy(await occupancyAll());
     new DataView(packed.buffer).setUint16(6, OCC_CELL * 2, true);
+    expect(unpackOccupancy(bytesOf(packed))).toBeNull();
+  });
+
+  it('refuses a bake whose fill-rule semantics this build no longer shares', async () => {
+    const packed = packOccupancy(await occupancyAll());
+    new DataView(packed.buffer).setUint16(8, SEMANTICS_VERSION + 1, true);
     expect(unpackOccupancy(bytesOf(packed))).toBeNull();
   });
 

@@ -11,6 +11,11 @@
  * also go stale on different upstreams and carry different licences — see
  * `docs/PREBAKE.md`.
  *
+ * Each header carries two independent version numbers: `BAKED_FORMAT_VERSION` says a reader
+ * can find the bytes at all, `SEMANTICS_VERSION` says the bytes still mean what the reader
+ * thinks they mean — see that constant's doc and `docs/PREBAKE.md`. Both readers treat a
+ * mismatch on either exactly like a truncated file.
+ *
  * Pure: no three.js, no DOM. Safe inside a worker, and directly runnable under Node so
  * the bake can use the same code the browser does.
  */
@@ -27,7 +32,26 @@ import type {
 } from './types.ts';
 
 /** Bumped when either layout changes in a way a reader cannot detect on its own. */
-export const BAKED_FORMAT_VERSION = 1;
+export const BAKED_FORMAT_VERSION = 2;
+
+/**
+ * Bumped when what a packed field MEANS changes, independent of the byte layout: `packKey`'s
+ * bit assignments (`src/snap/parseMeta.ts`), which section `matingSection` picks, connection
+ * id composition, or what `buildOccupancy` counts as solid.
+ *
+ * `BAKED_FORMAT_VERSION` says a reader can find the bytes; this says the bytes still mean
+ * what the reader thinks they mean. Both `connections.bin` and `occupancy.bin` are resolved
+ * by the same corpus walk in `tools/prebake.ts`, so one version covers both — a change to
+ * `matingSection` or to occupancy's fill rule invalidates the same committed bake either way.
+ *
+ * `readConnections`/`readOccupancy` reject a mismatch exactly like a truncated file: null,
+ * not a throw, so the app falls back to resolving from source instead of trusting stale
+ * semantics. Bumping this number, alone, changes no behaviour — it only stops an
+ * old-semantics file from being accepted by a new-semantics reader. See
+ * `src/snap/fixtureDigest.ts`, which is what makes forgetting the bump a failing test
+ * instead of a silent miss, and `docs/PREBAKE.md`.
+ */
+export const SEMANTICS_VERSION = 1;
 
 const CONNECTIONS_MAGIC = 0x4e43_5942; // 'BYCN', little-endian
 const OCCUPANCY_MAGIC = 0x434f_5942; // 'BYOC'
@@ -210,7 +234,7 @@ const SECTION_BYTES = 12;
  * `connections.bin`:
  *
  * ```
- * magic u32 'BYCN' | version u16 | reserved u16 | partCount u32 | stringCount u32
+ * magic u32 'BYCN' | version u16 | semantics u16 | partCount u32 | stringCount u32
  * string table:  [ length u16, utf8 bytes ] * stringCount, padded to 4
  * parts:         [ idIndex u32, pointCount u32, points... ]
  * point:         idIndex u32 | sourceIndex u32 | groupIndex u32 | key u32
@@ -238,7 +262,7 @@ export function packConnections(parts: readonly BakedConnections[]): Uint8Array 
   const view = new DataView(out.buffer);
   view.setUint32(0, CONNECTIONS_MAGIC, true);
   view.setUint16(4, BAKED_FORMAT_VERSION, true);
-  view.setUint16(6, 0, true);
+  view.setUint16(6, SEMANTICS_VERSION, true);
   view.setUint32(8, parts.length, true);
   view.setUint32(12, table.count, true);
   out.set(strings, 16);
@@ -280,12 +304,18 @@ export function packConnections(parts: readonly BakedConnections[]): Uint8Array 
   return out;
 }
 
-/** Reads `connections.bin`. Returns null when the bytes are not a readable version. */
+/**
+ * Reads `connections.bin`. Returns null when the bytes are not a readable version — either
+ * `BAKED_FORMAT_VERSION` (the layout) or `SEMANTICS_VERSION` (what the fields mean) — the
+ * same null path a truncated file takes, so a stale bake degrades to source resolution
+ * instead of shipping wrong snapping behaviour.
+ */
 function readConnections(buffer: ArrayBuffer): Map<string, ConnectionPoint[]> | null {
   if (buffer.byteLength < 16) return null;
   const view = new DataView(buffer);
   if (view.getUint32(0, true) !== CONNECTIONS_MAGIC) return null;
   if (view.getUint16(4, true) !== BAKED_FORMAT_VERSION) return null;
+  if (view.getUint16(6, true) !== SEMANTICS_VERSION) return null;
 
   const partCount = view.getUint32(8, true);
   const { strings, end } = readStringTable(view, 16, view.getUint32(12, true));
@@ -357,14 +387,16 @@ export interface BakedOccupancy {
  * `occupancy.bin`:
  *
  * ```
- * magic u32 'BYOC' | version u16 | cellSize u16 | partCount u32 | stringCount u32
+ * magic u32 'BYOC' | version u16 | cellSize u16 | semantics u16 | reserved u16
+ * partCount u32 | stringCount u32
  * string table:  [ length u16, utf8 bytes ] * stringCount, padded to 4
  * parts:         [ idIndex u32, dims u16 * 3, reserved u16,
  *                  min f32 * 3, max f32 * 3, maskBytes u32, mask..., padded to 4 ]
  * ```
  *
  * `cellSize` is written so a reader can reject a bake made at a different `OCC_CELL`
- * rather than misinterpret its grid.
+ * rather than misinterpret its grid; `semantics` is `SEMANTICS_VERSION`, so a reader can
+ * likewise reject a bake whose fill rule it no longer shares — see that constant's doc.
  */
 export function packOccupancy(parts: readonly BakedOccupancy[]): Uint8Array {
   const table = new StringTable();
@@ -375,16 +407,18 @@ export function packOccupancy(parts: readonly BakedOccupancy[]): Uint8Array {
   }
 
   const strings = concat(table.encode());
-  const out = new Uint8Array(16 + strings.length + bodyBytes);
+  const out = new Uint8Array(20 + strings.length + bodyBytes);
   const view = new DataView(out.buffer);
   view.setUint32(0, OCCUPANCY_MAGIC, true);
   view.setUint16(4, BAKED_FORMAT_VERSION, true);
   view.setUint16(6, OCC_CELL, true);
-  view.setUint32(8, parts.length, true);
-  view.setUint32(12, table.count, true);
-  out.set(strings, 16);
+  view.setUint16(8, SEMANTICS_VERSION, true);
+  view.setUint16(10, 0, true);
+  view.setUint32(12, parts.length, true);
+  view.setUint32(16, table.count, true);
+  out.set(strings, 20);
 
-  let at = 16 + strings.length;
+  let at = 20 + strings.length;
   for (const part of parts) {
     view.setUint32(at, table.intern(part.partId), true);
     for (let i = 0; i < 3; i++) view.setUint16(at + 4 + i * 2, part.occupancy.dims[i], true);
@@ -399,20 +433,22 @@ export function packOccupancy(parts: readonly BakedOccupancy[]): Uint8Array {
 }
 
 /**
- * Reads `occupancy.bin`. Returns null when the bytes are not a readable version, or were
- * baked at a different cell size than this build voxelises at.
+ * Reads `occupancy.bin`. Returns null when the bytes are not a readable version, were baked
+ * at a different cell size than this build voxelises at, or carry a fill-rule semantics this
+ * build no longer shares — see `SEMANTICS_VERSION`.
  */
 function readOccupancy(
   buffer: ArrayBuffer,
 ): Map<string, { bounds: Bounds; occupancy: OccupancyMask }> | null {
-  if (buffer.byteLength < 16) return null;
+  if (buffer.byteLength < 20) return null;
   const view = new DataView(buffer);
   if (view.getUint32(0, true) !== OCCUPANCY_MAGIC) return null;
   if (view.getUint16(4, true) !== BAKED_FORMAT_VERSION) return null;
   if (view.getUint16(6, true) !== OCC_CELL) return null;
+  if (view.getUint16(8, true) !== SEMANTICS_VERSION) return null;
 
-  const partCount = view.getUint32(8, true);
-  const { strings, end } = readStringTable(view, 16, view.getUint32(12, true));
+  const partCount = view.getUint32(12, true);
+  const { strings, end } = readStringTable(view, 20, view.getUint32(16, true));
   const byId = new Map<string, { bounds: Bounds; occupancy: OccupancyMask }>();
 
   let at = align4(end);
