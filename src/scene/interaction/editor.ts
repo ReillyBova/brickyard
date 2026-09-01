@@ -16,6 +16,7 @@
  */
 
 import { multiply } from '../../math';
+import { collides } from '../../snap/collision';
 import { findMates, mateCount } from '../../snap/mating';
 import { HashSpatialIndex } from '../../snap/spatialIndex';
 import type { MateGroup, PartDef } from '../../snap/types';
@@ -156,6 +157,21 @@ export class EditorSession {
   }
 
   /**
+   * Replace the whole document — opening a model, or returning to an empty sandbox.
+   * Fresh history: loading a model is a new starting point, not an edit to undo back
+   * past. `parts` must cover every part id the document references, or `lookup` and
+   * collision on those bricks silently no-op (see `docs/ARCHITECTURE.md`'s "fallback
+   * behaviour" — a part with no data still loads and renders, it just can't snap or
+   * collide, which is a property of the part, not of how it got here).
+   */
+  loadDocument(doc: SceneDocument, parts: Iterable<PartDef>): void {
+    for (const part of parts) this.registerPart(part);
+    const before = this.document;
+    this.history = createHistory(doc);
+    this.reconcile(before);
+  }
+
+  /**
    * Place a brick. Geometry and connectivity land in one transaction so undo restores
    * both — a `remove` alone would put the brick back with no edges. Returns the total
    * mate count, which is the only external use for a placement's engagement strength —
@@ -209,13 +225,39 @@ export class EditorSession {
    * outside `ids` are dropped and re-solved against the landing position; edges between
    * two co-moving bricks are left alone, because a single rigid delta left-multiplying
    * both leaves their relative transform — and so their mate geometry — unchanged.
+   *
+   * Collision is checked per moved brick against the landing transform before anything
+   * is committed — the same fix `src/features/mcp/session.ts`'s `transform()` needed
+   * for the identical gap: moving used to re-solve connectivity via `findMates` but
+   * never called `collides()`, so a brick could be driven into another and locked
+   * there. The moving set is passed as `collides`'s `ignore`, exactly as `findMates`
+   * already excludes it below — two co-moving bricks that overlap each other (they
+   * don't, since a rigid delta preserves their relative pose, but adjacent studs can
+   * sit close) are not what this guards against; a brick landing inside some *other*
+   * brick is. Any hit refuses the whole gesture atomically — nothing partially moves —
+   * and returns `false` rather than throwing, since a keyboard nudge into a wall is a
+   * refusal, not a caller error (contrast the MCP path, which throws because a caller
+   * gets to know why).
    */
-  transformSelection(ids: readonly BrickId[], delta: Mat4, label: string): void {
+  transformSelection(ids: readonly BrickId[], delta: Mat4, label: string): boolean {
     const idSet = new Set(ids);
     const moving = ids
       .map((id) => this.document.bricks.get(id))
       .filter((b): b is BrickInstance => !!b);
-    if (moving.length === 0) return;
+    if (moving.length === 0) return false;
+
+    const landing = new Map<BrickId, Mat4>();
+    for (const b of moving) landing.set(b.id, multiply(delta, b.transform));
+
+    // Checked against the index as it stands now — the moving bricks are still
+    // indexed at their old positions, but `ignore` exempts the whole moving set from
+    // ever counting as an obstacle, so what this actually tests is "does the landing
+    // position overlap anything outside the set that's moving together."
+    for (const b of moving) {
+      const part = this.parts.get(b.partId);
+      if (!part) continue;
+      if (collides(part, landing.get(b.id) as Mat4, this.index, idSet)) return false;
+    }
 
     const dropped = new Map<string, ConnectionEdge>();
     for (const id of ids) {
@@ -229,14 +271,11 @@ export class EditorSession {
       }
     }
 
-    const landing = new Map<BrickId, Mat4>();
     for (const b of moving) {
-      const to = multiply(delta, b.transform);
-      landing.set(b.id, to);
       const part = this.parts.get(b.partId);
       // Re-index at the landing transform before re-solving mates, so findMates sees
       // the piece where it actually lands rather than where it started.
-      if (part) this.index.insert(b.id, part, to);
+      if (part) this.index.insert(b.id, part, landing.get(b.id) as Mat4);
     }
 
     const newEdges = new Map<string, ConnectionEdge>();
@@ -258,6 +297,7 @@ export class EditorSession {
         { type: 'connect', edges: [...newEdges.values()] },
       ],
     });
+    return true;
   }
 
   undo(): void {

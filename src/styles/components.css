@@ -728,8 +728,21 @@ a:hover { color: var(--by-accent-hover); }
 /* ── Status bar ─────────────────────────────────────────────────────────────
    The quiet readout: brick count, selection count, current mode hint. Not a
    place for warnings — those are toasts.
+
+   Floats over the viewport rather than sitting in normal document flow: the
+   canvas above it is styled to fill its container's full height
+   (`.by-viewport canvas`), so an unpositioned sibling renders below the fold
+   of an absolutely-positioned, non-clipping `.by-viewport` — present in the
+   DOM, readable to a screen reader or a text dump, but never actually on
+   screen. Anchored bottom-center with a window-edge gutter, the same
+   floating-raft treatment `.by-shell__bar` uses at the top.
    ------------------------------------------------------------------------- */
 .by-statusbar {
+  position: absolute;
+  left: 50%;
+  bottom: var(--by-space-3);
+  transform: translateX(-50%);
+  z-index: var(--by-z-chrome);
   display: flex;
   align-items: center;
   gap: var(--by-space-4);
@@ -742,6 +755,47 @@ a:hover { color: var(--by-accent-hover); }
   font-size: var(--by-text-xs);
   color: var(--by-text-muted);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ── Shortcut card ──────────────────────────────────────────────────────────
+   A floating key -> action legend for a mode with no toolbar button to hang
+   a tooltip on: the selection's keyboard-only transforms (arrow keys, Page
+   Up/Down, Shift+arrows) have no click equivalent, so nothing else on screen
+   names them. Appears only once there's a selection to act on — the moment
+   the keys start doing something is the moment they need explaining.
+   Same popover surface as .by-tooltip, stacked into rows instead of inline.
+   ------------------------------------------------------------------------- */
+.by-shortcut-card {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--by-statusbar-h) + var(--by-space-3) * 2);
+  transform: translateX(-50%);
+  z-index: var(--by-z-chrome);
+  display: flex;
+  align-items: center;
+  gap: var(--by-space-4);
+  padding: var(--by-space-2) var(--by-space-4);
+  border-radius: var(--by-radius-pill);
+  background: var(--by-popover);
+  box-shadow: var(--by-shadow-md);
+  font-size: var(--by-text-xs);
+  color: var(--by-text-muted);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.by-shortcut-card__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--by-space-2);
+}
+/* Rotation is the one action with no other affordance anywhere in the UI — no
+   toolbar button, no drag gesture — so its label carries the accent the way a
+   primary action would, per docs/DESIGN.md's rule that accent-on-cream text
+   uses the deep --by-accent-text step, not the base accent. */
+.by-shortcut-card__item--accent {
+  color: var(--by-accent-text);
+  font-weight: 600;
 }
 
 /* ── Progress ───────────────────────────────────────────────────────────────
@@ -768,6 +822,24 @@ a:hover { color: var(--by-accent-hover); }
 @keyframes by-slide {
   0% { transform: translateX(-100%); }
   100% { transform: translateX(286%); }
+}
+
+/* Centered over the viewport while a bundled model imports — see routes/ModelPicker.tsx
+   and the seeding flow in App.tsx. */
+.by-model-load-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--by-space-3);
+  padding: var(--by-space-4);
+  background: color-mix(in srgb, var(--by-canvas) 70%, transparent);
+  pointer-events: none;
+}
+.by-model-load-overlay .by-progress {
+  width: min(320px, 80%);
 }
 
 /* ── Empty state ────────────────────────────────────────────────────────────

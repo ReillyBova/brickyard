@@ -42,10 +42,10 @@ async function brick2x4(): Promise<PartDef> {
 
 /** A scene that reports the cursor over a chosen point, with that face's normal. */
 function stubScene(hit: { brick: BrickId; point: Vec3; normal: Vec3 } | null): PlacementScene & {
-  ghosts: { transform: Mat4; valid: boolean }[];
+  ghosts: { transform: Mat4; valid: boolean; wireframe: boolean }[];
   hidden: number;
 } {
-  const ghosts: { transform: Mat4; valid: boolean }[] = [];
+  const ghosts: { transform: Mat4; valid: boolean; wireframe: boolean }[] = [];
   let hidden = 0;
   return {
     ghosts,
@@ -54,8 +54,8 @@ function stubScene(hit: { brick: BrickId; point: Vec3; normal: Vec3 } | null): P
     },
     pick: () => hit,
     pickRay: () => ({ origin: [0, -500, 0] as Vec3, direction: [0, 1, 0] as Vec3 }),
-    showGhost: async (_p, _c, transform, valid) => {
-      ghosts.push({ transform, valid });
+    showGhost: async (_p, _c, transform, valid, wireframe = false) => {
+      ghosts.push({ transform, valid, wireframe });
     },
     hideGhost: () => {
       hidden += 1;
@@ -309,6 +309,20 @@ describe('keyboard', () => {
     expect(source).not.toMatch(/['"]Tab['"]/);
     expect(source).not.toMatch(/preventDefault/);
   });
+
+  it('never stops propagation on its keydown handler', async () => {
+    // src/ui/toolbar/useUndoRedo.tsx binds Cmd/Ctrl+Z and friends at `window` level for
+    // everywhere except this canvas, and skips exactly by checking
+    // `event.target.tagName === 'CANVAS'` — it relies on the event still reaching
+    // `window` to see that. Now that both bind the same EditorSession
+    // (onSessionReady/EditorSessionProvider), stopping propagation here would make that
+    // guard unreachable and undo would silently stop working everywhere except the
+    // canvas — the same class of bug as the Tab trap above, just for a different key.
+    const source = await import('node:fs').then((fs) =>
+      fs.readFileSync(new URL('./BuilderCanvas.tsx', import.meta.url), 'utf8'),
+    );
+    expect(source).not.toMatch(/stopPropagation/);
+  });
 });
 
 describe('the part catalog', () => {
@@ -368,5 +382,60 @@ describe('the part catalog', () => {
       globalThis.fetch = originalFetch;
     }
     expect(reads.length).toBeGreaterThan(0);
+  });
+});
+
+describe('pick up', () => {
+  it('renders the picked-up piece as a wireframe outline, unlike a fresh chest hold', async () => {
+    const part = await brick2x4();
+    const studPos = await aStudOn(part, IDENTITY);
+    const scene = stubScene({ brick: 'seed' as BrickId, point: studPos, normal: [0, -1, 0] });
+
+    const c = new PlacementController(scene);
+    c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+
+    c.hold(part);
+    expect(c.holding).toBe(true);
+    expect(c.pickedUp).toBe(false);
+    c.move(0, 0);
+    expect(scene.ghosts.at(-1)?.wireframe).toBe(false);
+    c.hold(null);
+
+    c.pickUp(part, 2, fromTranslation([100, 0, 0]));
+    expect(c.holding).toBe(true);
+    expect(c.pickedUp).toBe(true);
+    c.move(0, 0);
+    expect(scene.ghosts.at(-1)?.wireframe).toBe(true);
+  });
+
+  it('seeds continuity with the piece\'s former position', async () => {
+    // Two candidates equidistant from the cursor but not from each other: continuity
+    // should favour whichever is nearer the position pickUp was told the piece came
+    // from, exactly as it favours the previous frame's landing spot during a drag.
+    const part = await brick2x4();
+    const studPos = await aStudOn(part, IDENTITY);
+    const scene = stubScene({ brick: 'seed' as BrickId, point: studPos, normal: [0, -1, 0] });
+
+    const c = new PlacementController(scene);
+    c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+    c.pickUp(part, 4, IDENTITY);
+
+    expect(c.move(0, 0)).not.toBeNull();
+    // Lands somewhere real, resolved against the same candidates a fresh hold would see.
+    expect(c.current.candidates.length).toBeGreaterThan(0);
+  });
+
+  it('commit clears pickedUp, so the next hold is not mistaken for one', async () => {
+    const part = await brick2x4();
+    const studPos = await aStudOn(part, IDENTITY);
+    const scene = stubScene({ brick: 'seed' as BrickId, point: studPos, normal: [0, -1, 0] });
+
+    const c = new PlacementController(scene);
+    c.add({ id: 'seed' as BrickId, partId: '3001', colorCode: 4, transform: IDENTITY, part });
+    c.pickUp(part, 4, fromTranslation([500, 0, 0]));
+    c.move(0, 0);
+    c.commit('a' as BrickId);
+
+    expect(c.pickedUp).toBe(false);
   });
 });

@@ -13,7 +13,8 @@ import { useEffect, useRef, useState } from 'react';
 
 import { fromTranslation, fromYRotation, multiplyAll, positionOf } from '../../math';
 import { mintBrickId } from '../../model/ids.ts';
-import type { BrickInstance } from '../../model/types';
+import type { BrickInstance, SceneDocument } from '../../model/types';
+import type { PartDef } from '../../snap/types';
 import type { Mat4, Vec3 } from '../../types';
 import { SceneRenderer } from '../SceneRenderer.ts';
 import type { SelectionEntry } from '../selectionOverlay.ts';
@@ -37,21 +38,64 @@ function ndc(canvas: HTMLCanvasElement, event: PointerEvent): [number, number] {
   return [((event.clientX - r.left) / r.width) * 2 - 1, -((event.clientY - r.top) / r.height) * 2 + 1];
 }
 
+/**
+ * Undo/redo, scoped to the canvas so the mouse hand's most common shortcut doesn't need
+ * window focus plumbing. `src/ui/toolbar/useUndoRedo.tsx` binds the same combination at
+ * `window` level for everywhere else (toolbar, chest, color panel) and explicitly skips
+ * when the keydown target is this `<canvas>` — so the split, not a single owner, is what
+ * keeps one keystroke from firing undo twice now that both bind the *same* session
+ * (via `onSessionReady`/`EditorSessionProvider`). Never stop this keydown event from
+ * bubbling: the toolbar's listener relies on it still reaching `window` to see the
+ * target and skip it — target-filtering, not propagation, is what dedupes here.
+ */
 const isUndo = (e: KeyboardEvent): boolean =>
   (e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'z';
 const isRedo = (e: KeyboardEvent): boolean =>
   (e.metaKey || e.ctrlKey) && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'));
+
+/** What a caller hands `BuilderCanvas` to replace the document — an imported model. */
+export interface DocumentSeed {
+  document: SceneDocument;
+  /** Every part id the document's bricks reference. */
+  parts: readonly PartDef[];
+}
 
 interface BuilderCanvasProps {
   /** The part id on the cursor, from the parts chest. `undefined` is selection mode. */
   heldPartId?: string;
   /** The active palette color — applied to a newly held piece, and to one already held. */
   heldColorCode: number;
-  /** Fired once a held piece lands, so the chest tile that put it on the cursor clears. */
+  /**
+   * Fired once a held piece lands, or the hold is cancelled with Escape, so the chest
+   * tile that put it on the cursor clears either way.
+   */
   onHeldConsumed: () => void;
+  /**
+   * A whole document to load in place of whatever's on the baseplate — opening a
+   * bundled model. Import mechanics (fetch, parse, resolve parts) live above this
+   * component, in the composition root: this slice owns the one live session and what
+   * happens to it, not how a model gets turned into one.
+   */
+  seed?: DocumentSeed;
+  /** Fired once a seed has been loaded, so the caller can drop its reference to it. */
+  onSeedConsumed: () => void;
+  /**
+   * Reports the live `EditorSession` once it exists (and `null` on unmount), so the
+   * composition root can bind it into `EditorSessionProvider` — see
+   * `sessionContext.tsx`. Every other panel that reads or drives the canvas (toolbar,
+   * restyle, graph view) needs this same instance; without it, each invents its own.
+   */
+  onSessionReady?: (session: EditorSession | null) => void;
 }
 
-export function BuilderCanvas({ heldPartId, heldColorCode, onHeldConsumed }: BuilderCanvasProps): React.JSX.Element {
+export function BuilderCanvas({
+  heldPartId,
+  heldColorCode,
+  onHeldConsumed,
+  seed,
+  onSeedConsumed,
+  onSessionReady,
+}: BuilderCanvasProps): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [status, setStatus] = useState('');
   const [count, setCount] = useState(0);
@@ -60,6 +104,7 @@ export function BuilderCanvas({ heldPartId, heldColorCode, onHeldConsumed }: Bui
 
   // Reached into from the props-driven effects below, which run outside the mount
   // effect's own closure.
+  const rendererRef = useRef<SceneRenderer | null>(null);
   const placementRef = useRef<PlacementController | null>(null);
   const sessionRef = useRef<EditorSession | null>(null);
   const catalogRef = useRef<ReturnType<typeof createPartCatalog> | null>(null);
@@ -67,6 +112,10 @@ export function BuilderCanvas({ heldPartId, heldColorCode, onHeldConsumed }: Bui
   // props — kept current every render so a placement always calls the latest callback.
   const onHeldConsumedRef = useRef(onHeldConsumed);
   onHeldConsumedRef.current = onHeldConsumed;
+  const onSeedConsumedRef = useRef(onSeedConsumed);
+  onSeedConsumedRef.current = onSeedConsumed;
+  const onSessionReadyRef = useRef(onSessionReady);
+  onSessionReadyRef.current = onSessionReady;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -99,9 +148,11 @@ export function BuilderCanvas({ heldPartId, heldColorCode, onHeldConsumed }: Bui
     const session = new EditorSession(sceneSync);
     const placement = new PlacementController(renderer);
 
+    rendererRef.current = renderer;
     placementRef.current = placement;
     sessionRef.current = session;
     catalogRef.current = catalog;
+    onSessionReadyRef.current?.(session);
 
     const syncSelection = (): void => {
       const entries: SelectionEntry[] = [];
@@ -161,6 +212,25 @@ export function BuilderCanvas({ heldPartId, heldColorCode, onHeldConsumed }: Bui
         session.setSelection([]);
       } else if (event.shiftKey) {
         session.setSelection([...session.selection, hit.brick]);
+      } else if (session.selection.size === 1 && session.selection.has(hit.brick)) {
+        // Click an already-selected piece again to pick it back up: it rejoins the
+        // same placement pipeline a fresh chest choice uses, so the next placement
+        // re-solves candidates, mating and collision structurally rather than through
+        // a bespoke check bolted onto a move. Removing it now, rather than only on
+        // commit, is what lets the rest of the scene re-mate to the space it
+        // vacated — the same reason a keyboard nudge excludes the moving set from its
+        // own collision/mating check (EditorSession.transformSelection).
+        const brick = session.document.bricks.get(hit.brick);
+        const found = session.lookup(hit.brick);
+        if (brick && found) {
+          session.remove([hit.brick]);
+          session.setSelection([]);
+          placement.pickUp(found.part, brick.colorCode, brick.transform);
+          // Paint immediately at the current cursor position rather than waiting for
+          // the next pointermove — otherwise the piece vanishes with no ghost until
+          // the mouse happens to move.
+          placement.move(...pos);
+        }
       } else {
         session.setSelection([hit.brick]);
       }
@@ -201,7 +271,16 @@ export function BuilderCanvas({ heldPartId, heldColorCode, onHeldConsumed }: Bui
       }
 
       if (placement.holding) {
-        if (event.key === ']') placement.cycle();
+        if (event.key === 'Escape') {
+          // A picked-up piece was already removed from the document the moment it
+          // was picked up (see onUp), so cancelling restores it exactly — same id,
+          // same transform, same edges — via the one mechanism already guaranteed to
+          // do that: undoing the transaction that removed it. A fresh chest hold
+          // never touched the document, so it just lets go of the cursor.
+          if (placement.pickedUp) session.undo();
+          else onHeldConsumedRef.current(); // also clears the chest tile's held state
+          placement.hold(null);
+        } else if (event.key === ']') placement.cycle();
         else if (event.key.toLowerCase() === 'r') placement.rotate(lastPointer);
         return;
       }
@@ -222,22 +301,32 @@ export function BuilderCanvas({ heldPartId, heldColorCode, onHeldConsumed }: Bui
       const y = fine ? FINE_Y : STEP_Y;
       const deg = fine ? FINE_ROTATE_DEG : ROTATE_DEG;
 
+      // Screen-relative, not world-relative: read fresh on every keypress, because the
+      // camera can have orbited since the last one. Without this, "left" reads as
+      // world -X regardless of where the camera is looking — correct only until
+      // someone orbits behind the model, at which point every arrow reads reversed.
+      const ground = renderer.groundBasis();
+      const along = (dir: Vec3, magnitude: number): Mat4 =>
+        fromTranslation([dir[0] * magnitude, dir[1] * magnitude, dir[2] * magnitude]);
+
       switch (event.key) {
         case 'ArrowLeft':
           if (event.shiftKey) session.transformSelection(selection, rotationDelta((-deg * Math.PI) / 180), rotateLabel);
-          else session.transformSelection(selection, fromTranslation([-xz, 0, 0]), label);
+          else session.transformSelection(selection, along(ground.right, -xz), label);
           break;
         case 'ArrowRight':
           if (event.shiftKey) session.transformSelection(selection, rotationDelta((deg * Math.PI) / 180), rotateLabel);
-          else session.transformSelection(selection, fromTranslation([xz, 0, 0]), label);
+          else session.transformSelection(selection, along(ground.right, xz), label);
           break;
         case 'ArrowUp':
-          if (!event.shiftKey) session.transformSelection(selection, fromTranslation([0, 0, -xz]), label);
+          if (!event.shiftKey) session.transformSelection(selection, along(ground.forward, xz), label);
           break;
         case 'ArrowDown':
-          if (!event.shiftKey) session.transformSelection(selection, fromTranslation([0, 0, xz]), label);
+          if (!event.shiftKey) session.transformSelection(selection, along(ground.forward, -xz), label);
           break;
         case 'PageUp':
+          // Vertical, not screen-relative: world Y stays "up" regardless of camera
+          // azimuth, so this one key needs no camera correction.
           session.transformSelection(selection, fromTranslation([0, -y, 0]), label);
           break;
         case 'PageDown':
@@ -270,11 +359,23 @@ export function BuilderCanvas({ heldPartId, heldColorCode, onHeldConsumed }: Bui
       unsubscribe();
       sound.dispose();
       renderer.dispose();
+      rendererRef.current = null;
       placementRef.current = null;
       sessionRef.current = null;
       catalogRef.current = null;
+      onSessionReadyRef.current?.(null);
     };
   }, []);
+
+  // A whole document to load — opening a bundled model. The import itself already
+  // happened above this component; this just hands the result to the one session.
+  useEffect(() => {
+    const session = sessionRef.current;
+    if (!session || !seed) return;
+    session.loadDocument(seed.document, seed.parts);
+    rendererRef.current?.frameAll();
+    onSeedConsumedRef.current();
+  }, [seed]);
 
   // Clicking a part in the chest puts it on the cursor — the hold gesture — and clears
   // whatever was selected, since a placement gesture is starting, not a selection edit.
