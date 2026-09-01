@@ -4,6 +4,7 @@ export type { ToolbarSession } from './session';
 export { useUndoRedo, handleGlobalUndoRedoKeydown } from './useUndoRedo';
 export type { UndoRedoKeyEvent } from './useUndoRedo';
 export { useGrouping } from './useGrouping';
+export { useSoundMute } from './useSoundMute';
 export {
   buildGroupTransaction,
   buildUngroupTransaction,

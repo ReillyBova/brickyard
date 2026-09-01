@@ -26,10 +26,40 @@ export interface ClickOptions {
   gain?: number;
 }
 
+const STORAGE_KEY = 'by-sound-muted';
+
+/** Reads the stored preference. Private browsing and blocked site data both throw. */
+function readStoredMuted(): boolean {
+  try {
+    return window.localStorage.getItem(STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function writeStoredMuted(muted: boolean): void {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, muted ? 'true' : 'false');
+  } catch {
+    // Private browsing / blocked site data — the app still mutes for this session, it
+    // just won't be remembered next load.
+  }
+}
+
+/**
+ * Mute is a class-level switch, not an instance flag: `SceneRenderer` and
+ * `BuilderCanvas` each construct their own `SnapSound` for their own call site (arrival
+ * clicks vs. placement clicks), and neither knows about the other. A per-instance
+ * `enabled` would need both callers to remember to wire the same toggle to both
+ * instances — a static one means muting is a property of "brick sounds", not of any
+ * particular `SnapSound`, and a third call site gains it for free just by constructing
+ * one.
+ */
 export class SnapSound {
+  private static globalMuted = readStoredMuted();
+
   private context: AudioContext | null = null;
   private noise: AudioBuffer | null = null;
-  private enabled = true;
 
   /**
    * Browsers refuse to start audio without a user gesture. Placement *is* a gesture, so
@@ -59,12 +89,15 @@ export class SnapSound {
     return buffer;
   }
 
-  get muted(): boolean {
-    return !this.enabled;
+  /** Whether brick sounds are muted, app-wide. Defaults to on (unmuted). */
+  static get muted(): boolean {
+    return SnapSound.globalMuted;
   }
 
-  setMuted(muted: boolean): void {
-    this.enabled = !muted;
+  /** Mutes or unmutes every `SnapSound`, and persists the choice. */
+  static setMuted(muted: boolean): void {
+    SnapSound.globalMuted = muted;
+    writeStoredMuted(muted);
   }
 
   /**
@@ -76,7 +109,9 @@ export class SnapSound {
    * screen space and no attention.
    */
   play(strength = 1, options: ClickOptions = {}): void {
-    if (!this.enabled) return;
+    // Checked before `ensure()`, not after: a muted app never opens an `AudioContext`
+    // at all, rather than opening one and discarding every click it would have played.
+    if (SnapSound.globalMuted) return;
     const ctx = this.ensure();
     if (!ctx) return;
     // A context created before any gesture starts suspended; resuming is a no-op once running.
