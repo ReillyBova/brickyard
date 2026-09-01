@@ -20,13 +20,13 @@
  * Pure: no three.js, no DOM. Safe inside a worker.
  */
 
-import { invert, transformPoint } from '../math';
-import type { BrickId, Bounds, Mat4, Vec3 } from '../types';
-import { isCompatible } from './compat';
-import { MATE_TOLERANCE, worldPoint } from './mating';
-import { worldBounds } from './spatialIndex';
-import type { Collides, ConnectionPoint, OccupancyMask, PartDef, SpatialIndex } from './types';
-import type { Triangle } from '../ldraw/bounds';
+import { invert, transformPoint } from '../math.ts';
+import type { BrickId, Bounds, Mat4, Vec3 } from '../types.ts';
+import { isCompatible } from './compat.ts';
+import { MATE_TOLERANCE, worldPoint } from './mating.ts';
+import { worldBounds } from './spatialIndex.ts';
+import type { Collides, ConnectionPoint, OccupancyMask, PartDef, SpatialIndex } from './types.ts';
+import type { Triangle } from '../ldraw/bounds.ts';
 
 // ---------------------------------------------------------------------------
 // Occupancy mask construction

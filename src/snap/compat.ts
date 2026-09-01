@@ -5,7 +5,7 @@
  * once per candidate pair on the pointer-move path.
  */
 
-import type { ConnectionPoint, Gender, SectionVariant, SnapKind } from './types';
+import type { ConnectionPoint, Gender, SectionVariant, SnapKind } from './types.ts';
 
 const KIND_NAME: readonly (SnapKind | null)[] = [null, 'cyl', 'clip', 'finger', 'general'];
 const VARIANT_NAME: readonly (SectionVariant | null)[] = [null, 'R', 'S', 'A'];

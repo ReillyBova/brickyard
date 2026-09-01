@@ -16,7 +16,7 @@
 
 import { mat4 as glMat4, vec3 as glVec3 } from 'gl-matrix';
 
-import type { Mat3, Mat4, Vec3 } from './types';
+import type { Mat3, Mat4, Vec3 } from './types.ts';
 
 /**
  * gl-matrix types its inputs as mutable indexed collections; ours are readonly.

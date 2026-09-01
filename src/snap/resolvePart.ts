@@ -11,9 +11,9 @@
  * reader, which is what keeps this safe in a worker and offline in tests.
  */
 
-import type { Mat3, Mat4, Vec3 } from '../types';
-import type { ConnectionPoint, Gender, Section, SnapKind } from './types';
-import type { SnapAttributes, SnapCommand } from './parseMeta';
+import type { Mat3, Mat4, Vec3 } from '../types.ts';
+import type { ConnectionPoint, Gender, Section, SnapKind } from './types.ts';
+import type { SnapAttributes, SnapCommand } from './parseMeta.ts';
 import {
   KIND_BY_COMMAND,
   gridOffsets,
@@ -27,8 +27,8 @@ import {
   parseSections,
   parseSnapLine,
   parseVec3,
-} from './parseMeta';
-import { IDENTITY, fromBasis, fromTranslation, multiply, positionOf, transformDirection } from '../math';
+} from './parseMeta.ts';
+import { IDENTITY, fromBasis, fromTranslation, multiply, positionOf, transformDirection } from '../math.ts';
 
 /**
  * Reads one library file. Paths are namespaced: `ldraw/parts/3001.dat` for geometry,

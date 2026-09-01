@@ -6,11 +6,11 @@
  * would need rebuilding.
  */
 
-import { transformDirection, transformPoint } from '../math';
-import type { BrickId, Bounds, Mat4, Vec3 } from '../types';
-import { pointMatrix } from './mating';
-import { multiply } from '../math';
-import type { IndexedPoint, PartDef, SpatialIndex } from './types';
+import { transformDirection, transformPoint } from '../math.ts';
+import type { BrickId, Bounds, Mat4, Vec3 } from '../types.ts';
+import { pointMatrix } from './mating.ts';
+import { multiply } from '../math.ts';
+import type { IndexedPoint, PartDef, SpatialIndex } from './types.ts';
 
 /** One stud pitch. A query radius well under this touches a handful of cells. */
 export const CELL_SIZE = 20;
