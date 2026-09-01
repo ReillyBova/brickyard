@@ -160,9 +160,15 @@ export class SceneRenderer {
 
   // ---- ghost ------------------------------------------------------------------------
 
-  async showGhost(partId: string, _colorCode: number, transform: Mat4, valid: boolean): Promise<void> {
+  async showGhost(
+    partId: string,
+    _colorCode: number,
+    transform: Mat4,
+    valid: boolean,
+    wireframe = false,
+  ): Promise<void> {
     const geometry = await this.loadGeometry(partId);
-    this.ghost.show(geometry, transform, valid);
+    this.ghost.show(geometry, transform, valid, wireframe);
   }
 
   hideGhost(): void {

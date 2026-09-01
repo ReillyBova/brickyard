@@ -116,7 +116,7 @@ export interface PlacedBrick {
 export interface PlacementScene {
   pick(ndcX: number, ndcY: number): { brick: BrickId; point: Vec3; normal: Vec3 } | null;
   pickRay(ndcX: number, ndcY: number): { origin: Vec3; direction: Vec3 };
-  showGhost(partId: string, colorCode: number, transform: Mat4, valid: boolean): Promise<void>;
+  showGhost(partId: string, colorCode: number, transform: Mat4, valid: boolean, wireframe?: boolean): Promise<void>;
   hideGhost(): void;
 }
 
@@ -152,6 +152,13 @@ export class PlacementController {
   private held: PartDef | null = null;
   private heldColor = 4;
   private previous: Mat4 | undefined;
+  /**
+   * Set by `pickUp`, cleared by `hold`/`commit`. A picked-up piece renders as a
+   * wireframe outline throughout — see `ghost.ts` — so it reads as "you're relocating
+   * something that already exists" rather than "here is a new one", the way a fresh
+   * chest choice does.
+   */
+  private wasPickedUp = false;
 
   private readonly scene: PlacementScene;
 
@@ -164,13 +171,38 @@ export class PlacementController {
     return this.held !== null;
   }
 
+  /** Whether the piece on the cursor came from the baseplate rather than the chest. */
+  get pickedUp(): boolean {
+    return this.wasPickedUp;
+  }
+
   /** The piece on the cursor. Null puts the tool back into selection. */
   hold(part: PartDef | null, colorCode = this.heldColor): void {
     this.held = part;
     this.heldColor = colorCode;
+    this.wasPickedUp = false;
     this.previous = undefined;
     this.state = { candidates: [], index: 0, roll: 0, transform: null, valid: false };
     if (part === null) this.scene.hideGhost();
+  }
+
+  /**
+   * Take an already-placed piece back onto the cursor, rejoining the same placement
+   * pipeline a fresh chest choice uses — the next placement re-solves candidates,
+   * mating and collision exactly as it would for a new piece, structurally rather
+   * than needing its own bespoke check (see `EditorSession.transformSelection`'s
+   * `collides()` fix for the alternative this sidesteps).
+   *
+   * `previousTransform` seeds continuity with where the piece actually was, so the
+   * first hover after picking it up favours landing back near its own former spot
+   * over some other candidate the cursor happens to be closer to.
+   */
+  pickUp(part: PartDef, colorCode: number, previousTransform: Mat4): void {
+    this.held = part;
+    this.heldColor = colorCode;
+    this.wasPickedUp = true;
+    this.previous = previousTransform;
+    this.state = { candidates: [], index: 0, roll: 0, transform: null, valid: false };
   }
 
   /**
@@ -289,7 +321,7 @@ export class PlacementController {
       this.scene.hideGhost();
       return;
     }
-    await this.scene.showGhost(this.held.id, this.heldColor, transform, this.state.valid);
+    await this.scene.showGhost(this.held.id, this.heldColor, transform, this.state.valid, this.wasPickedUp);
   }
 
   /**
@@ -320,6 +352,7 @@ export class PlacementController {
       valid: false,
     };
     this.previous = undefined;
+    this.wasPickedUp = false;
     this.scene.hideGhost();
     return brick;
   }

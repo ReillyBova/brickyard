@@ -65,7 +65,10 @@ interface BuilderCanvasProps {
   heldPartId?: string;
   /** The active palette color — applied to a newly held piece, and to one already held. */
   heldColorCode: number;
-  /** Fired once a held piece lands, so the chest tile that put it on the cursor clears. */
+  /**
+   * Fired once a held piece lands, or the hold is cancelled with Escape, so the chest
+   * tile that put it on the cursor clears either way.
+   */
   onHeldConsumed: () => void;
   /**
    * A whole document to load in place of whatever's on the baseplate — opening a
@@ -209,6 +212,25 @@ export function BuilderCanvas({
         session.setSelection([]);
       } else if (event.shiftKey) {
         session.setSelection([...session.selection, hit.brick]);
+      } else if (session.selection.size === 1 && session.selection.has(hit.brick)) {
+        // Click an already-selected piece again to pick it back up: it rejoins the
+        // same placement pipeline a fresh chest choice uses, so the next placement
+        // re-solves candidates, mating and collision structurally rather than through
+        // a bespoke check bolted onto a move. Removing it now, rather than only on
+        // commit, is what lets the rest of the scene re-mate to the space it
+        // vacated — the same reason a keyboard nudge excludes the moving set from its
+        // own collision/mating check (EditorSession.transformSelection).
+        const brick = session.document.bricks.get(hit.brick);
+        const found = session.lookup(hit.brick);
+        if (brick && found) {
+          session.remove([hit.brick]);
+          session.setSelection([]);
+          placement.pickUp(found.part, brick.colorCode, brick.transform);
+          // Paint immediately at the current cursor position rather than waiting for
+          // the next pointermove — otherwise the piece vanishes with no ghost until
+          // the mouse happens to move.
+          placement.move(...pos);
+        }
       } else {
         session.setSelection([hit.brick]);
       }
@@ -249,7 +271,16 @@ export function BuilderCanvas({
       }
 
       if (placement.holding) {
-        if (event.key === ']') placement.cycle();
+        if (event.key === 'Escape') {
+          // A picked-up piece was already removed from the document the moment it
+          // was picked up (see onUp), so cancelling restores it exactly — same id,
+          // same transform, same edges — via the one mechanism already guaranteed to
+          // do that: undoing the transaction that removed it. A fresh chest hold
+          // never touched the document, so it just lets go of the cursor.
+          if (placement.pickedUp) session.undo();
+          else onHeldConsumedRef.current(); // also clears the chest tile's held state
+          placement.hold(null);
+        } else if (event.key === ']') placement.cycle();
         else if (event.key.toLowerCase() === 'r') placement.rotate(lastPointer);
         return;
       }
