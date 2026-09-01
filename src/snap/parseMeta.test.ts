@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   gridOffsets,
+  isSymmetric,
   matingSection,
   packKey,
   parseAttributes,
@@ -264,6 +265,36 @@ describe('matingSection', () => {
   });
 });
 
+describe('isSymmetric', () => {
+  it('is trivially true for a single section — every plain stud and socket', () => {
+    expect(isSymmetric(parseSections('R 6 4'))).toBe(true);
+  });
+
+  it('is true for a real Technic hole, centred and capped at both ends alike', () => {
+    expect(isSymmetric(parseSections('R 8 2 R 6 16 R 8 2'))).toBe(true);
+  });
+
+  it('is true for the real Technic pin, five sections mirrored around the middle', () => {
+    expect(isSymmetric(parseSections('R 6.25 2 R 6 16 R 8 4 R 6 16 R 6.25 2'))).toBe(true);
+  });
+
+  it('is false for the real 6141 stud — a flared base narrowing to a tip', () => {
+    expect(isSymmetric(parseSections('R 10 3 R 6 4'))).toBe(false);
+  });
+
+  it('is false when only the radii differ from front to back', () => {
+    expect(isSymmetric(parseSections('R 8 4 R 6 4 R 4 4'))).toBe(false);
+  });
+
+  it('is false when radii match but lengths do not', () => {
+    expect(isSymmetric(parseSections('R 8 2 R 6 16 R 8 4'))).toBe(false);
+  });
+
+  it('is true for an empty profile — vacuously, nothing to disagree', () => {
+    expect(isSymmetric([])).toBe(true);
+  });
+});
+
 describe('packKey', () => {
   const stud = () => packKey('cyl', 'M', parseSections('R 6 4'), false);
   const socket = () => packKey('cyl', 'F', parseSections('R 6 20'), false);
@@ -280,6 +311,14 @@ describe('packKey', () => {
     expect((key >> 5) & 0b11).toBe(1); // variant: R
     expect((key >> 7) & 0xff).toBe(12); // radius 6 in half-LDU buckets
     expect((key >> 15) & 1).toBe(1); // slide
+    expect((key >> 16) & 1).toBe(1); // symmetric: 8·2·8 reads the same backwards
+  });
+
+  it('marks an asymmetric profile as not symmetric', () => {
+    // 6141's real decorative stud: a flared base narrowing to a tip. Forwards and
+    // backwards read differently, so it has one true direction.
+    const key = packKey('cyl', 'M', parseSections('R 10 3 R 6 4'), true);
+    expect((key >> 16) & 1).toBe(0);
   });
 
   it('separates the two genders of the same profile', () => {

@@ -17,6 +17,8 @@ export interface UnpackedKey {
   /** Half-LDU steps; 0 means the point carries no section profile. */
   radiusBucket: number;
   slide: boolean;
+  /** Whether the full profile reads the same from either end — see parseMeta.isSymmetric. */
+  symmetric: boolean;
 }
 
 export function unpackKey(key: number): UnpackedKey {
@@ -26,6 +28,7 @@ export function unpackKey(key: number): UnpackedKey {
     variant: VARIANT_NAME[(key >> 5) & 0b11] ?? null,
     radiusBucket: (key >> 7) & 0xff,
     slide: ((key >> 15) & 1) === 1,
+    symmetric: ((key >> 16) & 1) === 1,
   };
 }
 

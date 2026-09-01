@@ -138,16 +138,31 @@ export function findMates(
 
     for (const other of index.near(position, radius)) {
       if (exclude?.has(other.brick)) continue;
-      // Co-directional, *unless* either side slides — a Technic pin or an axle has no
-      // "one true end": p/axlehole.dat and p/connhole.dat are both drawn open at both
-      // faces (`caps=none`), so a hole threaded from the opposite direction is exactly
-      // as valid a mate as one threaded from the modelled direction, and its axis reads
-      // as the exact negation rather than a near match. Measured on the bundled models:
-      // every isolated Technic axle and friction pin had its true mate sitting at
-      // distance 0 with dot -1 — rejected by this check alone, nothing else wrong.
-      const otherSlide = unpackKey(other.key).slide;
-      const slides = mine.slide || otherSlide;
-      const aligned = slides ? Math.abs(dot(axis, other.axis)) : dot(axis, other.axis);
+      const otherKey = unpackKey(other.key);
+      const slides = mine.slide || otherKey.slide;
+
+      // Co-directional, *unless* the pair is genuinely bidirectional — a Technic pin or
+      // an axle has no "one true end": p/axlehole.dat and p/connhole.dat are both drawn
+      // open at both faces (`caps=none`), and their full profiles read the same forwards
+      // and backwards, so a hole threaded from the opposite direction is exactly as valid
+      // a mate as one threaded from the modelled direction, and its axis reads as the
+      // exact negation rather than a near match. Measured on the bundled models: every
+      // isolated Technic axle and friction pin had its true mate sitting at distance 0
+      // with dot -1 — rejected by this check alone, nothing else wrong.
+      //
+      // Bidirectional needs both `slides` and `symmetric`, not either alone. `slides` on
+      // its own is too broad: `6141`'s decorative stud slides too (`R 10 3 · R 6 4`, a
+      // flared base narrowing to a tip) but is not symmetric — flared end first, narrow
+      // end second, no reverse reading — so it has one true direction like any ordinary
+      // stud. Once the search below started reaching along the axis for slide connectors
+      // in general, that stud matched a real neighbour's socket 15 LDU away pointing the
+      // wrong way entirely. `symmetric` on its own is too broad the other way: a
+      // single-section profile — a plain stud, `R 6 4` — is trivially a palindrome, so
+      // every ordinary connector reads as symmetric too, and the strict, load-bearing
+      // check for stud-on-stud stacking (an upside-down brick whose sockets face away)
+      // must stay strict for them.
+      const bidirectional = slides && mine.symmetric && otherKey.symmetric;
+      const aligned = bidirectional ? Math.abs(dot(axis, other.axis)) : dot(axis, other.axis);
       if (aligned < AXIS_TOLERANCE) continue;
 
       if (slides) {

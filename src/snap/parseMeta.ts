@@ -283,6 +283,31 @@ export function matingSection(sections: readonly Section[]): Section | null {
 }
 
 /**
+ * Whether a profile reads the same from either end — every section's variant, radius and
+ * length mirrored around the middle. A single section is trivially symmetric.
+ *
+ * This is what tells a genuinely bidirectional connector (a Technic pin or an axle,
+ * `caps=none` and often `center=true`, meant to be entered from either end) apart from one
+ * that merely permits variable-depth engagement from one fixed, specific direction — a
+ * flared or tapered stud, `slide=true` but with a distinct wide end and narrow end, that
+ * cannot legitimately be approached the other way. `6141`'s decorative stud is real,
+ * measured proof of the difference: `R 10 3 · R 6 4`, `slide=true`, but *not* symmetric —
+ * flared base first, narrower tip second, no reverse reading. Without this check it read
+ * as interchangeable with the genuinely bidirectional family, and a search that reaches
+ * along the axis for a Technic pin's partial insertion found *this* stud's mate 15 LDU
+ * away pointing the wrong direction entirely, and accepted it.
+ */
+export function isSymmetric(sections: readonly Section[]): boolean {
+  const n = sections.length;
+  for (let i = 0; i < n; i++) {
+    const a = sections[i];
+    const b = sections[n - 1 - i];
+    if (a.variant !== b.variant || a.radius !== b.radius || a.length !== b.length) return false;
+  }
+  return true;
+}
+
+/**
  * Compatibility key. Packed so that matching is an integer table lookup rather than a
  * chain of comparisons on the hot path.
  *
@@ -292,6 +317,7 @@ export function matingSection(sections: readonly Section[]): Section | null {
  *  bits  5..6   variant       1 R · 2 S · 3 A   (of the mating section)
  *  bits  7..14  radius        round(radius / 0.5), must fit in 0..255
  *  bit   15     slide
+ *  bit   16     symmetric     the full profile, not just the mating section — see isSymmetric
  * ```
  *
  * Zero in the variant and radius fields means "no section profile", which is how a
@@ -327,6 +353,7 @@ export function packKey(
     (GENDER_CODE[gender] << 3) |
     (variant << 5) |
     (bucket << 7) |
-    ((slide ? 1 : 0) << 15)
+    ((slide ? 1 : 0) << 15) |
+    ((isSymmetric(sections) ? 1 : 0) << 16)
   );
 }
