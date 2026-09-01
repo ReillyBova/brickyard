@@ -15,5 +15,10 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    // Performance budgets live in `*.perf.test.ts` and run under
+    // `vitest.perf.config.ts` (`npm run test:perf`): they measure wall clock, which is
+    // the machine's business as much as the code's, so they stay out of the gate CI and
+    // every worktree runs on every change.
+    exclude: ['src/**/*.perf.test.ts'],
   },
 })

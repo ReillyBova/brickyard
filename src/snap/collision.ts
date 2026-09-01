@@ -134,7 +134,7 @@ function rayTriangle(origin: Vec3, dir: Vec3, tri: Triangle): number | null {
  * A row is a line running the full X extent through one (iy, iz) cell, so a triangle can
  * only be hit by that row's ray if its own Y/Z extent covers the cell — which is exactly
  * what its voxel range records. Bucketing is therefore conservative, not approximate: no
- * crossing is lost, the ray simply stops being tested against the ~99% of a dish's
+ * crossing is lost, the ray simply stops being tested against the ~99% of a big part's
  * triangles that lie in other rows entirely.
  */
 function bucketByRow(
@@ -176,9 +176,9 @@ function bucketByRow(
  * that row's triangles yields every crossing on it; sorting those crossings then gives
  * each voxel on the row its own parity — the count of crossings still ahead of it — for
  * free. Combined with `bucketByRow`, the cost is triangles + rows x (triangles per row)
- * rather than voxels x triangles, which is what keeps large, high-poly curved parts
- * tractable: part `3947` (a radar dish, 384,000 voxels against 39,304 triangles)
- * voxelises in about 15ms; testing every voxel against every triangle takes minutes.
+ * rather than voxels x triangles, which is what keeps large, high-poly parts tractable:
+ * part `3947` (a 32x32 crater baseplate: 384,000 voxels, 39,304 triangles) voxelises in
+ * about 15ms; testing every voxel against every triangle takes minutes.
  *
  * The ray is axis-aligned so that one line serves the whole row, with its origin nudged
  * off the exact cell center by an irrational-looking fraction of a cell — the job the old
@@ -458,8 +458,8 @@ function overlapVoxelRange(
  * catch a solid `other` voxel whose center a `part` voxel narrowly missed.
  *
  * Only the voxels `other` can actually reach are visited (`overlapVoxelRange`). A part's
- * grid is its whole bounding box — a 6x6 dish is 384,000 voxels — while two placed parts
- * touch over a small fraction of that, and this runs per candidate brick, both ways
+ * grid is its whole bounding box — a 32x32 baseplate is 384,000 voxels — while two placed
+ * parts touch over a small fraction of that, and this runs per candidate brick, both ways
  * round, on every frame of a drag.
  */
 function anyOccupiedVoxelInside(

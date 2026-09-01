@@ -11,6 +11,7 @@ npm run dev              # dev server on :5173
 PORT=5174 npm run dev    # override port — required when multiple worktrees run at once
 npm run build            # production build
 npm run test             # vitest
+npm run test:perf        # collision performance budgets (excluded from the unit suite)
 npm run prebake          # regenerate the baked parts catalog
 ```
 
