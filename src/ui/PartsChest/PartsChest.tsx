@@ -26,6 +26,25 @@ interface PartsChestProps {
 
 const ALL_CATEGORIES = 'All categories';
 
+/** Chest categories, most-reached-for first. See `categories` below. */
+const CATEGORY_ORDER = [
+  'Bricks',
+  'Plates',
+  'Tiles',
+  'Slopes',
+  'Wedges',
+  'Arches',
+  'Round',
+  'SNOT',
+  'Hinges',
+  'Connectors',
+  'Technic',
+  'Wheels',
+  'Windows & Doors',
+  'Plants',
+  'Minifigure',
+];
+
 interface Group {
   category: string;
   parts: ChestPart[];
@@ -58,10 +77,18 @@ export function PartsChest({
   /** `undefined` means no category filter — "All categories". */
   const [category, setCategory] = useState<string | undefined>(undefined);
 
-  const categories = useMemo(
-    () => Array.from(new Set(parts.map((part) => part.category))).sort((a, b) => a.localeCompare(b)),
-    [parts],
-  );
+  const categories = useMemo(() => {
+    const present = new Set(parts.map((part) => part.category));
+    // Ordered by how often a builder reaches for them, not alphabetically — bricks and
+    // plates are most of any model, minifigure and decorative parts are the long tail.
+    // Anything not listed sorts alphabetically after these.
+    const rank = new Map(CATEGORY_ORDER.map((name, i) => [name, i]));
+    return Array.from(present).sort((a, b) => {
+      const ra = rank.get(a) ?? Number.MAX_SAFE_INTEGER;
+      const rb = rank.get(b) ?? Number.MAX_SAFE_INTEGER;
+      return ra === rb ? a.localeCompare(b) : ra - rb;
+    });
+  }, [parts]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

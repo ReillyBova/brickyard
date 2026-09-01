@@ -52,6 +52,13 @@ const DEFAULT_OUT = 'src/ui/PartsChest/catalog.generated.json'
  * membership and grouping are still product decisions, same as `tools/prebake.ts`'s
  * `DEFAULT_CHEST`.
  */
+/**
+ * Parts that resolve and carry connectivity but do not render — kept out of the chest
+ * rather than shipped as blank tiles. Add here rather than hand-editing the generated
+ * catalog, which a rebuild would overwrite.
+ */
+const EXCLUDED_PARTS = new Set(['3572', '5850']);
+
 const CURATED_CHEST: readonly { id: string; category: string }[] = [
   // Minifigure
   { id: '3626bp01', category: 'Minifigure' },
@@ -552,6 +559,7 @@ async function readCatalog(readLibrary: MirrorReader, source: 'mirror' | 'fixtur
   const catalog: CatalogEntry[] = []
   const missing: string[] = []
   for (const { id, category } of CURATED_CHEST) {
+    if (EXCLUDED_PARTS.has(id)) continue;
     const text = await readLibrary(`${id}.dat`)
     if (text === null) {
       missing.push(id)
