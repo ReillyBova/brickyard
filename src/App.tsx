@@ -38,7 +38,7 @@ import { PathtraceToggle } from './features/pathtrace/PathtraceToggle';
 import type { PathtraceStats } from './features/pathtrace/PathTracerController';
 import { RestyleContainer } from './features/restyle';
 import type { SceneRenderer } from './scene/SceneRenderer.ts';
-import { Toolbar, useGrouping, useUndoRedo } from './ui/toolbar';
+import { Toolbar, useGrouping, useSoundMute, useUndoRedo } from './ui/toolbar';
 import type { ToolbarAction } from './ui/toolbar/types';
 
 /** The app's three modes. Editor is where everything is built; the other two are views over it. */
@@ -152,6 +152,7 @@ function BuilderToolbar({
 
   const [undoAction, redoAction] = useUndoRedo(session);
   const [groupAction, ungroupAction] = useGrouping(session);
+  const soundAction = useSoundMute();
 
   // Restyle is an action *within* the editor, not a mode — it recolors whatever is
   // loaded, so it only makes sense while the editor owns the view.
@@ -194,6 +195,7 @@ function BuilderToolbar({
         { kind: 'group', group: { id: 'style', actions: [restyleAction] } },
         { kind: 'group', group: { id: 'clear', actions: [clearAction] } },
         { kind: 'group', group: { id: 'file', actions: fileActions } },
+        { kind: 'group', group: { id: 'sound', actions: [soundAction] } },
         {
           kind: 'modeSwitch',
           modeSwitch: {
