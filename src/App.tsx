@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { importModel, RESOLVE_SHARE } from './features/omr/importModel';
+import { LoadModelPanel } from './features/omr/LoadModelPanel';
+import { MODELS_BASE } from './features/omr/modelIndex';
 import { createNetworkReader } from './features/omr/network';
 import type { BundledModelEntry } from './features/omr/types';
 import {
@@ -11,7 +13,6 @@ import {
   useFileActions,
 } from './features/persist';
 import { AppRouter } from './routes/AppRouter';
-import { MODELS_BASE } from './routes/ModelPicker';
 import { useRoute } from './routes/route-context';
 import { RouteProvider } from './routes/router';
 import type { DocumentSeed } from './scene/interaction/BuilderCanvas.tsx';
@@ -23,7 +24,7 @@ import { RuntimeThumbnailRenderer } from './scene/thumbnail.ts';
 import { AppShell } from './ui/AppShell/AppShell';
 import { ColorPicker } from './ui/ColorPicker/ColorPicker';
 import { LDRAW_PALETTE } from './ui/ColorPicker/palette';
-import { ApertureIcon, EditorIcon, GraphModeIcon } from './ui/icons';
+import { ApertureIcon, EditorIcon, GraphModeIcon, PackageIcon, PaintbrushIcon } from './ui/icons';
 import { PartsChest } from './ui/PartsChest/PartsChest';
 import { PART_CATALOG } from './ui/PartsChest/catalog';
 import { GraphModeMount } from './features/graph';
@@ -36,7 +37,6 @@ import { PathtraceToggle } from './features/pathtrace/PathtraceToggle';
 import type { PathtraceStats } from './features/pathtrace/PathTracerController';
 import { RestyleContainer } from './features/restyle';
 import type { SceneRenderer } from './scene/SceneRenderer.ts';
-import { PaintbrushIcon } from './ui/icons';
 import { Toolbar, useGrouping, useUndoRedo } from './ui/toolbar';
 import type { ToolbarAction } from './ui/toolbar/types';
 
@@ -110,12 +110,16 @@ function BuilderToolbar({
   onModeChange,
   onToggleRestyle,
   restyleOpen,
+  onToggleLoadModel,
+  loadModelOpen,
   fileActions,
 }: {
   mode: AppMode;
   onModeChange: (mode: AppMode) => void;
   onToggleRestyle: () => void;
   restyleOpen: boolean;
+  onToggleLoadModel: () => void;
+  loadModelOpen: boolean;
   /** Save / Open / Export / Import — built in `SandboxEditor` via `useFileActions`, so
    * the dialog guarding the wordmark and this toolbar group share one `markSaved`. */
   fileActions: readonly ToolbarAction[];
@@ -141,9 +145,23 @@ function BuilderToolbar({
     onClick: onToggleRestyle,
   };
 
+  // Loading a model is an action within the editor too, the same as restyle — it opens
+  // the chest rail's counterpart to `/models` rather than switching anywhere, so
+  // building and loading stay in one place. First in the list: it's the primary way
+  // content gets onto the baseplate, alongside the file actions.
+  const loadModelAction = {
+    id: 'load-model',
+    label: 'Load model',
+    icon: <PackageIcon />,
+    active: loadModelOpen,
+    disabled: session === null || mode !== 'editor',
+    onClick: onToggleLoadModel,
+  };
+
   return (
     <Toolbar
       items={[
+        { kind: 'group', group: { id: 'load', actions: [loadModelAction] } },
         { kind: 'group', group: { id: 'history', actions: [undoAction, redoAction] } },
         { kind: 'group', group: { id: 'grouping', actions: [groupAction, ungroupAction] } },
         { kind: 'group', group: { id: 'style', actions: [restyleAction] } },
@@ -188,6 +206,7 @@ function SandboxEditor({
   const [session, setSession] = useState<EditorSession | null>(null);
   const [mode, setMode] = useState<AppMode>('editor');
   const [restyleOpen, setRestyleOpen] = useState(false);
+  const [loadModelOpen, setLoadModelOpen] = useState(false);
   const [environment, setEnvironment] = useState<PathtraceEnvironment>(DEFAULT_ENVIRONMENT);
   const [lighting, setLighting] = useState<LightingPreset>(DEFAULT_LIGHTING);
   const [pathtraceStats, setPathtraceStats] = useState<PathtraceStats | null>(null);
@@ -321,10 +340,21 @@ function SandboxEditor({
             mode={mode}
             onModeChange={(next) => {
               setMode(next);
-              if (next !== 'editor') setRestyleOpen(false);
+              if (next !== 'editor') {
+                setRestyleOpen(false);
+                setLoadModelOpen(false);
+              }
             }}
-            onToggleRestyle={() => setRestyleOpen((open) => !open)}
+            onToggleRestyle={() => {
+              setRestyleOpen((open) => !open);
+              setLoadModelOpen(false);
+            }}
             restyleOpen={restyleOpen}
+            onToggleLoadModel={() => {
+              setLoadModelOpen((open) => !open);
+              setRestyleOpen(false);
+            }}
+            loadModelOpen={loadModelOpen}
             fileActions={fileActions.actions}
           />
         }
@@ -341,6 +371,16 @@ function SandboxEditor({
             // colors there is nothing to place, and the palette below would compete with
             // the panel's own per-row color targets.
             <RestyleContainer session={session} onClose={() => setRestyleOpen(false)} />
+          ) : loadModelOpen && session !== null ? (
+            // Same reasoning as restyle: browsing models to load competes with the
+            // chest's own part grid, so it replaces it rather than floating over it.
+            <LoadModelPanel
+              onLoad={(doc, parts) => {
+                session.mergeDocument(doc, parts);
+                setLoadModelOpen(false);
+              }}
+              onClose={() => setLoadModelOpen(false)}
+            />
           ) : (
             <PartsChest
               parts={PART_CATALOG}
@@ -352,7 +392,7 @@ function SandboxEditor({
           )
         }
         colorPanel={
-          mode !== 'editor' || restyleOpen ? null : (
+          mode !== 'editor' || restyleOpen || loadModelOpen ? null : (
             <ColorPicker colors={LDRAW_PALETTE} selectedCode={selectedColorCode} onSelect={setSelectedColorCode} />
           )
         }

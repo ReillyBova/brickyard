@@ -30,9 +30,11 @@ export interface UseFileActionsResult {
 
 /**
  * `markSaved` is threaded in rather than this hook owning a `useDirty` itself, because
- * Open and Import both need to reset the same dirty baseline Save does — a freshly
- * opened or imported document has nothing unsaved yet, the same way opening a file in
- * any editor doesn't leave it dirty.
+ * Open needs to reset the same dirty baseline Save does — a freshly opened document has
+ * nothing unsaved yet, the same way opening a file in any editor doesn't leave it dirty.
+ * Import doesn't call it: it merges into whatever is already loaded (see
+ * `EditorSession.mergeDocument`), which is an edit like any other and should leave the
+ * document dirty.
  */
 export function useFileActions(session: ToolbarSession | null, markSaved: () => void): UseFileActionsResult {
   const [status, setStatus] = useState<FileStatus>({ kind: 'idle' });
@@ -118,8 +120,13 @@ export function useFileActions(session: ToolbarSession | null, markSaved: () => 
             read,
             onProgress: (progress) => setStatus({ kind: 'busy', label: 'Importing', progress }),
           });
-          session.loadDocument(result.document, result.partDefs.values());
-          markSaved();
+          // Adds alongside whatever is already in the document rather than replacing
+          // it — importing a second model is bringing in more content, not starting
+          // over the way Open is. See EditorSession.mergeDocument. Unlike Open, this
+          // doesn't call markSaved(): it's an edit against whatever was already
+          // loaded, so it leaves the document exactly as dirty as any other commit
+          // would.
+          session.mergeDocument(result.document, result.partDefs.values());
           setStatus({ kind: 'info', message: `Imported ${picked.name}: ${result.brickCount} bricks.` });
         } catch (err) {
           setStatus({ kind: 'error', message: `Couldn't import ${picked.name}: ${String(err)}` });

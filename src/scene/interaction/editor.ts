@@ -15,10 +15,10 @@
  * same primitive for the gestures this slice owns.
  */
 
-import { multiply } from '../../math';
+import { fromTranslation, multiply } from '../../math';
 import { collides } from '../../snap/collision';
 import { findMates, mateCount, pointMatrix } from '../../snap/mating';
-import { HashSpatialIndex } from '../../snap/spatialIndex';
+import { HashSpatialIndex, worldBounds } from '../../snap/spatialIndex';
 import type { MateGroup, PartDef } from '../../snap/types';
 import {
   type History,
@@ -35,11 +35,12 @@ import {
 import type {
   BrickInstance,
   ConnectionEdge,
+  Operation,
   SceneDocument,
   Transaction,
 } from '../../model/types';
 import { edgeIdFor } from '../../model/ids';
-import type { BrickId, Mat4 } from '../../types';
+import type { BrickId, Bounds, Mat4 } from '../../types';
 
 /**
  * Whether a brick arriving in the renderer should fly in (`SceneRenderer`'s progressive
@@ -188,6 +189,76 @@ export class EditorSession {
     // The one caller that animates: opening a model is the "initial load" the fly-in
     // treatment is for. See AddBrickOptions.
     this.reconcile(before, { animateArrivals: true });
+  }
+
+  /**
+   * Merge another document's bricks, groups and internal connectivity into this one,
+   * rather than replacing it. Per docs/ARCHITECTURE.md there is one scene graph — a
+   * second loaded model is not a new starting point, it's an additional connected
+   * component (`ConnectionGraph.component()`), the same way two models pasted into one
+   * file already work. Unlike `loadDocument`, this is a plain committed `Transaction`:
+   * undoable, and it keeps the existing history rather than resetting it.
+   *
+   * Ids are minted per-document from a 72-bit random space (`src/model/ids.ts`), so
+   * `doc`'s bricks, groups and edges are safe to fold in unchanged — no remapping.
+   * Bricks land offset along +X, clear of whatever is already in the document, so two
+   * models loaded at their own origins don't land fused together.
+   */
+  mergeDocument(doc: SceneDocument, parts: Iterable<PartDef>): void {
+    for (const part of parts) this.registerPart(part);
+
+    const incoming = [...doc.bricks.values()];
+    if (incoming.length === 0) return;
+
+    const offset = this.mergeOffsetX(incoming);
+    const bricks =
+      offset === 0
+        ? incoming
+        : incoming.map((b) => ({ ...b, transform: multiply(fromTranslation([offset, 0, 0]), b.transform) }));
+
+    const ops: Operation[] = [{ type: 'add', bricks }];
+    for (const group of doc.groups.values()) ops.push({ type: 'addGroup', group });
+    const edges = [...doc.graph.edges.values()];
+    if (edges.length > 0) ops.push({ type: 'connect', edges });
+
+    const before = this.document;
+    this.history = commitToHistory(this.history, {
+      label: `Load model (${bricks.length} ${bricks.length === 1 ? 'brick' : 'bricks'})`,
+      ops,
+    });
+    // Same treatment as loadDocument: a merged-in model is a load, not ordinary
+    // editing, so it gets the fly-in arrival animation too.
+    this.reconcile(before, { animateArrivals: true });
+  }
+
+  /** How far along +X to shift `incoming` so it clears whatever is already loaded. */
+  private mergeOffsetX(incoming: readonly BrickInstance[]): number {
+    if (this.document.bricks.size === 0) return 0;
+    const existing = this.worldBoundsOf(this.document.bricks.values());
+    const arriving = this.worldBoundsOf(incoming);
+    if (!existing || !arriving) return 0;
+    const GAP = 40; // two studs clear of the existing model
+    return existing.max[0] - arriving.min[0] + GAP;
+  }
+
+  private worldBoundsOf(bricks: Iterable<BrickInstance>): Bounds | null {
+    let min: [number, number, number] | undefined;
+    let max: [number, number, number] | undefined;
+    for (const brick of bricks) {
+      const part = this.parts.get(brick.partId);
+      if (!part) continue;
+      const wb = worldBounds(part.bounds, brick.transform);
+      if (!min || !max) {
+        min = [...wb.min];
+        max = [...wb.max];
+        continue;
+      }
+      for (let a = 0; a < 3; a++) {
+        if (wb.min[a] < min[a]) min[a] = wb.min[a];
+        if (wb.max[a] > max[a]) max[a] = wb.max[a];
+      }
+    }
+    return min && max ? { min, max } : null;
   }
 
   /**

@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 
 import { basisOf, IDENTITY, fromTranslation, positionOf } from '../../math';
 import { createDocument } from '../../model';
-import { mintBrickId } from '../../model/ids';
+import { edgeIdFor, mintBrickId } from '../../model/ids';
 import type { BrickInstance } from '../../model/types';
 import { boundsFromTriangles, partTriangles } from '../../ldraw/bounds';
 import { fixtureReader } from '../../snap/__fixtures__/reader';
@@ -322,6 +322,108 @@ describe('EditorSession', () => {
       expect(scene.added).toEqual([brick.id]);
       expect(scene.animated).toEqual([false]);
     });
+  });
+});
+
+// Loading a second model used to mean `loadDocument`, which discards the first — see
+// docs/ARCHITECTURE.md: there is one scene graph, and a second model is another
+// connected component in it, not a fresh start. `mergeDocument` is the additive path
+// `useFileActions`'s Import and the toolbar's "Load model" both use instead.
+describe('EditorSession.mergeDocument', () => {
+  it('adds bricks to an existing document rather than replacing it', async () => {
+    const part = await brick2x4();
+    const scene = recordingScene();
+    const s = new EditorSession(scene);
+
+    const first = instance(part, IDENTITY);
+    s.loadDocument(createDocument([first]), [part]);
+
+    const second = instance(part, fromTranslation([500, 0, 0]));
+    s.mergeDocument(createDocument([second]), [part]);
+
+    expect(s.document.bricks.size).toBe(2);
+    expect(s.document.bricks.has(first.id)).toBe(true);
+    expect(s.document.bricks.has(second.id)).toBe(true);
+  });
+
+  it('is undoable, unlike loadDocument', async () => {
+    const part = await brick2x4();
+    const scene = recordingScene();
+    const s = new EditorSession(scene);
+
+    const first = instance(part, IDENTITY);
+    s.loadDocument(createDocument([first]), [part]);
+
+    const second = instance(part, fromTranslation([500, 0, 0]));
+    s.mergeDocument(createDocument([second]), [part]);
+
+    expect(s.canUndo).toBe(true);
+    s.undo();
+
+    expect(s.document.bricks.size).toBe(1);
+    expect(s.document.bricks.has(first.id)).toBe(true);
+    expect(s.document.bricks.has(second.id)).toBe(false);
+  });
+
+  it('offsets the incoming model clear of whatever is already loaded', async () => {
+    const part = await brick2x4();
+    const scene = recordingScene();
+    const s = new EditorSession(scene);
+
+    // 3001's bounds run -40..40 on X (see brick2x4() above), so a second copy at the
+    // same transform would land fused into the first without an offset.
+    const first = instance(part, IDENTITY);
+    s.loadDocument(createDocument([first]), [part]);
+
+    const second = instance(part, IDENTITY);
+    s.mergeDocument(createDocument([second]), [part]);
+
+    const merged = s.document.bricks.get(second.id);
+    expect(merged).toBeDefined();
+    // existing max.x (40) - incoming min.x (-40) + the 40 LDU gap mergeDocument leaves.
+    expect(positionOf(merged!.transform)).toEqual([120, 0, 0]);
+  });
+
+  it('does not shift the model when merging into an empty document', async () => {
+    const part = await brick2x4();
+    const scene = recordingScene();
+    const s = new EditorSession(scene);
+
+    const brick = instance(part, IDENTITY);
+    s.mergeDocument(createDocument([brick]), [part]);
+
+    expect(positionOf(s.document.bricks.get(brick.id)!.transform)).toEqual([0, 0, 0]);
+  });
+
+  it('carries over the incoming document’s internal connectivity as its own component', async () => {
+    const part = await brick2x4();
+    const scene = recordingScene();
+    const s = new EditorSession(scene);
+
+    const standalone = instance(part, IDENTITY);
+    s.loadDocument(createDocument([standalone]), [part]);
+
+    const a = instance(part, fromTranslation([500, 0, 0]));
+    const b = instance(part, fromTranslation([600, 0, 0]));
+    const edge = { id: edgeIdFor(a.id, b.id), a: a.id, b: b.id, mates: [] };
+    s.mergeDocument(createDocument([a, b], [], [edge]), [part]);
+
+    expect(s.document.graph.component(a.id)).toEqual(new Set([a.id, b.id]));
+    expect(s.document.graph.component(standalone.id)).toEqual(new Set([standalone.id]));
+  });
+
+  it('animates every brick it merges in, the same as loadDocument', async () => {
+    const part = await brick2x4();
+    const scene = recordingScene();
+    const s = new EditorSession(scene);
+    s.loadDocument(createDocument([instance(part, IDENTITY)]), [part]);
+    scene.added.length = 0;
+    scene.animated.length = 0;
+
+    s.mergeDocument(createDocument([instance(part, fromTranslation([500, 0, 0]))]), [part]);
+
+    expect(scene.added.length).toBe(1);
+    expect(scene.animated).toEqual([true]);
   });
 });
 
