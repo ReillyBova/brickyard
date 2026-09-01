@@ -128,7 +128,7 @@ function concat(chunks: readonly Uint8Array[]): Uint8Array {
  *
  * Components are quantised to int16 over [-1, 1]: about 3e-5 per component, an angular
  * error near 1e-4 radians. `mating.ts` matches axes to about two degrees and positions to
- * 0.35 LDU, so the quantisation is four orders of magnitude inside what matching cares
+ * 0.6 LDU, so the quantisation is four orders of magnitude inside what matching cares
  * about.
  */
 function quaternionOf(basis: readonly number[]): { q: [number, number, number, number]; mirrored: boolean } {

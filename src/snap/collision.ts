@@ -356,7 +356,7 @@ const EXEMPT_AXIS_TOLERANCE = 0.999;
  * How close two connectors' own centers must land, in world space, to count as the
  * same seated joint rather than two connectors that merely happen to be nearby,
  * compatible, and pointing the same way. Reuses `mating.ts`'s `MATE_TOLERANCE`
- * exactly (0.35 LDU) rather than inventing a second number: an exemption is supposed
+ * exactly rather than inventing a second number: an exemption is supposed
  * to represent an actual mate, so it should require what a mate requires. No extra
  * slack is added for voxel quantisation here — that slack already lives in
  * `CONNECTOR_EPS`, which widens which voxels classify as connector volume in the first

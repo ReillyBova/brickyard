@@ -413,6 +413,42 @@ describe('hard connections, end to end on real parts', () => {
     expect(mate!.polarity).toBe('symmetric');
     index.remove(brick(1));
   });
+
+  it('a minifig hand mates an arm even with real published-model imprecision', async () => {
+    // Measured directly against Galaxy Explorer, Exo Suit and Saturn V: every minifig
+    // arm-to-hand wrist joint in those bundled models sits about 0.496 LDU from a
+    // perfectly seated placement — not drift in our own arithmetic (the two connectors'
+    // *axes* agree to 15 significant digits) but the published `.mpd` files themselves,
+    // whose 45-degree-rotated transforms are written to six decimal places. That
+    // truncation, carried through a multi-level reference chain, reliably lands a real
+    // wrist joint just past the old 0.35 LDU tolerance — rejecting essentially every
+    // minifig arm and hand in the corpus for a reason that has nothing to do with
+    // whether they actually belong together.
+    const arm = await part('3818');
+    const hand = await part('3820');
+    const wrist = arm.connections.find((c) => c.id === 'parts/3818.dat#1')!; // F, shoulder-style socket
+    const peg = hand.connections.find((c) => c.id === 'parts/3820.dat#0')!; // M
+    expect(isCompatible(peg, wrist)).toBe(true);
+
+    index.insert(brick(1), arm, IDENTITY);
+    const seated = solveMating(hand, peg, wrist, IDENTITY, 0);
+
+    // Perturb the seated placement by the measured real-world magnitude, in an arbitrary
+    // direction unrelated to the connector's own axis — exactly the kind of offset a
+    // truncated, rotated transform chain produces.
+    const nudge: Mat4 = fromTranslation([0.28, -0.35, 0.15]); // magnitude ≈ 0.4736
+    const nudged = multiply(nudge, seated);
+    const before = worldPoint(peg, seated);
+    const after = worldPoint(peg, nudged);
+    const offset = Math.hypot(...after.position.map((v, i) => v - before.position[i]));
+    expect(offset).toBeGreaterThan(0.35); // would have been rejected before this fix
+    expect(offset).toBeLessThan(MATE_TOLERANCE);
+
+    const groups = findMates(hand, nudged, index);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].mates.some((m) => m.aPoint === peg.id && m.bPoint === wrist.id)).toBe(true);
+    index.remove(brick(1));
+  });
 });
 
 describe('findMates on real bricks', () => {
