@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { IDENTITY, fromTranslation } from '../../math';
+import { createDocument } from '../../model';
 import { mintBrickId } from '../../model/ids';
 import type { BrickInstance } from '../../model/types';
 import { boundsFromTriangles, partTriangles } from '../../ldraw/bounds';
@@ -62,16 +63,32 @@ async function brick2x4WithOccupancy(): Promise<PartDef> {
   };
 }
 
-/** Records what the renderer was told, so sync can be asserted rather than assumed. */
-function recordingScene(): SceneSync & { added: BrickId[]; removed: BrickId[]; moved: BrickId[] } {
+/**
+ * Records what the renderer was told, so sync can be asserted rather than assumed.
+ * `animated` records the `animate` flag `EditorSession` actually passed on each
+ * `addBrick` call — undefined/false is "instant", true is "fly in" (see
+ * `AddBrickOptions` in `editor.ts`). This is what pins down the fly-in-on-load-only
+ * fix below: every add outside `loadDocument` must show up here as not animated.
+ */
+function recordingScene(): SceneSync & {
+  added: BrickId[];
+  removed: BrickId[];
+  moved: BrickId[];
+  animated: boolean[];
+} {
   const added: BrickId[] = [];
   const removed: BrickId[] = [];
   const moved: BrickId[] = [];
+  const animated: boolean[] = [];
   return {
     added,
     removed,
     moved,
-    addBrick: (b) => void added.push(b.id),
+    animated,
+    addBrick: (b, options) => {
+      added.push(b.id);
+      animated.push(options?.animate === true);
+    },
     removeBrick: (id) => void removed.push(id),
     setBrickTransform: (id) => void moved.push(id),
   };
@@ -217,6 +234,94 @@ describe('EditorSession', () => {
     expect(s.canUndo).toBe(false);
     expect(() => s.undo()).not.toThrow();
     expect(s.document.bricks.size).toBe(0);
+  });
+
+  // The bug this guards: the progressive-load "fly in" animation
+  // (SceneRenderer.addBrick) was firing for every add the renderer saw, not just an
+  // initial model load — so hand placement, undo/redo, and restyle all got the fly-in
+  // treatment too. `AddBrickOptions.animate` is how `EditorSession` tells the renderer
+  // which is which; these pin down that only `loadDocument` sets it.
+  describe('animate-on-load-only (AddBrickOptions)', () => {
+    it('placing a brick by hand is never animated', async () => {
+      const part = await brick2x4();
+      const scene = recordingScene();
+      const s = new EditorSession(scene);
+      s.registerPart(part);
+
+      s.place(instance(part, IDENTITY), part);
+
+      expect(scene.animated).toEqual([false]);
+    });
+
+    it('loadDocument animates every brick it seeds', async () => {
+      const part = await brick2x4();
+      const scene = recordingScene();
+      const s = new EditorSession(scene);
+
+      const bricks = [instance(part, IDENTITY), instance(part, fromTranslation([100, 0, 0]))];
+      s.loadDocument(createDocument(bricks), [part]);
+
+      expect(scene.added.length).toBe(2);
+      expect(scene.animated).toEqual([true, true]);
+    });
+
+    it('undo restoring a deleted brick is not animated', async () => {
+      const part = await brick2x4();
+      const scene = recordingScene();
+      const s = new EditorSession(scene);
+      s.registerPart(part);
+
+      const brick = instance(part, IDENTITY);
+      s.place(brick, part);
+      s.remove([brick.id]);
+      scene.added.length = 0; // only care about what undo does
+      scene.animated.length = 0;
+
+      s.undo();
+
+      expect(scene.added).toEqual([brick.id]);
+      expect(scene.animated).toEqual([false]);
+    });
+
+    it('redo re-placing a brick is not animated', async () => {
+      const part = await brick2x4();
+      const scene = recordingScene();
+      const s = new EditorSession(scene);
+      s.registerPart(part);
+
+      const brick = instance(part, IDENTITY);
+      s.place(brick, part);
+      s.undo();
+      scene.added.length = 0; // only care about what redo does
+      scene.animated.length = 0;
+
+      s.redo();
+
+      expect(scene.added).toEqual([brick.id]);
+      expect(scene.animated).toEqual([false]);
+    });
+
+    it('a recolor (remove-plus-re-add) is not animated, even mid-load', async () => {
+      const part = await brick2x4();
+      const scene = recordingScene();
+      const s = new EditorSession(scene);
+
+      const brick = instance(part, IDENTITY);
+      // Seed via loadDocument, the one path that *does* animate, so this test proves
+      // the recolor branch overrides that rather than merely defaulting correctly.
+      s.loadDocument(createDocument([brick]), [part]);
+      scene.animated.length = 0;
+      scene.added.length = 0;
+
+      s.commit({
+        label: 'Recolor brick',
+        ops: [{ type: 'recolor', changes: [{ id: brick.id, from: brick.colorCode, to: 1 }] }],
+      });
+
+      expect(scene.removed).toEqual([brick.id]);
+      expect(scene.added).toEqual([brick.id]);
+      expect(scene.animated).toEqual([false]);
+    });
   });
 });
 

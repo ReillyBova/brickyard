@@ -214,14 +214,22 @@ export class SceneRenderer {
    * roughly the order the model was meant to be built, without this method or its
    * caller needing to coordinate that explicitly.
    *
-   * A brick that resolves becomes visible by flying in from off-screen and settling with
-   * `--by-ease-snap`'s overshoot (see `updateArrivals`, driven from the frame loop in
-   * `start()`) rather than popping in — that flight *is* the load's progress indicator,
-   * per the roadmap: "make the wait the product" rather than a numeric bar. It degrades
-   * automatically past `MAX_CONCURRENT_ARRIVALS` and skips entirely when
-   * `--by-dur-arrival` reads 0 (`prefers-reduced-motion`).
+   * A brick that resolves as part of a model load (`options.animate === true`, set only
+   * by `EditorSession.loadDocument` — see `AddBrickOptions` in `editor.ts`) becomes
+   * visible by flying in from off-screen and settling with `--by-ease-snap`'s overshoot
+   * (see `updateArrivals`, driven from the frame loop in `start()`) rather than popping
+   * in — that flight *is* the load's progress indicator, per the roadmap: "make the wait
+   * the product" rather than a numeric bar. It degrades automatically past
+   * `MAX_CONCURRENT_ARRIVALS` and skips entirely when `--by-dur-arrival` reads 0
+   * (`prefers-reduced-motion`).
+   *
+   * Every other caller — hand placement, undo/redo, restyle's recolor-as-remove-plus-
+   * re-add — omits `animate` (or passes `false`), and lands instantly. Placement already
+   * has its own motion language (the snap overshoot on commit); undo/redo restore state,
+   * they don't re-enact its arrival; and a restyle across a loaded model would otherwise
+   * launch every recoloured brick off-screen and back.
    */
-  async addBrick(brick: BrickInstance): Promise<void> {
+  async addBrick(brick: BrickInstance, options?: { animate?: boolean }): Promise<void> {
     let geometry: THREE.BufferGeometry;
     try {
       geometry = await this.loadGeometry(brick.partId);
@@ -254,7 +262,8 @@ export class SceneRenderer {
 
     const finalMatrix = new THREE.Matrix4().fromArray(brick.transform as unknown as number[]);
 
-    if (this.arrivalDurationMs <= 0 || this.arrivals.size >= MAX_CONCURRENT_ARRIVALS) {
+    const wantsAnimation = options?.animate === true;
+    if (!wantsAnimation || this.arrivalDurationMs <= 0 || this.arrivals.size >= MAX_CONCURRENT_ARRIVALS) {
       batch.add(brick.id, finalMatrix);
       return;
     }
@@ -361,8 +370,10 @@ export class SceneRenderer {
     batch.setTransform(id, matrix);
   }
 
+  /** The demo/dev-route path (`SceneCanvas.tsx`) — a whole-document load, so it
+   *  animates like `EditorSession.loadDocument` does for the real app. */
   async loadDocument(bricks: Iterable<BrickInstance>): Promise<void> {
-    await Promise.all([...bricks].map((b) => this.addBrick(b)));
+    await Promise.all([...bricks].map((b) => this.addBrick(b, { animate: true })));
   }
 
   // ---- ghost ------------------------------------------------------------------------

@@ -41,9 +41,26 @@ import type {
 import { edgeIdFor } from '../../model/ids';
 import type { BrickId, Mat4 } from '../../types';
 
+/**
+ * Whether a brick arriving in the renderer should fly in (`SceneRenderer`'s progressive
+ * "arrival" animation, see `docs/ROADMAP.md`'s "Progressive loading" section) or appear
+ * immediately. Only `loadDocument` — opening a model — sets this; every other path that
+ * adds geometry (hand placement, undo/redo, restyle's recolor-as-remove-plus-re-add)
+ * must not, or the animation fires for ordinary editing instead of only the initial
+ * load. Threaded through as a call-time argument rather than a stateful "bulk load
+ * window" opened/closed around `reconcile`'s loop: `reconcile` dispatches every
+ * `addBrick` synchronously in one pass (the *loads* it kicks off are async, the calls
+ * that start them are not), so a plain argument captured at call time can't leak across
+ * calls the way a window's open/close bracketing could if a caller forgot to close it,
+ * threw before closing it, or a load from a stale window resolved late.
+ */
+export interface AddBrickOptions {
+  animate?: boolean;
+}
+
 /** What the renderer must do to match a document change. */
 export interface SceneSync {
-  addBrick(brick: BrickInstance): Promise<void> | void;
+  addBrick(brick: BrickInstance, options?: AddBrickOptions): Promise<void> | void;
   removeBrick(id: BrickId): void;
   setBrickTransform(id: BrickId, transform: Mat4): void;
 }
@@ -153,7 +170,7 @@ export class EditorSession {
   commit(tx: Transaction): void {
     const before = this.document;
     this.history = commitToHistory(this.history, tx);
-    this.reconcile(before);
+    this.reconcile(before); // never animated — see AddBrickOptions
   }
 
   /**
@@ -168,7 +185,9 @@ export class EditorSession {
     for (const part of parts) this.registerPart(part);
     const before = this.document;
     this.history = createHistory(doc);
-    this.reconcile(before);
+    // The one caller that animates: opening a model is the "initial load" the fly-in
+    // treatment is for. See AddBrickOptions.
+    this.reconcile(before, { animateArrivals: true });
   }
 
   /**
@@ -304,14 +323,14 @@ export class EditorSession {
     if (!this.canUndo) return;
     const before = this.document;
     this.history = undo(this.history);
-    this.reconcile(before);
+    this.reconcile(before); // restoring a brick lands it in place, never flying — see AddBrickOptions
   }
 
   redo(): void {
     if (!this.canRedo) return;
     const before = this.document;
     this.history = redo(this.history);
-    this.reconcile(before);
+    this.reconcile(before); // same as undo
   }
 
   /**
@@ -323,8 +342,9 @@ export class EditorSession {
    * (forward) and `undo`/`redo` (wholesale replacement) alike: it doesn't care how the
    * new document came about, only what's different about it.
    */
-  private reconcile(before: SceneDocument): void {
+  private reconcile(before: SceneDocument, options?: { animateArrivals?: boolean }): void {
     const after = this.document;
+    const animateArrivals = options?.animateArrivals ?? false;
 
     for (const [id] of before.bricks) {
       if (!after.bricks.has(id)) {
@@ -338,7 +358,7 @@ export class EditorSession {
       const prior = before.bricks.get(id);
       if (!prior) {
         this.index.insert(id, part, brick.transform);
-        void this.scene.addBrick(brick);
+        void this.scene.addBrick(brick, { animate: animateArrivals });
       } else if (prior.transform !== brick.transform) {
         this.index.insert(id, part, brick.transform);
         this.scene.setBrickTransform(id, brick.transform);
@@ -346,9 +366,15 @@ export class EditorSession {
         // No in-place recolor on the renderer's projection: a brick's batch is keyed by
         // (partId, colorCode), so changing color means changing batch. Remove and
         // re-add is exactly that, through the same two SceneSync methods everything
-        // else already uses.
+        // else already uses — but never animated: a recolor is not a load, and
+        // restyling a loaded model would otherwise launch it off-screen and back
+        // (fixed alongside the animate-on-load-only bug this is part of). Deliberately
+        // ignores `animateArrivals` rather than inheriting it, since `loadDocument`
+        // itself never hits this branch (a fresh document has no `prior` to compare
+        // against) but a future caller that reconciles a color change during a load
+        // shouldn't get a free pass into flying either.
         this.scene.removeBrick(id);
-        void this.scene.addBrick(brick);
+        void this.scene.addBrick(brick, { animate: false });
       }
     }
 
