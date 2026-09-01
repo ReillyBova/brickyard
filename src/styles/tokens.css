@@ -75,7 +75,7 @@
   /* Surfaces, coolest-to-warmest by depth. The viewport is the floor; panels
      float above it; popovers and dialogs float above those. */
   --by-canvas:        var(--color-neutral-200);  /* the 3D viewport ground   */
-  --by-canvas-grid:   var(--color-neutral-600);  /* baseplate / axis lines; 3.49:1 against --by-canvas */
+  --by-canvas-grid:   var(--color-neutral-700);  /* baseplate / axis lines; 5.36:1 against --by-canvas */
   --by-chrome:        var(--color-bg);           /* app frame, toolbar       */
   --by-panel:         var(--color-bg);           /* chest, inspector         */
   --by-panel-sunken:  var(--color-surface);      /* wells, part tiles, input */
@@ -142,7 +142,7 @@
   color-scheme: dark;
 
   --by-canvas:        #1b1915;                   /* one step past neutral-900 */
-  --by-canvas-grid:   var(--color-neutral-600);  /* 4.09:1 against --by-canvas */
+  --by-canvas-grid:   var(--color-neutral-500);  /* 6.09:1 against --by-canvas */
   --by-chrome:        var(--color-neutral-900);
   --by-panel:         var(--color-neutral-900);
   --by-panel-sunken:  #262319;
