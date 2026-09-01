@@ -31,9 +31,7 @@
 
 .by-graph-toolbar {
   position: absolute;
-  /* Sits above this mode's own status bar, which shares the bottom-centre anchor —
-     without the offset the two stack on top of each other. */
-  bottom: calc(var(--by-space-3) + var(--by-statusbar-h) + var(--by-space-2));
+  bottom: var(--by-space-3);
   left: 50%;
   transform: translateX(-50%);
   z-index: var(--by-z-chrome);
@@ -46,4 +44,13 @@
   display: flex;
   align-items: center;
   gap: var(--by-space-2);
+}
+
+/* The stats bar is a child of this raft, not a second floating bar. `.by-statusbar`
+   anchors itself bottom-centre by default, which inside an absolutely-positioned
+   parent laid it directly over the explode button — take it out of that and let the
+   flex row place it. */
+.by-graph-toolbar .by-statusbar {
+  position: static;
+  transform: none;
 }
