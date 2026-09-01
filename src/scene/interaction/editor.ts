@@ -181,9 +181,21 @@ export class EditorSession {
    * collision on those bricks silently no-op (see `docs/ARCHITECTURE.md`'s "fallback
    * behaviour" — a part with no data still loads and renders, it just can't snap or
    * collide, which is a property of the part, not of how it got here).
+   *
+   * Also drops every `PartDef` this session is holding for a part the new document
+   * doesn't reference. Fresh history means there is no undo path back to the old
+   * document that could need them, and without this, repeatedly opening different
+   * published models (each contributing its own unique parts — `docs/ARCHITECTURE.md`
+   * puts a small model at ~53 of them) grows `parts` for the rest of the session, each
+   * entry holding a part's connection points and its occupancy mask.
    */
   loadDocument(doc: SceneDocument, parts: Iterable<PartDef>): void {
     for (const part of parts) this.registerPart(part);
+    const referenced = new Set<string>();
+    for (const brick of doc.bricks.values()) referenced.add(brick.partId);
+    for (const partId of this.parts.keys()) {
+      if (!referenced.has(partId)) this.parts.delete(partId);
+    }
     const before = this.document;
     this.history = createHistory(doc);
     // The one caller that animates: opening a model is the "initial load" the fly-in

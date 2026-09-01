@@ -425,6 +425,40 @@ describe('EditorSession.mergeDocument', () => {
     expect(scene.added.length).toBe(1);
     expect(scene.animated).toEqual([true]);
   });
+
+  it('loadDocument drops PartDefs for parts the new document no longer references', async () => {
+    // Repeatedly opening published models — each with its own set of unique parts,
+    // ~53 for a small one per docs/ARCHITECTURE.md — must not grow `parts` for the rest
+    // of the session with every part from every model ever opened. Fresh history means
+    // there is no undo path back to the old document that could still need them.
+    const part = await brick2x4();
+    const s = new EditorSession(recordingScene());
+
+    const firstDoc = createDocument([instance(part, IDENTITY)]);
+    s.loadDocument(firstDoc, [part]);
+    expect(s.partFor(part.id)).toBe(part);
+
+    const secondDoc = createDocument([]); // a different "model" that never uses part 3001
+    s.loadDocument(secondDoc, []);
+
+    expect(s.partFor(part.id)).toBeUndefined();
+  });
+
+  it('loadDocument keeps a PartDef the new document still references', async () => {
+    const part = await brick2x4();
+    const s = new EditorSession(recordingScene());
+
+    const firstDoc = createDocument([instance(part, IDENTITY)]);
+    s.loadDocument(firstDoc, [part]);
+
+    // A second load that reuses the same part (e.g. reopening the same model, or a
+    // second model built from some of the same real-world parts) — nothing here should
+    // be pruned away, since `partFor` still needs it for lookup and collision.
+    const secondDoc = createDocument([instance(part, fromTranslation([100, 0, 0]))]);
+    s.loadDocument(secondDoc, [part]);
+
+    expect(s.partFor(part.id)).toBe(part);
+  });
 });
 
 describe('transformSelection collision', () => {
