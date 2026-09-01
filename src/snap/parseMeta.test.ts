@@ -216,24 +216,51 @@ describe('scalar attribute parsing', () => {
 });
 
 describe('matingSection', () => {
-  it('takes the bore of a stepped female profile', () => {
-    expect(matingSection(parseSections('R 8 2 R 6 16 R 8 2'), 'F')).toEqual({
+  it('takes the bore of a stepped female profile — the dominant section by length', () => {
+    expect(matingSection(parseSections('R 8 2 R 6 16 R 8 2'))).toEqual({
       variant: 'R',
       radius: 6,
       length: 16,
     });
   });
 
-  it('takes the widest section of a male profile', () => {
-    expect(matingSection(parseSections('R 5 2 _L 6 5'), 'M')).toEqual({
+  it('picks the section with the most total length, not a fixed min or max', () => {
+    // p/knob1.dat's real profile: a short neck (radius 5, length 2) flexing into a
+    // longer widened run (radius 6, length 5). Neither "always widest" nor "always
+    // narrowest" is safe in general — the section that dominates by length is.
+    expect(matingSection(parseSections('R 5 2 _L 6 5'))).toEqual({
       variant: 'R',
       radius: 6,
       length: 5,
     });
   });
 
+  it('picks the dominant section even when it sits in the middle, flanked by narrower ones', () => {
+    // The real Technic pin (3673): two radius-6 shafts (16 LDU each) flank a short
+    // radius-8 collar (4 LDU) and two short radius-6.25 tips (2 LDU each). The shafts
+    // dominate by length, so they — not the collar — key the pin, matching 3700's hole.
+    expect(matingSection(parseSections('R 6.25 2 R 6 16 R 8 4 R 6 16 R 6.25 2'))).toEqual({
+      variant: 'R',
+      radius: 6,
+      length: 16,
+    });
+  });
+
+  it('picks the dominant bore over a short, unreachable inner constriction', () => {
+    // The real round brick 3062b's underside socket: a normal radius-6 bore for almost
+    // its whole depth (20 LDU), narrowing to radius 4 only in the last 8 LDU that no
+    // stud ever reaches. Measured against the bundled models, keying on the narrow tail
+    // instead of the bore left every 3062b reading as incompatible with the stud it
+    // visibly sits on.
+    expect(matingSection(parseSections('R 6 20 R 4 8'))).toEqual({
+      variant: 'R',
+      radius: 6,
+      length: 20,
+    });
+  });
+
   it('returns null for an empty profile', () => {
-    expect(matingSection([], 'M')).toBeNull();
+    expect(matingSection([])).toBeNull();
   });
 });
 

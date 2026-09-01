@@ -202,6 +202,91 @@ describe('3818 — Minifig Arm Right', () => {
   });
 });
 
+describe('3673 — Technic Pin', () => {
+  const load = () => resolvePart('3673', fixtureReader);
+
+  it('resolves two connection points: the outer peg and an inner bore', async () => {
+    expect(await load()).toHaveLength(2);
+  });
+
+  it('carries the real, symmetric five-section friction-pin profile', async () => {
+    const points = await load();
+    const peg = points.find((p) => p.gender === 'M');
+    expect(peg).toBeDefined();
+    // The part's own annotation clears what p/connect.dat would otherwise inherit and
+    // replaces it with one profile spanning the whole pin: two friction shafts (radius
+    // 6) flanking a stop collar (radius 8) in the middle, tapering at both tips.
+    expect(profile(peg!)).toBe('R 6.25 2 · R 6 16 · R 8 4 · R 6 16 · R 6.25 2');
+    expect(peg!.slide).toBe(true);
+    expect(pos(peg!)).toEqual([0, 0, 0]);
+  });
+
+  it('is also hollow along its axis, so pins can chain end to end', async () => {
+    const bore = (await load()).find((p) => p.gender === 'F');
+    expect(bore).toBeDefined();
+    expect(profile(bore!)).toBe('R 4 40');
+  });
+});
+
+describe('3705 — Technic Axle 4', () => {
+  const load = () => resolvePart('3705', fixtureReader);
+
+  it('resolves as a cross-section axle, not a round peg', async () => {
+    const points = await load();
+    expect(points.length).toBeGreaterThan(0);
+    for (const p of points) {
+      expect(p.gender).toBe('M');
+      expect(p.slide).toBe(true);
+      for (const s of p.sections) expect(s.variant).toBe('A');
+    }
+  });
+
+  it('spans the axle as one sliding connector, radius 6', async () => {
+    const whole = (await load()).find((p) => p.source === 'parts/3705.dat');
+    expect(whole).toBeDefined();
+    expect(profile(whole!)).toBe('A 6 80');
+    expect(pos(whole!)).toEqual([0, 0, 0]);
+  });
+});
+
+describe('4716 — Technic Worm Gear 2L', () => {
+  it('resolves a female axle hole inherited from p/axlehole.dat', async () => {
+    const points = await resolvePart('4716', fixtureReader);
+    expect(points).toHaveLength(1);
+    const [hole] = points;
+    expect(hole.gender).toBe('F');
+    expect(hole.kind).toBe('cyl');
+    expect(profile(hole)).toBe('A 6 1');
+    expect(hole.slide).toBe(true);
+    expect(hole.source).toBe('p/axlehole.dat');
+  });
+});
+
+describe('30374 — Bar 4L Lightsaber Blade', () => {
+  it('resolves a single sliding male bar', async () => {
+    const points = await resolvePart('30374', fixtureReader);
+    expect(points).toHaveLength(1);
+    const [bar] = points;
+    expect(bar.gender).toBe('M');
+    expect(bar.kind).toBe('cyl');
+    expect(profile(bar)).toBe('R 4 80');
+    expect(bar.slide).toBe(true);
+  });
+});
+
+describe('3938 — Hinge Brick 1 x 2 Top', () => {
+  it('carries a male finger run in the same group as 3937, the base', async () => {
+    const points = await resolvePart('3938', fixtureReader);
+    const finger = points.find((p) => p.kind === 'finger');
+    expect(finger).toBeDefined();
+    expect(finger!.gender).toBe('M');
+    expect(finger!.group).toBe('hgBrC');
+    expect(profile(finger!)).toBe('R 4 18 · R 4 4 · R 4 18');
+    expect(pos(finger!)).toEqual([0, 10, 0]);
+    expect(axis(finger!)).toEqual([-1, 0, 0]);
+  });
+});
+
 describe('other snap kinds, from captured parts', () => {
   it('reads SNAP_CLP as a female clip (2335, Flag 2 x 2)', async () => {
     const points = await resolvePart('2335', fixtureReader);

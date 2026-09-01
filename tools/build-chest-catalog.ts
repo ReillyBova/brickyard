@@ -64,11 +64,21 @@ const CURATED_CHEST: readonly { id: string; category: string }[] = [
   { id: '3040b', category: 'Slopes' },
   { id: '3665a', category: 'Slopes' },
 
-  // Technic — a stepped pin hole, a pin, a liftarm.
+  // SNOT — sideways-facing studs, off the vertical lattice entirely.
+  { id: '4070', category: 'SNOT' },
+
+  // Technic — a stepped pin hole, a friction pin, a liftarm, an axle and an axle hole
+  // (the worm gear's — its bore is the simplest real axle-hole example).
   { id: '3700', category: 'Technic' },
   { id: '3701', category: 'Technic' },
   { id: '3673', category: 'Technic' },
   { id: '32523', category: 'Technic' },
+  { id: '3705', category: 'Technic' },
+  { id: '4716', category: 'Technic' },
+
+  // Hinges — interlocking fingers, matched by group rather than gender alone.
+  { id: '3937', category: 'Hinges' },
+  { id: '3938', category: 'Hinges' },
 
   // Connectors — a clip and a bar, the two shapes Technic doesn't otherwise cover.
   { id: '4085c', category: 'Connectors' },

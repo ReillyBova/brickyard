@@ -25,6 +25,18 @@ import type { ConnectionPoint, Mate, MateGroup, PartDef, SpatialIndex } from './
 export const MATE_TOLERANCE = 0.35;
 
 /**
+ * How far a slide connector's centred point may sit from a mate's, measured *along*
+ * their shared axis, in LDU. A Technic pin or an axle is collapsed to one point at the
+ * centre of its whole shaft; pushed only partway into a single hole — the ordinary case,
+ * since most holes are shorter than the pin that goes through them — its centre lands
+ * well past `MATE_TOLERANCE` from the hole's own centre, along the axis they share.
+ * Bounded rather than unbounded so two merely-parallel, unrelated shafts several studs
+ * apart can never be confused: this widens reach along the line only, never off it —
+ * `MATE_TOLERANCE` still gates the perpendicular offset.
+ */
+const SLIDE_REACH = 40;
+
+/**
  * Axes must agree within about two degrees.
  *
  * Mating connectors are **co-directional**, not opposed. LDraw draws both a stud and a
@@ -116,11 +128,42 @@ export function findMates(
     const mine = unpackKey(mp.key);
     if (mine.gender === null || mine.kind === null) continue;
 
-    for (const other of index.near(position, MATE_TOLERANCE)) {
+    // A slide connector's one point stands for its whole shaft, positioned at its
+    // geometric centre (`resolvePart` collapses a Technic pin or an axle's full length
+    // into a single centred point). Pushed only partway into one hole — the ordinary
+    // case, since most holes are shorter than the pin — its centre sits well away from
+    // the hole's own centre, along the shared axis. `MATE_TOLERANCE` alone would never
+    // find it, so the search widens for slide connectors specifically.
+    const radius = mine.slide ? SLIDE_REACH : MATE_TOLERANCE;
+
+    for (const other of index.near(position, radius)) {
       if (exclude?.has(other.brick)) continue;
-      if (dist2(position, other.position) > MATE_TOLERANCE ** 2) continue;
-      // Co-directional. Gender, not direction, is what stops two studs from mating.
-      if (dot(axis, other.axis) < AXIS_TOLERANCE) continue;
+      // Co-directional, *unless* either side slides — a Technic pin or an axle has no
+      // "one true end": p/axlehole.dat and p/connhole.dat are both drawn open at both
+      // faces (`caps=none`), so a hole threaded from the opposite direction is exactly
+      // as valid a mate as one threaded from the modelled direction, and its axis reads
+      // as the exact negation rather than a near match. Measured on the bundled models:
+      // every isolated Technic axle and friction pin had its true mate sitting at
+      // distance 0 with dot -1 — rejected by this check alone, nothing else wrong.
+      const otherSlide = unpackKey(other.key).slide;
+      const slides = mine.slide || otherSlide;
+      const aligned = slides ? Math.abs(dot(axis, other.axis)) : dot(axis, other.axis);
+      if (aligned < AXIS_TOLERANCE) continue;
+
+      if (slides) {
+        // Coaxial, not coincident: perpendicular distance from the line through
+        // `position` along `axis`, since a partial insertion moves the two centres
+        // apart *along* that line but never off it. `axis` is unit length, so the
+        // standard point-line formula needs no extra normalisation.
+        const dx = other.position[0] - position[0];
+        const dy = other.position[1] - position[1];
+        const dz = other.position[2] - position[2];
+        const along = dx * axis[0] + dy * axis[1] + dz * axis[2];
+        const perp2 = dx * dx + dy * dy + dz * dz - along * along;
+        if (perp2 > MATE_TOLERANCE ** 2) continue;
+      } else if (dist2(position, other.position) > MATE_TOLERANCE ** 2) {
+        continue;
+      }
       if (!keysCompatible(mp.key, other.key, mp.group, other.group)) continue;
 
       const mates = byBrick.get(other.brick) ?? [];

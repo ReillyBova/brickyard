@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { IDENTITY, determinant, fromTranslation, multiply, transformPoint } from '../math';
+import { IDENTITY, determinant, fromTranslation, invert, multiply, transformPoint } from '../math';
 import type { BrickId, Mat4 } from '../types';
 import { fixtureReader } from './__fixtures__/reader';
 import { isCompatible, keysCompatible, unpackKey } from './compat';
@@ -188,6 +188,192 @@ describe('axle exclusivity', () => {
         }
       }
     }
+  });
+});
+
+describe('hard connections, end to end on real parts', () => {
+  // Each case here resolves two real captured parts, places one against the other with
+  // solveMating, and confirms findMates independently discovers the same pair — proving
+  // the connectivity model on the parts the project exists to handle, not just 3001.
+  const index = new HashSpatialIndex();
+
+  it('a Technic pin seats in a Technic brick hole', async () => {
+    const brickPart = await part('3700');
+    const pin = await part('3673');
+    const hole = brickPart.connections.find((c) => c.source === 'p/connhole.dat')!;
+    const peg = pin.connections.find((c) => c.gender === 'M')!;
+    expect(hole).toBeDefined();
+    expect(peg).toBeDefined();
+    expect(isCompatible(peg, hole)).toBe(true);
+
+    index.insert(brick(1), brickPart, IDENTITY);
+    const placed = solveMating(pin, peg, hole, IDENTITY, 0);
+    const groups = findMates(pin, placed, index);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].mates.some((m) => m.aPoint === peg.id && m.bPoint === hole.id)).toBe(true);
+    index.remove(brick(1));
+  });
+
+  it('a Technic pin pushed only halfway into a hole, from either end, still mates', async () => {
+    // resolvePart collapses a pin's whole shaft to one centred point, and a real single
+    // Technic hole is shallower than the pin that passes through it — so a pin actually
+    // seated in one hole has its own centre well away from the hole's, along their
+    // shared axis, with the rest of the shaft protruding freely. Measured directly
+    // against the bundled models: this — not a compatibility or parsing bug — is what
+    // left most real Technic connections unfound.
+    const brickPart = await part('3700');
+    const pin = await part('3673');
+    const hole = brickPart.connections.find((c) => c.source === 'p/connhole.dat')!;
+    const peg = pin.connections.find((c) => c.gender === 'M')!;
+    index.insert(brick(1), brickPart, IDENTITY);
+
+    const seated = solveMating(pin, peg, hole, IDENTITY, 0);
+    const { position: holePos, axis } = worldPoint(hole, IDENTITY);
+
+    // Slide the perfectly-seated placement 10 LDU along the shared axis — half the
+    // pin's engaging shaft — so the pin's centre point no longer coincides with the
+    // hole's at all, the way a pin actually pushed into one hole never does.
+    const offset: Mat4 = fromTranslation([axis[0] * 10, axis[1] * 10, axis[2] * 10]);
+    const halfway = multiply(offset, seated);
+    const pegNow = worldPoint(peg, halfway);
+    expect(Math.hypot(...pegNow.position.map((v, i) => v - holePos[i]))).toBeGreaterThan(9);
+
+    const groups = findMates(pin, halfway, index);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].mates.some((m) => m.aPoint === peg.id && m.bPoint === hole.id)).toBe(true);
+    index.remove(brick(1));
+  });
+
+  it('a Technic pin refuses a Technic axle hole', async () => {
+    const pin = await part('3673');
+    const gear = await part('4716'); // Technic Worm Gear 2L — mounts on an axle
+    const peg = pin.connections.find((c) => c.gender === 'M')!;
+    const axleHole = gear.connections.find((c) => c.gender === 'F')!;
+    expect(isCompatible(peg, axleHole)).toBe(false);
+  });
+
+  it('a Technic axle refuses a round pin hole', async () => {
+    const axlePart = await part('3705');
+    const brickPart = await part('3700');
+    const axle = axlePart.connections.find((c) => c.source === 'parts/3705.dat')!;
+    const hole = brickPart.connections.find((c) => c.source === 'p/connhole.dat')!;
+    expect(isCompatible(axle, hole)).toBe(false);
+  });
+
+  it('a Technic axle seats in a worm gear, via its axle hole', async () => {
+    const axlePart = await part('3705');
+    const gear = await part('4716'); // Technic Worm Gear 2L — mounts on an axle
+    const axle = axlePart.connections.find((c) => c.source === 'parts/3705.dat')!;
+    const axleHole = gear.connections.find((c) => c.gender === 'F')!;
+    expect(isCompatible(axle, axleHole)).toBe(true);
+
+    index.insert(brick(1), gear, IDENTITY);
+    const placed = solveMating(axlePart, axle, axleHole, IDENTITY, 0);
+    const groups = findMates(axlePart, placed, index);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].mates.some((m) => m.aPoint === axle.id && m.bPoint === axleHole.id)).toBe(
+      true,
+    );
+    index.remove(brick(1));
+  });
+
+  it('an axle threaded from the opposite direction still mates — sliding connectors have no one true end', async () => {
+    // p/axlehole.dat and p/connhole.dat are both drawn open at both faces (`caps=none`),
+    // so an axle entering from the "wrong" side is exactly as valid as one entering from
+    // the modelled direction. Its world axis reads as the exact negation, not a near
+    // match — flip the seated placement 180 degrees about an axis perpendicular to the
+    // connector (so the position stays put but the axle points the other way) and
+    // confirm findMates still finds it. Measured directly against the bundled models,
+    // this was rejecting every axle approached from that side, full stop.
+    const axlePart = await part('3705');
+    const gear = await part('4716');
+    const axle = axlePart.connections.find((c) => c.source === 'parts/3705.dat')!;
+    const axleHole = gear.connections.find((c) => c.gender === 'F')!;
+    index.insert(brick(1), gear, IDENTITY);
+
+    const seated = solveMating(axlePart, axle, axleHole, IDENTITY, 0);
+    // 180 degrees about the connector's *own* local X, conjugated by its point matrix so
+    // the pivot is the connector's world position regardless of its own orientation
+    // quirks: flips its world +Y (the connector axis) without moving that position.
+    const flipAboutX: Mat4 = [1, 0, 0, 0, 0, -1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1];
+    const pm = pointMatrix(axle);
+    const flipped = multiply(seated, multiply(pm, multiply(flipAboutX, invert(pm))));
+
+    const before = worldPoint(axle, seated);
+    const after = worldPoint(axle, flipped);
+    expect(after.position).toEqual(before.position); // same seat, axis reversed
+    const dot = after.axis[0] * before.axis[0] + after.axis[1] * before.axis[1] + after.axis[2] * before.axis[2];
+    expect(dot).toBeCloseTo(-1, 6);
+
+    const groups = findMates(axlePart, flipped, index);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].mates.some((m) => m.aPoint === axle.id && m.bPoint === axleHole.id)).toBe(
+      true,
+    );
+    index.remove(brick(1));
+  });
+
+  it('a bar seats in a clip', async () => {
+    const flag = await part('2335'); // Flag 2 x 2, carries two SNAP_CLP clips
+    const lightsaber = await part('30374'); // Bar 4L Lightsaber Blade
+    const [clip] = flag.connections;
+    const [bar] = lightsaber.connections;
+    expect(isCompatible(bar, clip)).toBe(true);
+
+    index.insert(brick(1), flag, IDENTITY);
+    const placed = solveMating(lightsaber, bar, clip, IDENTITY, 0);
+    const groups = findMates(lightsaber, placed, index);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].mates.some((m) => m.aPoint === bar.id && m.bPoint === clip.id)).toBe(true);
+    index.remove(brick(1));
+  });
+
+  it('a sideways SNOT stud (4070) accepts a normal brick, off the lattice entirely', async () => {
+    // The discriminating case for "sideways building": 4070's stud points along +Z, not
+    // +Y, so the moving brick's socket has to land rotated 90 degrees to engage it —
+    // exactly the geometry a lattice-based implementation could never produce.
+    const headlight = await part('4070');
+    const p3001 = await part('3001');
+    const sidewaysStud = headlight.connections.find((c) => c.source === 'p/stud2a.dat')!;
+    expect(sidewaysStud.gender).toBe('M');
+    // Axis is [0, 0, 1] — sideways, not [0, ±1, 0] like every stud tested until now.
+    expect([sidewaysStud.orientation[3], sidewaysStud.orientation[4], sidewaysStud.orientation[5]]).toEqual([
+      0, 0, 1,
+    ]);
+
+    const socket = socketsDown(p3001)[0];
+    expect(isCompatible(socket, sidewaysStud)).toBe(true);
+
+    index.insert(brick(1), headlight, IDENTITY);
+    const placed = solveMating(p3001, socket, sidewaysStud, IDENTITY, 0);
+    const groups = findMates(p3001, placed, index);
+    expect(groups).toHaveLength(1);
+    expect(
+      groups[0].mates.some((m) => m.aPoint === socket.id && m.bPoint === sidewaysStud.id),
+    ).toBe(true);
+    index.remove(brick(1));
+  });
+
+  it('two hinge halves interlock, fingers matching by group rather than gender alone', async () => {
+    const base = await part('3937'); // Hinge Brick 1 x 2 Base
+    const top = await part('3938'); // Hinge Brick 1 x 2 Top
+    const baseFinger = base.connections.find((c) => c.kind === 'finger')!;
+    const topFinger = top.connections.find((c) => c.kind === 'finger')!;
+    expect(baseFinger.gender).toBe('F');
+    expect(topFinger.gender).toBe('M');
+    expect(isCompatible(baseFinger, topFinger)).toBe(true);
+
+    // Both halves place their finger run at the same local pos/axis, so the identity
+    // transform is where a real assembly puts them — the pivot line, not the mesh, is
+    // what connectivity tracks.
+    index.insert(brick(1), base, IDENTITY);
+    const groups = findMates(top, IDENTITY, index);
+    expect(groups).toHaveLength(1);
+    const mate = groups[0].mates.find((m) => m.aPoint === topFinger.id && m.bPoint === baseFinger.id);
+    expect(mate).toBeDefined();
+    expect(mate!.kind).toBe('finger');
+    expect(mate!.polarity).toBe('symmetric');
+    index.remove(brick(1));
   });
 });
 

@@ -240,16 +240,44 @@ const RADIUS_QUANTUM = 0.5;
 const RADIUS_BUCKET_MAX = 255;
 
 /**
- * The section that actually does the mating. A male connector is limited by its widest
- * section — that is what has to fit — and a female one by its narrowest, the bore. So a
- * Technic pin hole `R 8 2 · R 6 16 · R 8 2` keys on radius 6, exactly like the pin that
- * enters it.
+ * The section that actually does the mating: whichever radius accounts for the most of
+ * the profile's total length, regardless of gender.
+ *
+ * A stepped profile almost always has one dominant section — the real shaft or bore that
+ * does the engaging — plus one or two short features at the ends: a collar, a chamfer, a
+ * locking ridge. Picking a fixed extreme (always widest, always narrowest) gets fooled by
+ * whichever of those short features happens to be more extreme than the shaft:
+ *
+ * - The real Technic pin (`3673`) is `_L 6.25 2 · R 6 16 · R 8 4 · R 6 16 · _L 6.25 2` — a
+ *   radius-8 collar sits in the *middle*, deliberately meant to stay outside any single
+ *   hole (it's the stop between two beams when a pin joins them front-to-back). Always
+ *   picking the widest section grabs the collar (8) instead of the shaft (6) that
+ *   actually enters `3700`'s hole, `R 8 2 · R 6 16 · R 8 2` — and the two read as
+ *   incompatible even though they are the textbook fit.
+ * - The round brick `3062b`'s underside socket is `R 6 20 · R 4 8` — a normal radius-6
+ *   bore for almost its whole depth, narrowing to 4 only in the last 8 LDU where no stud
+ *   ever reaches. Always picking the narrowest section grabs that unreachable neck (4)
+ *   instead of the bore (6) that a real stud engages — measured directly against the
+ *   bundled models, every `3062b` in Shipwrecked Pirate came in reading as incompatible
+ *   with the stud it visibly sits on, for exactly this reason.
+ *
+ * In both real cases the short, unrepresentative feature loses on total length, and the
+ * shaft or bore that actually does the work wins — which is what this picks.
  */
-export function matingSection(sections: readonly Section[], gender: Gender): Section | null {
+export function matingSection(sections: readonly Section[]): Section | null {
   if (sections.length === 0) return null;
-  let best = sections[0];
+  const totalByRadius = new Map<number, number>();
   for (const s of sections) {
-    if (gender === 'F' ? s.radius < best.radius : s.radius > best.radius) best = s;
+    totalByRadius.set(s.radius, (totalByRadius.get(s.radius) ?? 0) + s.length);
+  }
+  let best = sections[0];
+  let bestTotal = totalByRadius.get(best.radius)!;
+  for (const s of sections) {
+    const total = totalByRadius.get(s.radius)!;
+    if (total > bestTotal) {
+      best = s;
+      bestTotal = total;
+    }
   }
   return best;
 }
@@ -282,7 +310,7 @@ export function packKey(
   sections: readonly Section[],
   slide: boolean,
 ): number {
-  const sec = matingSection(sections, gender);
+  const sec = matingSection(sections);
   const variant = sec ? VARIANT_CODE[sec.variant] : 0;
   let bucket = 0;
   if (sec) {
