@@ -45,6 +45,16 @@
     "category": "Connectors"
   },
   {
+    "id": "3937",
+    "title": "Hinge 1 x 2 Base",
+    "category": "Hinges"
+  },
+  {
+    "id": "3938",
+    "title": "Hinge 1 x 2 Top",
+    "category": "Hinges"
+  },
+  {
     "id": "973",
     "title": "Minifig Torso",
     "category": "Minifigure"
@@ -115,6 +125,11 @@
     "category": "Slopes"
   },
   {
+    "id": "4070",
+    "title": "Brick 1 x 1 with Headlight",
+    "category": "SNOT"
+  },
+  {
     "id": "3673",
     "title": "Technic Pin",
     "category": "Technic"
@@ -127,6 +142,16 @@
   {
     "id": "3701",
     "title": "Technic Brick 1 x 4 with Holes",
+    "category": "Technic"
+  },
+  {
+    "id": "3705",
+    "title": "Technic Axle 4",
+    "category": "Technic"
+  },
+  {
+    "id": "4716",
+    "title": "Technic Worm Gear 2L",
     "category": "Technic"
   },
   {

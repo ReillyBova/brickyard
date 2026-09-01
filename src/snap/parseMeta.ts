@@ -240,16 +240,25 @@ const RADIUS_QUANTUM = 0.5;
 const RADIUS_BUCKET_MAX = 255;
 
 /**
- * The section that actually does the mating. A male connector is limited by its widest
- * section — that is what has to fit — and a female one by its narrowest, the bore. So a
- * Technic pin hole `R 8 2 · R 6 16 · R 8 2` keys on radius 6, exactly like the pin that
- * enters it.
+ * The section that actually does the mating: a profile's choke point, its narrowest
+ * section, regardless of gender.
+ *
+ * A female bore's narrowest point is the constriction anything must pass through — a
+ * Technic pin hole `R 8 2 · R 6 16 · R 8 2` keys on radius 6. A male connector's narrowest
+ * point is the neck the bore actually grips, for the same reason: any *wider* point on the
+ * male side — a collar, a flared cap — sits outside the bore rather than passing through
+ * it. The real Technic pin (`3673`) proves this isn't hypothetical: its authoritative
+ * profile is `_L 6.25 2 · R 6 16 · R 8 4 · R 6 16 · _L 6.25 2`, a radius-8 collar in the
+ * *middle* that is deliberately meant to stay outside any single hole — it's the stop
+ * between two beams when a pin joins them front-to-back. Picking the widest section there
+ * grabs the collar instead of the engaging shaft, so the pin's key disagreed with the
+ * hole's and the two read as incompatible even though they are the textbook fit.
  */
-export function matingSection(sections: readonly Section[], gender: Gender): Section | null {
+export function matingSection(sections: readonly Section[]): Section | null {
   if (sections.length === 0) return null;
   let best = sections[0];
   for (const s of sections) {
-    if (gender === 'F' ? s.radius < best.radius : s.radius > best.radius) best = s;
+    if (s.radius < best.radius) best = s;
   }
   return best;
 }
@@ -282,7 +291,7 @@ export function packKey(
   sections: readonly Section[],
   slide: boolean,
 ): number {
-  const sec = matingSection(sections, gender);
+  const sec = matingSection(sections);
   const variant = sec ? VARIANT_CODE[sec.variant] : 0;
   let bucket = 0;
   if (sec) {

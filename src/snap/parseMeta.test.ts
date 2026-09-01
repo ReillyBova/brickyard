@@ -217,23 +217,38 @@ describe('scalar attribute parsing', () => {
 
 describe('matingSection', () => {
   it('takes the bore of a stepped female profile', () => {
-    expect(matingSection(parseSections('R 8 2 R 6 16 R 8 2'), 'F')).toEqual({
+    expect(matingSection(parseSections('R 8 2 R 6 16 R 8 2'))).toEqual({
       variant: 'R',
       radius: 6,
       length: 16,
     });
   });
 
-  it('takes the widest section of a male profile', () => {
-    expect(matingSection(parseSections('R 5 2 _L 6 5'), 'M')).toEqual({
+  it('takes the narrowest section of a male profile, not the widest', () => {
+    // p/knob1.dat's real profile: a neck that widens toward the tip. The neck (radius
+    // 5) is what a receiving socket actually grips; the wider tip is what the socket's
+    // opening has to admit, not what determines the fit.
+    expect(matingSection(parseSections('R 5 2 _L 6 5'))).toEqual({
+      variant: 'R',
+      radius: 5,
+      length: 2,
+    });
+  });
+
+  it('takes the narrowest section even when it sits in the middle, flanked by wider ones', () => {
+    // The real Technic pin (3673): a radius-8 collar sandwiched between two radius-6
+    // shafts. The collar is a stop meant to stay outside any single hole; the shafts are
+    // what actually engage the hole's bore, so the narrowest section — not the widest —
+    // has to be what the key is built from for the pin to match its hole.
+    expect(matingSection(parseSections('R 6.25 2 R 6 16 R 8 4 R 6 16 R 6.25 2'))).toEqual({
       variant: 'R',
       radius: 6,
-      length: 5,
+      length: 16,
     });
   });
 
   it('returns null for an empty profile', () => {
-    expect(matingSection([], 'M')).toBeNull();
+    expect(matingSection([])).toBeNull();
   });
 });
 
