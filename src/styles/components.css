@@ -110,6 +110,7 @@ a:hover:not(.by-btn) { color: var(--by-accent-hover); }
 /* Icon button — square hit box, circular pressable. Every one carries a
    title/aria-label and, if it has a shortcut, shows it in the tooltip. */
 .by-icon-btn {
+  position: relative;
   display: inline-grid;
   place-items: center;
   width: var(--by-hit-min);
@@ -128,6 +129,27 @@ a:hover:not(.by-btn) { color: var(--by-accent-hover); }
 .by-icon-btn:active:not(:disabled) { background: var(--by-press-wash); }
 .by-icon-btn.is-active { background: var(--by-accent-solid); color: var(--by-text-on-accent); }
 .by-icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* Active-filter count, riding the corner of a filter trigger. Only ever rendered
+   alongside .is-active, so it never needs to contrast against the muted icon color. */
+.by-icon-btn__badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border: 1.5px solid var(--by-chrome);
+  border-radius: var(--by-radius-pill);
+  background: var(--by-accent-solid);
+  color: var(--by-text-on-accent);
+  font-family: var(--by-font-ui);
+  font-size: var(--by-text-2xs);
+  font-weight: 700;
+  line-height: 13px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
 
 /* Tool group — related tools ride in one pill-shaped raft, the way a toolbar
    should read as a handful of objects rather than a row of twenty buttons. */
@@ -181,6 +203,44 @@ a:hover:not(.by-btn) { color: var(--by-accent-hover); }
 }
 .by-menu__item:hover { background: var(--by-hover-wash); }
 .by-menu__item.is-active { background: var(--by-accent-wash); color: var(--by-accent-text); }
+
+/* Multi-select variant — a checkbox menu grouped into sections that AND together, each
+   section OR-ing its own selections. FilterMenu.tsx. */
+.by-menu__section { display: flex; flex-direction: column; gap: 1px; }
+.by-menu__section-label { padding: var(--by-space-2) var(--by-space-3) var(--by-space-1); }
+.by-menu__divider {
+  height: 1px;
+  margin: var(--by-space-1) 0;
+  background: var(--by-line);
+}
+.by-menu__item--check { justify-content: flex-start; gap: var(--by-space-2); }
+.by-menu__item-check {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+.by-menu__item-check > svg { width: 14px; height: 14px; color: var(--by-accent-text); }
+.by-menu__footer {
+  padding-top: var(--by-space-1);
+  margin-top: var(--by-space-1);
+  border-top: 1px solid var(--by-line);
+}
+.by-menu__clear {
+  width: 100%;
+  padding: var(--by-space-2) var(--by-space-3);
+  border: 0;
+  border-radius: var(--by-radius-sm);
+  background: transparent;
+  color: var(--by-accent-text);
+  font: inherit;
+  font-size: var(--by-text-sm);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.by-menu__clear:hover { background: var(--by-hover-wash); }
 
 /* ── Fields ─────────────────────────────────────────────────────────────── */
 .by-field { display: flex; flex-direction: column; gap: 5px; }

@@ -42,6 +42,15 @@ export function FilterIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+/** Checked state inside a multi-select filter menu item. */
+export function CheckIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon data-lucide="check" {...props}>
+      <path d="M20 6 9 17l-5-5" />
+    </Icon>
+  );
+}
+
 /** Disclosure chevron for the colour picker's finishes accordion; rotates via CSS. */
 export function ChevronDownIcon(props: SVGProps<SVGSVGElement>) {
   return (

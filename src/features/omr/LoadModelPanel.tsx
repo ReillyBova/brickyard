@@ -117,7 +117,6 @@ export function LoadModelPanel({ onLoad, onClose }: LoadModelPanelProps) {
                   className="by-load-model-panel__item"
                   onClick={() => open(m)}
                   disabled={busy}
-                  title={`Load ${m.name} — ${m.theme}, ${m.year}`}
                 >
                   <span className="by-load-model-panel__item-name">{m.name}</span>
                   <span className="by-load-model-panel__item-meta by-faint">
