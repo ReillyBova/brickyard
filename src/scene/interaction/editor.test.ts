@@ -12,7 +12,9 @@ import { describe, expect, it } from 'vitest';
 import { IDENTITY, fromTranslation } from '../../math';
 import { mintBrickId } from '../../model/ids';
 import type { BrickInstance } from '../../model/types';
+import { boundsFromTriangles, partTriangles } from '../../ldraw/bounds';
 import { fixtureReader } from '../../snap/__fixtures__/reader';
+import { buildOccupancy } from '../../snap/collision';
 import { resolvePart } from '../../snap/resolvePart';
 import type { PartDef } from '../../snap/types';
 import type { BrickId, Mat4 } from '../../types';
@@ -36,6 +38,27 @@ async function brick2x4(): Promise<PartDef> {
     connections: await resolvePart('3001', fixtureReader),
     bounds: { min: [-40, -4, -20], max: [40, 24, 20] },
     occupancy: { dims: [0, 0, 0], bits: new Uint8Array(0) },
+  };
+}
+
+/**
+ * A real occupancy mask, for the `transformSelection` collision tests below — unlike
+ * `brick2x4()` above, those tests exercise `collides()` directly, and an empty mask is
+ * exactly what would make a real collision invisible (see `placement.test.ts`'s own
+ * fixture, which makes the same point for placement's collision checks).
+ */
+async function brick2x4WithOccupancy(): Promise<PartDef> {
+  const [connections, triangles] = await Promise.all([
+    resolvePart('3001', fixtureReader),
+    partTriangles('3001', fixtureReader),
+  ]);
+  const bounds = boundsFromTriangles(triangles);
+  return {
+    id: '3001',
+    title: 'Brick  2 x  4',
+    connections,
+    bounds,
+    occupancy: buildOccupancy(triangles, bounds, connections),
   };
 }
 
@@ -194,5 +217,81 @@ describe('EditorSession', () => {
     expect(s.canUndo).toBe(false);
     expect(() => s.undo()).not.toThrow();
     expect(s.document.bricks.size).toBe(0);
+  });
+});
+
+describe('transformSelection collision', () => {
+  // The same gap src/features/mcp/session.ts's transform() had: connectivity was
+  // re-solved via findMates on every move, but nothing ever called collides(), so a
+  // keyboard nudge could drive a brick into another and leave it locked there.
+
+  it('refuses to move a brick exactly onto another, leaving the document unchanged', async () => {
+    const part = await brick2x4WithOccupancy();
+    const s = new EditorSession(recordingScene());
+    s.registerPart(part);
+
+    const a = instance(part, IDENTITY);
+    const b = instance(part, fromTranslation([500, 0, 0]));
+    s.place(a, part);
+    s.place(b, part);
+    expect(s.document.graph.edges.size).toBe(0);
+
+    const applied = s.transformSelection([b.id], fromTranslation([-500, 0, 0]), 'Move brick');
+
+    expect(applied).toBe(false);
+    // Nothing committed: brick b is still where it was, no edges formed.
+    expect(s.document.bricks.get(b.id)?.transform).toEqual(fromTranslation([500, 0, 0]));
+    expect(s.document.graph.edges.size).toBe(0);
+    expect(s.document.bricks.size).toBe(2);
+  });
+
+  it('still allows moving a brick back into a position where it legitimately mates', async () => {
+    const part = await brick2x4WithOccupancy();
+    const s = new EditorSession(recordingScene());
+    s.registerPart(part);
+
+    const lower = instance(part, IDENTITY);
+    s.place(lower, part);
+    // A 2x4 squarely on a 2x4: the maximal-overlap case a naive collision check would
+    // be most tempted to flag.
+    const upper = instance(part, fromTranslation([0, -BRICK_HEIGHT, 0]));
+    s.place(upper, part);
+    expect(s.document.graph.edges.size).toBe(1);
+
+    // Move it away, breaking the connection...
+    const awayDelta = fromTranslation([500, 0, 0]);
+    expect(s.transformSelection([upper.id], awayDelta, 'Move brick')).toBe(true);
+    expect(s.document.graph.edges.size).toBe(0);
+
+    // ...then back onto the exact same mated position. Must succeed, not be treated as
+    // a collision, and re-form the connection.
+    const backDelta = fromTranslation([-500, 0, 0]);
+    const applied = s.transformSelection([upper.id], backDelta, 'Move brick');
+
+    expect(applied).toBe(true);
+    expect(s.document.graph.edges.size).toBe(1);
+    expect([...s.document.graph.edges.values()][0].mates).toHaveLength(8);
+  });
+
+  it('does not let one selected brick block another moving together', async () => {
+    // A rigid group move must not treat the group's own members as obstacles to each
+    // other — collides() is called with the whole moving set as `ignore`, mirroring
+    // findMates's existing exemption of it.
+    const part = await brick2x4WithOccupancy();
+    const s = new EditorSession(recordingScene());
+    s.registerPart(part);
+
+    const a = instance(part, IDENTITY);
+    const b = instance(part, fromTranslation([0, -BRICK_HEIGHT, 0]));
+    s.place(a, part);
+    s.place(b, part);
+    expect(s.document.graph.edges.size).toBe(1);
+
+    const delta = fromTranslation([200, 0, 0]);
+    const applied = s.transformSelection([a.id, b.id], delta, 'Move 2 bricks');
+
+    expect(applied).toBe(true);
+    // The pair's own connection survives a shared rigid move.
+    expect(s.document.graph.edges.size).toBe(1);
   });
 });
