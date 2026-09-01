@@ -119,6 +119,9 @@ the same transactions a person uses — and therefore cannot produce an invalid 
 connection graph validates every placement. The deployed app stands alone without it; MCP is a second
 channel, demonstrated rather than required.
 
+The tool surface, the transports and the guidance the server carries are in
+[`MCP.md`](MCP.md).
+
 ### Physics
 
 Connected components as rigid bodies, so a structure can be knocked over and fall apart along its
