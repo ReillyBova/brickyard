@@ -140,3 +140,34 @@ describe('parseMpd — locally-embedded OMR part overrides', () => {
     expect(parsed.submodelCount).toBe(3);
   });
 });
+
+describe('parseMpd — numeric build-step submodels are not local overrides', () => {
+  // 21033 - Chicago.ldr (the Chicago set) names each build step `21033 - <step>.ldr`, e.g.
+  // `21033 - 1.ldr`. That fits the same `<set number> - <suffix>` shape as a genuine local
+  // OMR override, and "1" alone passes the bare-part-id check just like "65473" does — but
+  // it is a `.ldr` submodel (`!LDRAW_ORG Model`), not a `.dat` part. Unwrapping it the same
+  // way as the Bonsai Tree's override would replace the whole step with real LDraw part
+  // `1.dat` ("Container Bookcase 2 x 4 x 4"), a large flat part appearing where a step of
+  // ordinary plates and bricks belongs — the reported "big baseplate" symptom.
+  const text = readFixture('21033-chicago.mpd');
+  const parsed = parseMpd(text, '21033 - Chicago.mpd');
+
+  it('recurses into the numbered step instead of resolving it to part "1"', () => {
+    expect(parsed.refs.some((r) => r.partId === '1')).toBe(false);
+  });
+
+  it('emits the leaf parts the step submodel actually contains', () => {
+    expect(parsed.refs.some((r) => r.partId === '3666')).toBe(true);
+    expect(parsed.refs.some((r) => r.partId === '4162p17')).toBe(true);
+    // 3023 appears both as a root-level leaf via the step and would collide in a plain
+    // partId set check, so count occurrences instead.
+    expect(parsed.refs.filter((r) => r.partId === '3023')).toHaveLength(1);
+  });
+
+  it('still recurses (not resolves) even though the step index is a real LDraw part id', () => {
+    // Sanity check on the fixture itself, not just the parser: "1" is not a coincidental
+    // stand-in for nothing — LDraw part `1.dat` is real, which is exactly what makes this
+    // case dangerous instead of merely a harmless miss.
+    expect(parsed.submodelCount).toBe(2);
+  });
+});
