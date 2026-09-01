@@ -8,16 +8,16 @@
  * Pure: no three.js imports, no DOM.
  */
 
-import type { BrickId, GroupId, Mat4 } from '../types';
-import { asGraph } from './document';
-import { invert as invertMatrix, multiply } from '../math';
+import type { BrickId, GroupId, Mat4 } from '../types.ts';
+import { asGraph } from './document.ts';
+import { invert as invertMatrix, multiply } from '../math.ts';
 import type {
   ApplyOperation,
   BrickInstance,
   InvertOperation,
   Operation,
   SceneDocument,
-} from './types';
+} from './types.ts';
 
 const addBricks = (doc: SceneDocument, bricks: readonly BrickInstance[]): SceneDocument => {
   if (bricks.length === 0) return doc;

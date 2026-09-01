@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { fromTranslation, multiply, fromYRotation } from '../math';
-import { createDocument } from './document';
-import { edgeIdFor, mintBrickId, mintGroupId } from './ids';
-import { mate } from './testing';
+import { fromTranslation, multiply, fromYRotation } from '../math.ts';
+import { createDocument } from './document.ts';
+import { edgeIdFor, mintBrickId, mintGroupId } from './ids.ts';
+import { mate } from './testing.ts';
 import {
   DOCUMENT_FORMAT_VERSION,
   fromJSON,
@@ -11,8 +11,8 @@ import {
   stringifyDocument,
   toJSON,
   toLdr,
-} from './serialize';
-import type { BrickInstance, GroupDef } from './types';
+} from './serialize.ts';
+import type { BrickInstance, GroupDef } from './types.ts';
 
 /** Minted rather than labelled, because `fromJSON` validates every id it reads. */
 const sample = () => {

@@ -11,10 +11,10 @@
  * rather than failing when a session has no page attached.
  */
 
-import type { Vec3 } from '../../types';
-import { toLdr, stringifyDocument } from '../../model/serialize';
-import type { ReferenceLookup } from './reference';
-import { Session, SessionError, type PlacementRequest } from './session';
+import type { Vec3 } from '../../types.ts';
+import { toLdr, stringifyDocument } from '../../model/serialize.ts';
+import type { ReferenceLookup } from './reference.ts';
+import { Session, SessionError, type PlacementRequest } from './session.ts';
 
 export type ContentBlock =
   | { type: 'text'; text: string }

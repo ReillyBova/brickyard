@@ -9,8 +9,8 @@
  * Pure: no three.js imports, no DOM, no I/O.
  */
 
-import { PROMPTS, SERVER_INSTRUCTIONS } from './instructions';
-import { TOOLS, callTool, type ToolContext } from './tools';
+import { PROMPTS, SERVER_INSTRUCTIONS } from './instructions.ts';
+import { TOOLS, callTool, type ToolContext } from './tools.ts';
 
 /** Used when a client does not name one. */
 export const DEFAULT_PROTOCOL_VERSION = '2025-06-18';

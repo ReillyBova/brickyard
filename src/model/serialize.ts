@@ -15,11 +15,11 @@
  * Pure: no three.js imports, no DOM, no I/O.
  */
 
-import type { BrickId, GroupId, Mat4 } from '../types';
-import { createDocument } from './document';
-import { asBrickId, asGroupId, edgeIdFor } from './ids';
-import type { BrickInstance, ConnectionEdge, GroupDef, SceneDocument } from './types';
-import type { Mate } from '../snap/types';
+import type { BrickId, GroupId, Mat4 } from '../types.ts';
+import { createDocument } from './document.ts';
+import { asBrickId, asGroupId, edgeIdFor } from './ids.ts';
+import type { BrickInstance, ConnectionEdge, GroupDef, SceneDocument } from './types.ts';
+import type { Mate } from '../snap/types.ts';
 
 /** Bumped only when a change would make an older file unreadable. */
 export const DOCUMENT_FORMAT_VERSION = 1;

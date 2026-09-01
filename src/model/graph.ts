@@ -9,10 +9,10 @@
  * Pure: no three.js imports, no DOM.
  */
 
-import type { BrickId, EdgeId } from '../types';
-import type { Mate } from '../snap/types';
-import { edgeIdFor } from './ids';
-import type { ConnectionEdge, ConnectionGraph, GraphNode } from './types';
+import type { BrickId, EdgeId } from '../types.ts';
+import type { Mate } from '../snap/types.ts';
+import { edgeIdFor } from './ids.ts';
+import type { ConnectionEdge, ConnectionGraph, GraphNode } from './types.ts';
 
 export { edgeIdFor };
 

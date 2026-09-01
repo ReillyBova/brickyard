@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import type { Mat4 } from '../types';
-import { connectBricks, createDocument, emptyDocument } from './document';
-import { IDENTITY, fromTranslation, invert as invertMatrix, multiply } from '../math';
-import { applyOperation, applyOperations, invertOperation } from './operations';
+import type { Mat4 } from '../types.ts';
+import { connectBricks, createDocument, emptyDocument } from './document.ts';
+import { IDENTITY, fromTranslation, invert as invertMatrix, multiply } from '../math.ts';
+import { applyOperation, applyOperations, invertOperation } from './operations.ts';
 import {
   brick,
   edge,
@@ -14,8 +14,8 @@ import {
   testBrickId as bid,
   testEdgeId as edgeId,
   testGroupId as gid,
-} from './testing';
-import type { ConnectionEdge, Operation, SceneDocument } from './types';
+} from './testing.ts';
+import type { ConnectionEdge, Operation, SceneDocument } from './types.ts';
 
 /** Comparable form of a document, including the full graph structure. */
 const snapshot = (doc: SceneDocument) => ({

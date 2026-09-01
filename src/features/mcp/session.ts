@@ -14,13 +14,13 @@
  * the caller supplies — over the network in a page, from disk in a test.
  */
 
-import type { BrickId, GroupId, Mat4, Vec3 } from '../../types';
-import type { BrickInstance, ConnectionEdge, GroupDef, SceneDocument, Transaction } from '../../model/types';
-import type { ColorLibrary } from '../../ldraw/types';
-import type { ConnectionPoint, MateGroup, PartDef } from '../../snap/types';
-import { IDENTITY, multiply, positionOf, transformPoint } from '../../math';
-import { allBricks, emptyDocument, getBrick } from '../../model/document';
-import { edgeIdFor, mintBrickId, mintGroupId } from '../../model/ids';
+import type { BrickId, GroupId, Mat4, Vec3 } from '../../types.ts';
+import type { BrickInstance, ConnectionEdge, GroupDef, SceneDocument, Transaction } from '../../model/types.ts';
+import type { ColorLibrary } from '../../ldraw/types.ts';
+import type { ConnectionPoint, MateGroup, PartDef } from '../../snap/types.ts';
+import { IDENTITY, multiply, positionOf, transformPoint } from '../../math.ts';
+import { allBricks, emptyDocument, getBrick } from '../../model/document.ts';
+import { edgeIdFor, mintBrickId, mintGroupId } from '../../model/ids.ts';
 import {
   type History,
   canRedo,
@@ -31,12 +31,12 @@ import {
   redoLabel,
   undo,
   undoLabel,
-} from '../../model/history';
-import { collides } from '../../snap/collision';
-import { isCompatible } from '../../snap/compat';
-import { findMates, solveMating } from '../../snap/mating';
-import { HashSpatialIndex } from '../../snap/spatialIndex';
-import { HandleTable } from './handles';
+} from '../../model/history.ts';
+import { collides } from '../../snap/collision.ts';
+import { isCompatible } from '../../snap/compat.ts';
+import { findMates, solveMating } from '../../snap/mating.ts';
+import { HashSpatialIndex } from '../../snap/spatialIndex.ts';
+import { HandleTable } from './handles.ts';
 
 export type PartSource = (partId: string) => Promise<PartDef>;
 

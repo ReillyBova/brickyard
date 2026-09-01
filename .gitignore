@@ -37,3 +37,6 @@ storybook-static/
 
 # Per-developer preview config: each agent and session uses its own port
 .claude/launch.json
+
+# MCP session output — `model_save` from tools/bridge.ts
+.mcp/
