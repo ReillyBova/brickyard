@@ -5,19 +5,21 @@
  * the same three-quarter view as `public/icon.svg`, so a tile previews the actual piece
  * in the color about to be placed rather than a generic pictogram. Cached in memory for
  * the session — nothing is written to disk, and nothing is re-rendered once cached.
- * Geometry comes from `LDrawPartSource` (`./partSource.ts`), the same loader the main
- * scene uses, so a part looks identical here and on the baseplate.
+ * Geometry comes from `PartGeometrySource` (`./partSource.ts`) — `BakedPartSource` by
+ * default, so every chest part's thumbnail renders from the bundled geometry with no
+ * network request, falling through to `LDrawPartSource` for anything outside the chest.
+ * Either way it's the same geometry the main scene uses, so a part looks identical here
+ * and on the baseplate.
  *
- * Two reasons this runs at runtime instead of being baked to PNG at build time: it needs
- * no headless-GL toolchain, and it can render in the color the user actually has active,
- * which a build-time bake — fixed at bake time — could not. `ThumbnailSource` is the
- * seam a baked path would implement later, same pattern as `PartGeometrySource`.
+ * This runs at runtime rather than being baked to PNG at build time because it can render
+ * in the color the user actually has active, which a build-time bake — fixed at bake
+ * time — could not.
  */
 
 import * as THREE from 'three';
 
 import { ROOT_ROTATION_X, flipYZ } from './coords.ts';
-import { DEFAULT_PARTS_BASE_URL, LDrawPartSource } from './partSource.ts';
+import { BakedPartSource, DEFAULT_PARTS_BASE_URL, LDrawPartSource } from './partSource.ts';
 import type { PartGeometrySource } from './partSource.ts';
 
 export interface ThumbnailSource {
@@ -72,7 +74,9 @@ export class RuntimeThumbnailRenderer implements ThumbnailSource {
   renderCount = 0;
   renderTimeMs = 0;
 
-  constructor(partSource: PartGeometrySource = new LDrawPartSource(DEFAULT_PARTS_BASE_URL)) {
+  constructor(
+    partSource: PartGeometrySource = new BakedPartSource(new LDrawPartSource(DEFAULT_PARTS_BASE_URL)),
+  ) {
     this.partSource = partSource;
 
     const canvas = document.createElement('canvas');

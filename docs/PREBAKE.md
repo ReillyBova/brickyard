@@ -135,9 +135,29 @@ which costs milliseconds (`buildOccupancy`, `src/snap/collision.ts`).
 
 Flattened, deduplicated, packed vertex and index buffers for the parts in the chest. Geometry is
 where the bytes are; the full corpus is far too large to ship, so this tier is bounded deliberately.
+At the 20-part development chest, `geometry.bin` runs about 245 KB raw and 46 KB gzipped — roughly
+2 KB gzipped per part — which is the number to watch as the chest grows toward a shipping-sized set.
 
 The chest starts small during development — a few dozen parts — and grows to a curated popular set
 before shipping. That is a bundle-size decision, not an upstream one.
+
+`tools/bakeGeometry.ts` produces it by running three.js's own `LDrawLoader` under Node against the
+mirror, rather than triangulating LDraw files from scratch: getting a face's winding right needs the
+BFC state machine (`CERTIFY CW/CCW`, `INVERTNEXT`, mirrored reference matrices), and getting curved
+primitives — studs, cylinders, minifig limbs — looking smooth on top of that needs `LDrawLoader`'s
+edge-driven normal smoothing, which merges a shared vertex's normals only where no explicit line marks
+that edge as a crease. Both are exactly what the runtime loader already does, so baked and
+cold-fetched geometry for the same part cannot visually disagree — they're the same code path, one
+fed from the mirror on disk instead of a network request. `LDrawLoader` normally resolves subfiles
+through `fetch`; the bake instead walks each part's reference tree itself and seeds `THREE.Cache`
+with what it finds, so `FileLoader` resolves every subfile from memory and the bake stays fully
+offline. Deduplication comes from `BufferGeometryUtils.mergeVertices`, which welds vertices whose
+position *and* normal already match — never across a smoothing seam — typically cutting vertex count
+to about a third of the raw triangle soup.
+
+None of the chest parts hardcode a subfile colour today (every reference resolves through LDraw's
+colour-16 passthrough), so `PartGeometry.colorCodes` is unset for all of them; the field exists for
+the day a printed or dual-moulded part joins the chest.
 
 ### Model manifests
 

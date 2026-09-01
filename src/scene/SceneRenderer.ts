@@ -19,7 +19,7 @@ import type { RaycastHit } from '../snap/types';
 
 import { ROOT_ROTATION_X, flipYZ } from './coords.ts';
 import { MaterialCache } from './colorLibrary.ts';
-import { DEFAULT_PARTS_BASE_URL, LDrawPartSource } from './partSource.ts';
+import { BakedPartSource, DEFAULT_PARTS_BASE_URL, LDrawPartSource } from './partSource.ts';
 import type { PartGeometrySource } from './partSource.ts';
 import { InstancedBatchManager, batchKey } from './instancedBatches.ts';
 import { GhostPreview } from './ghost.ts';
@@ -187,7 +187,7 @@ export class SceneRenderer {
     this.sceneCamera = new SceneCamera(canvas, width / height);
 
     const baseUrl = options.partsBaseUrl ?? DEFAULT_PARTS_BASE_URL;
-    this.partSource = options.partSource ?? new LDrawPartSource(baseUrl);
+    this.partSource = options.partSource ?? new BakedPartSource(new LDrawPartSource(baseUrl));
   }
 
   // ---- geometry / material resolution -------------------------------------------
