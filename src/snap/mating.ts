@@ -12,10 +12,10 @@
  * something you get.
  */
 
-import { fromBasis, fromYRotation, invert, multiply, transformDirection, transformPoint } from '../math';
-import type { BrickId, Mat3, Mat4, Vec3 } from '../types';
-import { keysCompatible, polarityOf, unpackKey } from './compat';
-import type { ConnectionPoint, Mate, MateGroup, PartDef, SpatialIndex } from './types';
+import { fromBasis, fromYRotation, invert, multiply, transformDirection, transformPoint } from '../math.ts';
+import type { BrickId, Mat3, Mat4, Vec3 } from '../types.ts';
+import { keysCompatible, polarityOf, unpackKey } from './compat.ts';
+import type { ConnectionPoint, Mate, MateGroup, PartDef, SpatialIndex } from './types.ts';
 
 /**
  * How close two connection points must be to count as mated, in LDU. Generous enough to

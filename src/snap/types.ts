@@ -4,7 +4,7 @@
  * Pure: no three.js imports, no DOM. This module must stay safe to run in a worker.
  */
 
-import type { Bounds, BrickId, Mat3, Mat4, Vec3 } from '../types';
+import type { Bounds, BrickId, Mat3, Mat4, Vec3 } from '../types.ts';
 
 export type SnapKind = 'cyl' | 'clip' | 'finger' | 'general';
 export type Gender = 'M' | 'F';
