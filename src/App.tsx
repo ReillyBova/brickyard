@@ -6,6 +6,7 @@ import { MODELS_BASE } from './features/omr/modelIndex';
 import { createNetworkReader } from './features/omr/network';
 import type { BundledModelEntry } from './features/omr/types';
 import {
+  ClearSceneDialog,
   StatusToast,
   UnsavedChangesDialog,
   useBeforeUnload,
@@ -24,7 +25,7 @@ import { RuntimeThumbnailRenderer } from './scene/thumbnail.ts';
 import { AppShell } from './ui/AppShell/AppShell';
 import { ColorPicker } from './ui/ColorPicker/ColorPicker';
 import { LDRAW_PALETTE } from './ui/ColorPicker/palette';
-import { ApertureIcon, EditorIcon, GraphModeIcon, PackageIcon, PaintbrushIcon } from './ui/icons';
+import { ApertureIcon, EditorIcon, GraphModeIcon, PackageIcon, PaintbrushIcon, Trash2Icon } from './ui/icons';
 import { PartsChest } from './ui/PartsChest/PartsChest';
 import { PART_CATALOG } from './ui/PartsChest/catalog';
 import { GraphModeMount } from './features/graph';
@@ -117,6 +118,8 @@ function useModelLoad(
  * disabled actions for exactly that first frame.
  */
 function BuilderToolbar({
+  onRequestClear,
+  canClear,
   mode,
   onModeChange,
   onToggleRestyle,
@@ -125,6 +128,8 @@ function BuilderToolbar({
   loadModelOpen,
   fileActions,
 }: {
+  onRequestClear: () => void;
+  canClear: boolean;
   mode: AppMode;
   onModeChange: (mode: AppMode) => void;
   onToggleRestyle: () => void;
@@ -147,6 +152,14 @@ function BuilderToolbar({
 
   // Restyle is an action *within* the editor, not a mode — it recolors whatever is
   // loaded, so it only makes sense while the editor owns the view.
+  const clearAction = {
+    id: 'clear',
+    label: 'Clear baseplate',
+    icon: <Trash2Icon />,
+    disabled: !canClear || mode !== 'editor',
+    onClick: onRequestClear,
+  };
+
   const restyleAction = {
     id: 'restyle',
     label: 'Restyle',
@@ -176,6 +189,7 @@ function BuilderToolbar({
         { kind: 'group', group: { id: 'history', actions: [undoAction, redoAction] } },
         { kind: 'group', group: { id: 'grouping', actions: [groupAction, ungroupAction] } },
         { kind: 'group', group: { id: 'style', actions: [restyleAction] } },
+        { kind: 'group', group: { id: 'clear', actions: [clearAction] } },
         { kind: 'group', group: { id: 'file', actions: fileActions } },
         {
           kind: 'modeSwitch',
@@ -217,6 +231,7 @@ function SandboxEditor({
   const [session, setSession] = useState<EditorSession | null>(null);
   const [mode, setMode] = useState<AppMode>('editor');
   const [restyleOpen, setRestyleOpen] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
   const [loadModelOpen, setLoadModelOpen] = useState(false);
   const [environment, setEnvironment] = useState<PathtraceEnvironment>(DEFAULT_ENVIRONMENT);
   const [lighting, setLighting] = useState<LightingSettings>(DEFAULT_LIGHTING);
@@ -326,6 +341,19 @@ function SandboxEditor({
               </div>
             )}
             <StatusToast status={fileActions.status} onDismiss={fileActions.dismissStatus} />
+            {confirmClear && session !== null && (
+              <ClearSceneDialog
+                brickCount={session.document.bricks.size}
+                onCancel={() => setConfirmClear(false)}
+                onClear={() => {
+                  // One transaction, so a mis-click is a single undo away — which is why the
+                  // dialog can promise it.
+                  session.remove([...session.document.bricks.keys()]);
+                  setConfirmClear(false);
+                }}
+              />
+            )}
+
             {confirmLeave && (
               <UnsavedChangesDialog
                 onCancel={() => setConfirmLeave(false)}
@@ -348,6 +376,8 @@ function SandboxEditor({
         }}
         toolbar={
           <BuilderToolbar
+            onRequestClear={() => setConfirmClear(true)}
+            canClear={session !== null && session.document.bricks.size > 0}
             mode={mode}
             onModeChange={(next) => {
               setMode(next);
