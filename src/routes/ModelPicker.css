@@ -1,16 +1,143 @@
-/* The model picker placeholder. Reuses .by-empty from components.css for the message;
-   this file only places it on the page and adds the back link. */
+/* The model picker: a bundled-model list, and a viewer for whichever one is open.
+   Reuses .by-empty, .by-btn, .by-progress and .by-statusbar from components.css;
+   everything here is layout plus the two component classes this route owns. */
 
 .by-model-picker {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
   min-height: 100%;
-  padding: var(--by-space-6);
+  padding: var(--by-space-8) var(--by-space-4);
+  background: var(--by-chrome);
+  gap: var(--by-space-6);
+}
+
+.by-model-picker__header {
+  max-width: 60ch;
+  text-align: center;
+}
+
+.by-model-picker__heading {
+  font-family: var(--by-font-display);
+  font-weight: var(--by-font-display-weight);
+  font-size: var(--by-text-3xl);
+  letter-spacing: var(--by-tracking-display);
+  color: var(--by-text);
+  margin: 0 0 var(--by-space-2);
+}
+
+.by-model-picker__subheading {
+  color: var(--by-text-muted);
+  font-size: var(--by-text-lg);
+  margin: 0;
+}
+
+.by-model-picker__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--by-space-3);
+  width: 100%;
+  max-width: 900px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.by-model-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--by-space-2);
+  width: 100%;
+  padding: var(--by-space-4);
+  border: 1px solid var(--by-line);
+  border-radius: var(--by-radius-lg);
+  background: var(--by-panel);
+  color: var(--by-text);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--by-dur-fast) var(--by-ease-out), border-color var(--by-dur-fast) var(--by-ease-out);
+}
+.by-model-card:hover { background: var(--by-hover-wash); border-color: var(--by-line-strong); }
+.by-model-card:active { background: var(--by-press-wash); }
+
+.by-model-card__name {
+  font-family: var(--by-font-display);
+  font-weight: var(--by-font-display-weight);
+  font-size: var(--by-text-lg);
+}
+
+.by-model-card__stats {
+  color: var(--by-text-muted);
+  font-size: var(--by-text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.by-model-picker__back { margin-top: var(--by-space-2); }
+
+/* ── Viewer ─────────────────────────────────────────────────────────────── */
+
+.by-model-viewer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
   background: var(--by-chrome);
 }
 
-.by-model-picker__back {
-  margin-top: var(--by-space-4);
+.by-model-viewer__header {
+  display: flex;
+  align-items: center;
+  gap: var(--by-space-3);
+  padding: var(--by-space-3);
+}
+
+.by-model-viewer__title {
+  font-family: var(--by-font-display);
+  font-weight: var(--by-font-display-weight);
+  font-size: var(--by-text-lg);
+  color: var(--by-text);
+}
+
+.by-model-viewer__canvas-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.by-model-viewer__canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.by-model-viewer__overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--by-space-3);
+  padding: var(--by-space-4);
+  background: color-mix(in srgb, var(--by-canvas) 70%, transparent);
+  pointer-events: none;
+}
+
+.by-model-viewer__overlay .by-progress {
+  width: min(320px, 80%);
+}
+
+.by-model-viewer__overlay-text {
+  color: var(--by-text);
+  font-size: var(--by-text-sm);
+  font-variant-numeric: tabular-nums;
+  margin: 0;
+}
+
+.by-model-viewer__status {
+  position: absolute;
+  left: var(--by-space-3);
+  bottom: var(--by-space-3);
+  width: max-content;
 }

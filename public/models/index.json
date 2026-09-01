@@ -1,0 +1,57 @@
+[
+  {
+    "slug": "1713-shipwrecked-pirate",
+    "name": "Shipwrecked Pirate (1713)",
+    "mpdFile": "1713-shipwrecked-pirate.mpd",
+    "manifestFile": "1713-shipwrecked-pirate.manifest.json",
+    "brickCount": 29,
+    "uniquePartCount": 19,
+    "sizeBytes": 2586,
+    "submodelCount": 3,
+    "stepCount": 0
+  },
+  {
+    "slug": "10156-lego-truck",
+    "name": "LEGO Truck (10156)",
+    "mpdFile": "10156-lego-truck.mpd",
+    "manifestFile": "10156-lego-truck.manifest.json",
+    "brickCount": 111,
+    "uniquePartCount": 51,
+    "sizeBytes": 7042,
+    "submodelCount": 3,
+    "stepCount": 17
+  },
+  {
+    "slug": "21109-exo-suit",
+    "name": "Exo Suit (21109)",
+    "mpdFile": "21109-exo-suit.mpd",
+    "manifestFile": "21109-exo-suit.manifest.json",
+    "brickCount": 305,
+    "uniquePartCount": 82,
+    "sizeBytes": 21768,
+    "submodelCount": 1,
+    "stepCount": 14
+  },
+  {
+    "slug": "928-galaxy-explorer",
+    "name": "Galaxy Explorer (928)",
+    "mpdFile": "928-galaxy-explorer.mpd",
+    "manifestFile": "928-galaxy-explorer.manifest.json",
+    "brickCount": 368,
+    "uniquePartCount": 88,
+    "sizeBytes": 22366,
+    "submodelCount": 12,
+    "stepCount": 52
+  },
+  {
+    "slug": "21309-nasa-apollo-saturn-v",
+    "name": "NASA Apollo Saturn V (21309)",
+    "mpdFile": "21309-nasa-apollo-saturn-v.mpd",
+    "manifestFile": "21309-nasa-apollo-saturn-v.manifest.json",
+    "brickCount": 1845,
+    "uniquePartCount": 141,
+    "sizeBytes": 77104,
+    "submodelCount": 103,
+    "stepCount": 777
+  }
+]
