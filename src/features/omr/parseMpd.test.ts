@@ -98,3 +98,45 @@ describe('parseMpd — no FILE header', () => {
     expect(parsed.uniquePartIds).toEqual(['3001', '3002']);
   });
 });
+
+describe('parseMpd — locally-embedded OMR part overrides', () => {
+  // 10281 - main.ldr (Bonsai Tree) references `10281 - 65473.dat`, a local copy of the
+  // branch elbow (LDraw id 65473) embedded because the part predated the public library
+  // at submission time — the elbow's own body is drawn directly (type-4 quads under
+  // `s\10281 - 65473s01.dat`), not just referenced, so treating the embedded file as a
+  // pure submodel and recursing into only its `1` lines drops that geometry. The elbow is
+  // official on the library now, so the fix is to resolve the reference as the real
+  // external id `65473` instead.
+  const text = readFixture('10281-bonsai-branch.mpd');
+  const parsed = parseMpd(text, '10281 - Bonsai Tree.mpd');
+
+  it('resolves a local OMR override to its real external part id, not a leftover fragment', () => {
+    const elbow = parsed.refs.find((r) => r.partId === '65473');
+    expect(elbow).toBeDefined();
+    // Nothing from the embedded file's own subpart/primitive references — 65473s01,
+    // tm08q2639, tm08q2111 — should appear as its own ref; the real part id stands in
+    // for the whole thing rather than reconstructing it from fragments.
+    expect(parsed.refs.some((r) => r.partId.includes('65473s01'))).toBe(false);
+    expect(parsed.refs.some((r) => r.partId.includes('tm08q'))).toBe(false);
+  });
+
+  it('keeps a plain external leaf untouched', () => {
+    expect(parsed.refs.some((r) => r.partId === '98138')).toBe(true);
+  });
+
+  it('falls back to recursing when the embedded name has no real-id form', () => {
+    // `10281 - flex-cable2.ldr` also draws its own geometry (LDCad's generated flexible
+    // hose fallback), but "flex-cable2" isn't a bare LDraw part id — there's no real
+    // external part to resolve to. It should still recurse into its own `1` lines, so
+    // the two genuine external references it makes (27965k01, the end caps) resolve,
+    // even though the hose body itself is lost either way.
+    const caps = parsed.refs.filter((r) => r.partId === '27965k01');
+    expect(caps).toHaveLength(2);
+    expect(parsed.uniquePartIds).not.toContain('flex-cable2');
+  });
+
+  it('does not recurse into a resolved override, so its own submodelCount is unaffected', () => {
+    // 3 sections: main, the 65473 override, the flex-cable2 override.
+    expect(parsed.submodelCount).toBe(3);
+  });
+});

@@ -1,0 +1,45 @@
+0 FILE 10281 - main.ldr
+0 Name: 10281 - main.ldr
+0 Author: Orion Pobursky [OrionP]
+
+1 16 0 -14 77 1 0 0 0 1 0 0 0 1 10281 - 65473.dat
+1 70 10 -14 77 1 0 0 0 1 0 0 0 1 10281 - flex-cable2.ldr
+1 28 -70 -172 -90 0.97 0.141 -0.199 -0.171 0.975 -0.141 0.174 0.171 0.97 98138.dat
+
+0 FILE 10281 - 65473.dat
+0 65473
+0 Name: 10281 - 65473.dat
+0 Author: Orion Pobursky [OrionP]
+0 !LDRAW_ORG Unofficial_Part
+0 !LICENSE Redistributable under CCAL version 2.0 : see CAreadme.txt
+
+0 BFC CERTIFY CCW
+
+0 !KEYWORDS Elbow
+
+1 16 0 0 0 1 0 0 0 1 0 0 0 1 s\10281 - 65473s01.dat
+1 16 21.0883 -50.9117 0 0.70711 0.70711 0 0.70711 -0.70711 0 0 0 1 s\10281 - 65473s01.dat
+
+1 16 72 0 0 -72 0 0 0 0 -72 0 72 0 48\10281 - tm08q2639.dat
+0 BFC INVERTNEXT
+1 16 72 0 0 -72 0 0 0 0 -72 0 72 0 48\10281 - tm08q2111.dat
+
+0 FILE 10281 - flex-cable2.ldr
+0 flex-cable2
+0 Name: 10281 - flex-cable2.ldr
+0 Author: Orion Pobursky [OrionP]
+0 !LDRAW_ORG Model
+0 !LICENSE Redistributable under CCAL version 2.0 : see CAreadme.txt
+
+0 UNOFFICIAL PART
+0 BFC CERTIFY CCW
+
+0 //Start cap reference(s)
+1 16 0 0 0 -0.342 0.94 0 -0.94 -0.342 0 0 0 1 27965k01.dat
+
+0 //End cap reference(s)
+1 16 20 -201.702 -89.23 -1 0 0 0 -0.262 0.965 0 0.965 0.262 27965k01.dat
+
+0 //Segments
+4 16 29.045828 -7.911372 0 28.980759 -8.090148 0.95675 33.135887 -9.933935 0.442242 33.011448 -9.650235 -0.482741
+4 16 28.980759 -8.090148 0.95675 28.795383 -8.599462 1.76775 33.062538 -10.510535 1.225592 33.135887 -9.933935 0.442242

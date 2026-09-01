@@ -91,6 +91,47 @@ function parseRefLine(tokens: readonly string[]): RefLine | null {
 /** Strips a `.dat`/`.ldr` extension and lowercases, so a filename becomes a stable part id. */
 const partIdOf = (file: string): string => file.trim().toLowerCase().replace(/\.(dat|ldr)$/i, '');
 
+/** A bare LDraw part id: digits, then only further alphanumerics — never a hyphenated word. */
+const BARE_PART_ID = /^[0-9][0-9a-z]*$/i;
+
+/** `<set number> - <real part id>`, the OMR convention `realPartId` unwraps. */
+const LOCAL_OVERRIDE_NAME = /^\d+\s*-\s*(.+)$/;
+
+/**
+ * Unwraps the LDraw Official Model Repository convention for a part that had not yet
+ * reached the public library when a model was submitted: the model embeds its own copy,
+ * named `<set number> - <real part id>.<ext>` (`docs/LDRAW-PRIMER.md` links the OMR spec).
+ * `10281 - 65473.dat` in the bundled Bonsai Tree is one, referencing the branch elbow's
+ * body only one level down, through `s\10281 - 65473s01.dat`'s own type-4 quads — geometry
+ * `splitFiles` carries no structure for, since a `0 FILE` section is only ever parsed for
+ * its `1` and `STEP` lines. Recursing into the embedded copy therefore reconstructs the
+ * elbow from whatever loose primitives it references directly (an axle hole, a couple of
+ * rings) and silently drops the curved surface those primitives sit inside — "renders, but
+ * wrong," not missing. The part is official on the library now, so `flattenFile` prefers
+ * resolving straight to the real id instead, through the ordinary external pipeline.
+ *
+ * Only called on a reference with no directory-style prefix — see `flattenFile` — so it
+ * never fires on the embedded copy's own internal subpart/primitive references
+ * (`s\10281 - 65473s01.dat`, `48\10281 - tm08q2639.dat`), which are not independently
+ * resolvable ids.
+ *
+ * Returns null when the name doesn't fit the convention, or when what's left after
+ * unwrapping it doesn't look like a real part id — LDCad's generated flexible-hose
+ * fallback content is named `<set number> - flex-cable2.ldr`, a descriptive slug with no
+ * external counterpart to resolve to, not an id. Recursing into a section this returns
+ * null for is the right fallback: the id wouldn't exist externally either way, so
+ * `PartGeometrySource` would report it as a plain load failure and every part it draws
+ * directly would still be gone, but at least the references it makes to genuine external
+ * parts (a flex hose's end caps, say) still resolve.
+ */
+function realPartId(fileName: string): string | null {
+  const stripped = fileName.trim().replace(/\.(dat|ldr)$/i, '');
+  const match = LOCAL_OVERRIDE_NAME.exec(stripped);
+  if (!match) return null;
+  const candidate = match[1].trim();
+  return BARE_PART_ID.test(candidate) ? candidate.toLowerCase() : null;
+}
+
 /**
  * Splits raw MPD text into `0 FILE` sections. A document with no `FILE` header at all —
  * a plain single-model `.ldr` — is treated as one section named `fallbackName`.
@@ -171,6 +212,21 @@ function flattenFile(
     state.refs.push({ partId, colorCode, transform: world });
     state.uniquePartIds.add(partId);
     return;
+  }
+
+  if (!/[\\/]/.test(fileName.trim())) {
+    // A top-level reference (never one of a part's own internal subpart/primitive
+    // references, which always carry a directory-style `s\`/`48\` prefix — see
+    // `realPartId`). When its name fits the OMR local-override convention, prefer the
+    // real external id: it resolves through the ordinary part pipeline and gets the
+    // part's actual geometry, rather than whatever `flattenFile` would reconstruct by
+    // recursing through the embedded copy's own `1` lines alone.
+    const real = realPartId(fileName);
+    if (real !== null) {
+      state.refs.push({ partId: real, colorCode: colorContext, transform: world });
+      state.uniquePartIds.add(real);
+      return;
+    }
   }
 
   if (depth > state.maxDepth || chain.has(key)) return; // guards a malformed cycle
