@@ -31,7 +31,7 @@ export function EnvironmentPanel({
       <div className="by-panel__body">
         <div className="by-panel__section">
           <p className="by-eyebrow">Environment</p>
-          <div className="by-seg" role="radiogroup" aria-label="Environment">
+          <div className="by-seg by-seg--wrap" role="radiogroup" aria-label="Environment">
             {ENVIRONMENTS.map((env) => (
               <button
                 key={env.id}

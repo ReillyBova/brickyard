@@ -3,6 +3,14 @@
  * controller (`resolutionPolicy.ts`), reprojection uniforms, and the two draw passes (TRACE,
  * PRESENT). Shares the caller's `WebGLRenderer` and canvas — no second GL context.
  *
+ * While the camera is moving, this loop does not trace at all — it calls back into
+ * `renderRaster` (a thin wrapper around `SceneRenderer.renderOnce()`) so the canvas shows an
+ * ordinary rasterized frame: clean, instant, and free, since that rasterizer already exists and
+ * shares this same renderer/scene/camera. Tracing only begins once the camera comes to rest,
+ * at which point the resolution ladder starts at its cheapest rung and climbs as `resolutionPolicy`
+ * allows. This is why interactivity does not depend on the resolution ladder at all — the ladder
+ * is purely an optimisation for the converging, stationary-camera phase.
+ *
  * The accumulation buffers are allocated once at full canvas resolution and never resized on a
  * resolution-ladder change; TRACE instead draws into a shrinking top-left viewport of them and
  * PRESENT samples only that sub-rect (`uRegion` of `uFull`), so a camera coming to rest doesn't
@@ -55,7 +63,10 @@ const NEUTRAL_MATERIAL: PathtraceMaterial = {
 };
 
 export interface PathtraceStats {
-  readonly status: 'building' | 'rendering';
+  /** 'moving': the camera is in motion, so this frame was an ordinary rasterized draw —
+   *  no trace, no accumulation. 'rendering': the camera is still and this frame came from
+   *  the accumulating path trace. */
+  readonly status: 'building' | 'moving' | 'rendering';
   readonly samples: number;
   readonly renderScale: number;
   readonly spp: number;
@@ -117,6 +128,9 @@ export class PathTracerController {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly camera: THREE.PerspectiveCamera;
   private readonly controls: OrbitControls;
+  /** Draws one ordinary rasterized frame to the shared canvas — `SceneRenderer.renderOnce()`.
+   *  Called instead of tracing whenever the camera is in motion. */
+  private readonly renderRaster: () => void;
 
   private traceQuad: FullScreenQuad | null = null;
   private traceMaterial: THREE.ShaderMaterial | null = null;
@@ -140,10 +154,16 @@ export class PathTracerController {
 
   private onStats: ((stats: PathtraceStats) => void) | null = null;
 
-  constructor(handles: { renderer: THREE.WebGLRenderer; camera: THREE.PerspectiveCamera; controls: OrbitControls }) {
+  constructor(handles: {
+    renderer: THREE.WebGLRenderer;
+    camera: THREE.PerspectiveCamera;
+    controls: OrbitControls;
+    renderRaster: () => void;
+  }) {
     this.renderer = handles.renderer;
     this.camera = handles.camera;
     this.controls = handles.controls;
+    this.renderRaster = handles.renderRaster;
   }
 
   /**
@@ -216,7 +236,11 @@ export class PathTracerController {
         uTex: { value: null },
         uRegion: { value: new THREE.Vector2() },
         uFull: { value: this.fullSize.clone() },
-        uExposure: { value: 1.1 },
+        // three.js's own path-tracer example (webgl_renderer_pathtracer, ACESFilmicToneMapping)
+        // leaves exposure at the renderer default of 1 rather than boosting it — match that
+        // now that the diffuse NEE term in shaders.ts carries its own PI normalisation and
+        // isn't relying on exposure to compensate for missing energy conservation.
+        uExposure: { value: 1.0 },
       },
     });
     this.presentQuad = new FullScreenQuad(this.presentMaterial);
@@ -259,6 +283,30 @@ export class PathTracerController {
         createAccumulationTarget(this.fullSize.x, this.fullSize.y),
         createAccumulationTarget(this.fullSize.x, this.fullSize.y),
       ];
+    }
+
+    if (moved) {
+      // Clean, instant and free: the rasterizer already renders this exact scene, so a
+      // moving camera gets its frames from there rather than from a 1spp trace. The
+      // resolution ladder still resets here (mirroring what `nextResolutionState` would do
+      // for a traced frame) so the instant the camera settles, tracing resumes at its
+      // cheapest rung rather than wherever it happened to be before the drag started.
+      this.resolution = nextResolutionState(this.resolution, { frameMs: this.lastFrameMs, cameraMoved: true });
+      this.raysSinceMove = 0;
+      this.renderRaster();
+      this.prevViewProj.copy(this.camera.projectionMatrix).multiply(this.camera.matrixWorldInverse);
+      this.lastFrameMs = performance.now() - frameStart;
+      this.onStats?.({
+        status: 'moving',
+        samples: 0,
+        renderScale: renderScaleFor(this.resolution),
+        spp: 0,
+        frameMs: this.lastFrameMs,
+        fps: this.lastFrameMs > 0 ? 1000 / this.lastFrameMs : 0,
+        triangleCount: this.triangleCount,
+        raysCast: 0,
+      });
+      return;
     }
 
     this.resolution = nextResolutionState(this.resolution, { frameMs: this.lastFrameMs, cameraMoved: moved });

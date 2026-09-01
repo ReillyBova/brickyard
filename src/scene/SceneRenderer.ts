@@ -531,27 +531,32 @@ export class SceneRenderer {
     this.sceneCamera.setAspect(width / height);
   }
 
+  /** One raster draw: camera update, arrival animation, render, stats. Shared by `start()`'s
+   *  own loop and by `renderOnce()`, the on-demand entry point render mode uses while the
+   *  camera is moving — see `renderOnce()` below. */
+  private renderRasterFrame(now: number): void {
+    this.stats = { ...this.stats, frameTimeMs: now - this.lastFrameTime };
+    this.lastFrameTime = now;
+
+    this.sceneCamera.update();
+    this.updateArrivals(now);
+    this.renderer.render(this.scene, this.sceneCamera.camera);
+
+    const info = this.renderer.info.render;
+    this.stats = {
+      ...this.stats,
+      drawCalls: info.calls,
+      triangles: info.triangles,
+      batchCount: this.batches.batchCount,
+      instanceCount: this.batches.instanceCount,
+    };
+  }
+
   start(): void {
     if (this.animationHandle !== null) return;
     this.lastFrameTime = performance.now();
     const loop = (): void => {
-      const now = performance.now();
-      this.stats = { ...this.stats, frameTimeMs: now - this.lastFrameTime };
-      this.lastFrameTime = now;
-
-      this.sceneCamera.update();
-      this.updateArrivals(now);
-      this.renderer.render(this.scene, this.sceneCamera.camera);
-
-      const info = this.renderer.info.render;
-      this.stats = {
-        ...this.stats,
-        drawCalls: info.calls,
-        triangles: info.triangles,
-        batchCount: this.batches.batchCount,
-        instanceCount: this.batches.instanceCount,
-      };
-
+      this.renderRasterFrame(performance.now());
       this.animationHandle = requestAnimationFrame(loop);
     };
     this.animationHandle = requestAnimationFrame(loop);
@@ -560,6 +565,22 @@ export class SceneRenderer {
   stop(): void {
     if (this.animationHandle !== null) cancelAnimationFrame(this.animationHandle);
     this.animationHandle = null;
+  }
+
+  // ---- pathtrace mount point (continued) -----------------------------------------------
+  // See the larger comment below `dispose()`. This entry point specifically exists for
+  // render mode's camera-moving state: rather than tracing at 1spp during a drag (noisy,
+  // and wasted work the instant the drag ends), `PathTracerController` calls this to draw
+  // one ordinary rasterized frame instead — the same renderer/scene/camera `start()`'s loop
+  // would have drawn, on demand rather than on its own RAF. `start()`/`stop()` stay the
+  // single owner of whether a loop is *running*; this only ever fires when render mode's own
+  // loop calls it, one frame at a time, so there is never a second RAF loop racing this one
+  // for the canvas.
+  renderOnce(): void {
+    this.renderer.setRenderTarget(null);
+    const size = this.renderer.getSize(new THREE.Vector2());
+    this.renderer.setViewport(0, 0, size.x, size.y);
+    this.renderRasterFrame(performance.now());
   }
 
   getStats(): SceneStats {
